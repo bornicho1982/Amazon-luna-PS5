@@ -107,7 +107,6 @@ try {
         --start-group $webrtcLibs --end-group `
         "$sdkDir\target\lib\libc++.a" `
         "$sdkDir\target\lib\libc++abi.a" `
-        "$sdkDir\target\lib\libc.a" `
         "$sdkDir\target\lib\libunwind.a" `
         "ps5\stubs\libSceVideodec2.so" `
         "ps5\stubs\libSceVideoOut.so" `

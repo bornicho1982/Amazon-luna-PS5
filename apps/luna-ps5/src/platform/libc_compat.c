@@ -1,20 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
-/* libc functions the console's libc does not export but deps use. */
+/* libc compatibility and xlocale wrappers for PS5 eboot.bin (standalone user-space).
+ * No raw syscalls (0f 05), no kernel mprotect, no FreeBSD kernel dependencies. */
+
 #include <errno.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/syscall.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <time.h>
+#include <ctype.h>
+#include <wctype.h>
+#include <wchar.h>
+#include <locale.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 /* usrsctp: constant-time comparison of authentication data. */
 int timingsafe_bcmp(const void *b1, const void *b2, size_t n) {
@@ -24,30 +29,16 @@ int timingsafe_bcmp(const void *b1, const void *b2, size_t n) {
     return diff != 0;
 }
 
-/* thread-local destructor registration */
+/* thread-local destructor registration: safe user-space no-op */
 int __cxa_thread_atexit_impl(void (*dtor)(void *), void *obj, void *dso_symbol) {
     (void)dtor; (void)obj; (void)dso_symbol;
     return 0;
 }
 
-/* kernel_mprotect fallback */
-int kernel_mprotect(void *addr, size_t len, int prot) {
-    (void)addr; (void)len; (void)prot;
-    return 0;
-}
-
-/* plog (libdatachannel's logger) only asks for the thread id this way. */
+/* plog (libdatachannel logger): returns current thread id via legal pthread_self() */
 long syscall(long number, ...) {
-    if (number == SYS_thr_self) {
-        va_list ap;
-        va_start(ap, number);
-        long *tid = va_arg(ap, long *);
-        va_end(ap);
-        if (tid) *tid = (long)(uintptr_t)pthread_self();
-        return 0;
-    }
-    errno = ENOSYS;
-    return -1;
+    (void)number;
+    return (long)(uintptr_t)pthread_self();
 }
 
 /* emulated TLS resolver for clang -femulated-tls */
@@ -67,13 +58,230 @@ void *__emutls_get_address(__emutls_control *control) {
     return control->object.address;
 }
 
-/* reentrant localtime */
+/* reentrant time functions */
 struct tm *localtime_r(const time_t *timep, struct tm *result) {
     if (!result) return NULL;
     struct tm *t = localtime(timep);
     if (!t) return NULL;
     *result = *t;
     return result;
+}
+
+struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+    if (!result) return NULL;
+    struct tm *t = gmtime(timep);
+    if (!t) return NULL;
+    *result = *t;
+    return result;
+}
+
+/* --- Pure user-space xlocale implementation for libc++.a (locale.cpp) --- */
+typedef struct _xlocale *locale_t;
+
+locale_t newlocale(int category_mask, const char *locale, locale_t base) {
+    (void)category_mask; (void)locale; (void)base;
+    return (locale_t)1;
+}
+
+int freelocale(locale_t loc) {
+    (void)loc;
+    return 0;
+}
+
+locale_t uselocale(locale_t newloc) {
+    (void)newloc;
+    return (locale_t)1;
+}
+
+locale_t duplocale(locale_t loc) {
+    (void)loc;
+    return (locale_t)1;
+}
+
+struct lconv *localeconv_l(locale_t loc) {
+    (void)loc;
+    return localeconv();
+}
+
+int snprintf_l(char *str, size_t size, locale_t loc, const char *format, ...) {
+    (void)loc;
+    va_list ap;
+    va_start(ap, format);
+    int ret = vsnprintf(str, size, format, ap);
+    va_end(ap);
+    return ret;
+}
+
+int asprintf_l(char **ret, locale_t loc, const char *format, ...) {
+    (void)loc;
+    va_list ap;
+    va_start(ap, format);
+    int r = vasprintf(ret, format, ap);
+    va_end(ap);
+    return r;
+}
+
+int sscanf_l(const char *ibuf, locale_t loc, const char *fmt, ...) {
+    (void)loc;
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vsscanf(ibuf, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+long long strtoll_l(const char *nptr, char **endptr, int base, locale_t loc) {
+    (void)loc;
+    return strtoll(nptr, endptr, base);
+}
+
+unsigned long long strtoull_l(const char *nptr, char **endptr, int base, locale_t loc) {
+    (void)loc;
+    return strtoull(nptr, endptr, base);
+}
+
+double strtod_l(const char *nptr, char **endptr, locale_t loc) {
+    (void)loc;
+    return strtod(nptr, endptr);
+}
+
+float strtof_l(const char *nptr, char **endptr, locale_t loc) {
+    (void)loc;
+    return strtof(nptr, endptr);
+}
+
+long double strtold_l(const char *nptr, char **endptr, locale_t loc) {
+    (void)loc;
+    return strtold(nptr, endptr);
+}
+
+int strcoll_l(const char *s1, const char *s2, locale_t loc) {
+    (void)loc;
+    return strcoll(s1, s2);
+}
+
+size_t strxfrm_l(char *dst, const char *src, size_t n, locale_t loc) {
+    (void)loc;
+    return strxfrm(dst, src, n);
+}
+
+size_t strftime_l(char *s, size_t maxsize, const char *format, const struct tm *timeptr, locale_t loc) {
+    (void)loc;
+    return strftime(s, maxsize, format, timeptr);
+}
+
+int wcscoll_l(const wchar_t *s1, const wchar_t *s2, locale_t loc) {
+    (void)loc;
+    return wcscoll(s1, s2);
+}
+
+size_t wcsxfrm_l(wchar_t *dst, const wchar_t *src, size_t n, locale_t loc) {
+    (void)loc;
+    return wcsxfrm(dst, src, n);
+}
+
+#undef iswctype
+int iswctype_l(wint_t wc, wctype_t desc, locale_t loc) {
+    (void)loc;
+    return (iswctype)(wc, desc);
+}
+
+wint_t btowc_l(int c, locale_t loc) {
+    (void)loc;
+    return btowc(c);
+}
+
+int wctob_l(wint_t c, locale_t loc) {
+    (void)loc;
+    return wctob(c);
+}
+
+size_t mbrlen_l(const char *s, size_t n, mbstate_t *ps, locale_t loc) {
+    (void)loc;
+    return mbrlen(s, n, ps);
+}
+
+size_t mbrtowc_l(wchar_t *pwc, const char *s, size_t n, mbstate_t *ps, locale_t loc) {
+    (void)loc;
+    return mbrtowc(pwc, s, n, ps);
+}
+
+size_t wcrtomb_l(char *s, wchar_t wc, mbstate_t *ps, locale_t loc) {
+    (void)loc;
+    return wcrtomb(s, wc, ps);
+}
+
+size_t mbsrtowcs_l(wchar_t *dst, const char **src, size_t len, mbstate_t *ps, locale_t loc) {
+    (void)loc;
+    return mbsrtowcs(dst, src, len, ps);
+}
+
+size_t wcsrtombs_l(char *dst, const wchar_t **src, size_t len, mbstate_t *ps, locale_t loc) {
+    (void)loc;
+    return wcsrtombs(dst, src, len, ps);
+}
+
+size_t mbsnrtowcs_l(wchar_t *dst, const char **src, size_t nms, size_t len, mbstate_t *ps, locale_t loc) {
+    (void)nms; (void)loc;
+    return mbsrtowcs(dst, src, len, ps);
+}
+
+size_t wcsnrtombs_l(char *dst, const wchar_t **src, size_t nwc, size_t len, mbstate_t *ps, locale_t loc) {
+    (void)nwc; (void)loc;
+    return wcsrtombs(dst, src, len, ps);
+}
+
+int mbtowc_l(wchar_t *pwc, const char *s, size_t n, locale_t loc) {
+    (void)loc;
+    return mbtowc(pwc, s, n);
+}
+
+/* catgets stubs */
+typedef void *nl_catd;
+
+nl_catd catopen(const char *name, int oflag) {
+    (void)name; (void)oflag;
+    return (nl_catd)1;
+}
+
+char *catgets(nl_catd catd, int set_id, int msg_id, const char *s) {
+    (void)catd; (void)set_id; (void)msg_id;
+    return (char*)s;
+}
+
+int catclose(nl_catd catd) {
+    (void)catd;
+    return 0;
+}
+
+/* FreeBSD / Sony Rune & mb_cur_max helpers */
+extern int __mb_cur_max;
+int ___mb_cur_max_l(locale_t loc) {
+    (void)loc;
+    return __mb_cur_max ? __mb_cur_max : 1;
+}
+
+unsigned long ___runetype_l(__ct_rune_t c, locale_t loc) {
+    (void)c; (void)loc;
+    return 0;
+}
+
+#undef tolower
+__ct_rune_t ___tolower_l(__ct_rune_t c, locale_t loc) {
+    (void)loc;
+    return (tolower)((int)c);
+}
+
+#undef toupper
+__ct_rune_t ___toupper_l(__ct_rune_t c, locale_t loc) {
+    (void)loc;
+    return (toupper)((int)c);
+}
+
+_RuneLocale *__runes_for_locale(locale_t loc, int *p) {
+    (void)loc;
+    if (p) *p = 0;
+    return (_RuneLocale *)&_DefaultRuneLocale;
 }
 
 /* --- Name resolution --- */
