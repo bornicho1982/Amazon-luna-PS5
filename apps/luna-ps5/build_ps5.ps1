@@ -40,10 +40,8 @@ try {
         "main",
         "net/http_client",
         "auth/cbl_client",
-        "auth/auth_server",
         "session/luna_session",
         "input/pad_manager",
-        "signaling/kvs_signaling",
         "stream/webrtc_client",
         "display/font_inter_bold",
         "display/font_renderer",
@@ -57,7 +55,12 @@ try {
         -I"src" -c "src\util\qrcodegen.c" -o "ps5\obj\qrcodegen.o"
     if ($LASTEXITCODE -ne 0) { throw "Error compilando qrcodegen.c" }
 
-    $objs = @("ps5\obj\app_crt.o", "ps5\obj\app_cpp_runtime.o", "ps5\obj\qrcodegen.o")
+    & clang -target x86_64-sie-ps5 -isysroot "$sdkDir" -isystem "$sdkDir\target\include" `
+        -std=c11 -O2 -fPIC -ffunction-sections -fdata-sections `
+        -I"src" -c "src\platform\libc_compat.c" -o "ps5\obj\libc_compat.o"
+    if ($LASTEXITCODE -ne 0) { throw "Error compilando libc_compat.c" }
+
+    $objs = @("ps5\obj\app_crt.o", "ps5\obj\app_cpp_runtime.o", "ps5\obj\qrcodegen.o", "ps5\obj\libc_compat.o")
     foreach ($s in $sources) {
         $outName = $s.Replace("/", "_")
         $objPath = "ps5\obj\$outName.o"
@@ -66,10 +69,12 @@ try {
             -isystem "$sdkDir\target\include\c++\v1" `
             -isystem "$sdkDir\target\include" `
             -std=c++20 -O2 -fPIC -Wall -Wextra `
-            -fno-exceptions -fno-rtti -fno-stack-protector -fno-plt -femulated-tls `
+            -fexceptions -fcxx-exceptions -frtti -fno-stack-protector -fno-plt -femulated-tls `
             -ffunction-sections -fdata-sections `
             -DLUNA_TARGET_PS5=1 `
             -I"src" `
+            -I"$here\..\..\tools\reference\xbox-cloud-gaming-ps5\deps\libdatachannel\include" `
+            -I"$here\..\..\tools\reference\xbox-cloud-gaming-ps5\deps\mbedtls\include" `
             -c "src\$s.cpp" -o $objPath
         if ($LASTEXITCODE -ne 0) { throw "Error compilando $s.cpp" }
         $objs += $objPath
@@ -77,6 +82,16 @@ try {
 
     Write-Host "[3/5] Enlazando imagen intermedia PIE y convirtiendo a modulo PS5 (0xFE10 + NIDs + ORBI)..." -ForegroundColor Cyan
     $sdkStubs = Get-ChildItem "$sdkDir\target\lib\*.so" | ForEach-Object { $_.FullName }
+
+    $webrtcLibs = @(
+        "$here\ps5\lib\libdatachannel-static.a",
+        "$here\ps5\lib\libjuice-static.a",
+        "$here\ps5\lib\libsrtp2.a",
+        "$here\ps5\lib\libusrsctp.a",
+        "$here\ps5\lib\libmbedtls.a",
+        "$here\ps5\lib\libmbedx509.a",
+        "$here\ps5\lib\libmbedcrypto.a"
+    )
 
     & ld.lld `
         -m elf_x86_64 -pie `
@@ -89,8 +104,10 @@ try {
         -e _start `
         -o "ps5\obj\llvm-pie.elf" `
         $objs `
+        --start-group $webrtcLibs --end-group `
         "$sdkDir\target\lib\libc++.a" `
         "$sdkDir\target\lib\libc++abi.a" `
+        "$sdkDir\target\lib\libc.a" `
         "$sdkDir\target\lib\libunwind.a" `
         "ps5\stubs\libSceVideodec2.so" `
         "ps5\stubs\libSceVideoOut.so" `

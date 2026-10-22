@@ -14,9 +14,11 @@ ps5/obj/
 apps/luna-ps5/build/
 apps/luna-ps5/build_desktop/
 apps/luna-ps5/ps5/obj/
+apps/luna-ps5/ps5/lib/
 *.o
 *.obj
 *.elf
+*.a
 
 # Packaged binaries (compiled via build_ps5.ps1 or provided in Releases)
 PPSA99825/eboot.bin

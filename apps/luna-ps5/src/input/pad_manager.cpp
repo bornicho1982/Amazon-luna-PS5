@@ -277,4 +277,99 @@ void PadManager::serializeReport(uint8_t* buffer, size_t maxLen, size_t& outLen,
     outLen = 20;
 }
 
+namespace {
+inline size_t writeVarint(uint8_t* buf, uint64_t val) {
+    size_t i = 0;
+    while (val >= 0x80) {
+        buf[i++] = static_cast<uint8_t>((val & 0x7F) | 0x80);
+        val >>= 7;
+    }
+    buf[i++] = static_cast<uint8_t>(val & 0x7F);
+    return i;
+}
+} // namespace
+
+void PadManager::serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, size_t& outLen, uint32_t packetNum, int padIndex) {
+    if (maxLen < 64) {
+        outLen = 0;
+        return;
+    }
+
+    // 1. Mapear botones a la máscara oficial de Amazon Luna
+    uint32_t lunaButtons = 0;
+    if (state_.buttons & PAD_UP)       lunaButtons |= 0x0001;
+    if (state_.buttons & PAD_DOWN)     lunaButtons |= 0x0002;
+    if (state_.buttons & PAD_LEFT)     lunaButtons |= 0x0004;
+    if (state_.buttons & PAD_RIGHT)    lunaButtons |= 0x0008;
+    if (state_.buttons & PAD_OPTIONS)  lunaButtons |= 0x0010;
+    if (state_.buttons & PAD_TOUCH)    lunaButtons |= 0x0020;
+    if (state_.buttons & PAD_L3)       lunaButtons |= 0x0040;
+    if (state_.buttons & PAD_R3)       lunaButtons |= 0x0080;
+    if (state_.buttons & PAD_L1)       lunaButtons |= 0x0100;
+    if (state_.buttons & PAD_R1)       lunaButtons |= 0x0200;
+    if (state_.buttons & PAD_CROSS)    lunaButtons |= 0x1000;
+    if (state_.buttons & PAD_CIRCLE)   lunaButtons |= 0x2000;
+    if (state_.buttons & PAD_SQUARE)   lunaButtons |= 0x4000;
+    if (state_.buttons & PAD_TRIANGLE) lunaButtons |= 0x8000;
+
+    // Normalizar sticks a rango 0-65535 (centro en 32767)
+    uint32_t thumbLX = static_cast<uint32_t>(state_.leftX + 32768);
+    uint32_t thumbLY = static_cast<uint32_t>(32767 - state_.leftY);
+    uint32_t thumbRX = static_cast<uint32_t>(state_.rightX + 32768);
+    uint32_t thumbRY = static_cast<uint32_t>(32767 - state_.rightY);
+
+    // 2. Serializar sub-mensaje GamePadEvent
+    uint8_t evtBuf[64];
+    size_t e = 0;
+
+    // tag 1: deviceId (varint)
+    evtBuf[e++] = (1 << 3) | 0;
+    e += writeVarint(evtBuf + e, padIndex);
+
+    // tag 2: dwPacketNumber (varint)
+    evtBuf[e++] = (2 << 3) | 0;
+    e += writeVarint(evtBuf + e, packetNum);
+
+    // tag 3: deviceType (0 = DS4/DualSense)
+    evtBuf[e++] = (3 << 3) | 0;
+    e += writeVarint(evtBuf + e, 0);
+
+    // tag 4: wButtons (varint)
+    evtBuf[e++] = (4 << 3) | 0;
+    e += writeVarint(evtBuf + e, lunaButtons);
+
+    // tag 5: bLeftTrigger (varint)
+    evtBuf[e++] = (5 << 3) | 0;
+    e += writeVarint(evtBuf + e, state_.leftTrigger);
+
+    // tag 6: bRightTrigger (varint)
+    evtBuf[e++] = (6 << 3) | 0;
+    e += writeVarint(evtBuf + e, state_.rightTrigger);
+
+    // tag 7: sThumbLX (varint)
+    evtBuf[e++] = (7 << 3) | 0;
+    e += writeVarint(evtBuf + e, thumbLX);
+
+    // tag 8: sThumbLY (varint)
+    evtBuf[e++] = (8 << 3) | 0;
+    e += writeVarint(evtBuf + e, thumbLY);
+
+    // tag 9: sThumbRX (varint)
+    evtBuf[e++] = (9 << 3) | 0;
+    e += writeVarint(evtBuf + e, thumbRX);
+
+    // tag 10: sThumbRY (varint)
+    evtBuf[e++] = (10 << 3) | 0;
+    e += writeVarint(evtBuf + e, thumbRY);
+
+    // 3. Envolver en ClientMessage (tag 1: length-delimited, wire type 2 = 0x0A)
+    size_t outIdx = 0;
+    buffer[outIdx++] = 0x0A;
+    outIdx += writeVarint(buffer + outIdx, e);
+    std::memcpy(buffer + outIdx, evtBuf, e);
+    outIdx += e;
+
+    outLen = outIdx;
+}
+
 } // namespace luna::input

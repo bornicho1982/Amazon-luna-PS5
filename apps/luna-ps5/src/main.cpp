@@ -18,9 +18,7 @@
 #endif
 
 #include "input/pad_manager.h"
-#include "signaling/kvs_signaling.h"
 #include "stream/webrtc_client.h"
-#include "auth/auth_server.h"
 #include "auth/cbl_client.h"
 #include "session/luna_session.h"
 #include "net/http_client.h"
@@ -41,41 +39,6 @@ enum class AppState {
     StartingSession,
     Streaming
 };
-
-std::string detectLocalLanIp() {
-    int sock = static_cast<int>(::socket(AF_INET, SOCK_DGRAM, 0));
-    if (sock < 0) return "192.168.18.21";
-
-    sockaddr_in remote{};
-    remote.sin_family = AF_INET;
-    remote.sin_port = htons(53);
-    ::inet_pton(AF_INET, "192.168.1.1", &remote.sin_addr);
-
-    std::string result = "192.168.18.21";
-    if (::connect(sock, reinterpret_cast<sockaddr*>(&remote), sizeof(remote)) == 0) {
-        sockaddr_in local{};
-#if defined(_WIN32)
-        int len = sizeof(local);
-#else
-        socklen_t len = sizeof(local);
-#endif
-        if (::getsockname(sock, reinterpret_cast<sockaddr*>(&local), &len) == 0) {
-            char buf[32]{};
-            if (::inet_ntop(AF_INET, &local.sin_addr, buf, sizeof(buf))) {
-                std::string ip(buf);
-                if (ip != "0.0.0.0" && ip != "127.0.0.1") {
-                    result = ip;
-                }
-            }
-        }
-    }
-#if defined(_WIN32)
-    closesocket(sock);
-#else
-    ::close(sock);
-#endif
-    return result;
-}
 
 } // namespace
 
@@ -146,30 +109,8 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    // 7. Servidor de soporte LAN en puerto 8085 (backup/bridge)
-    luna::auth::AuthServer authSrv;
+    // 7. Estado inicial y Cliente de Autenticación Amazon CBL QR autónomo
     AppState appState = AppState::LoginCBL;
-
-    authSrv.onSessionReceived([&rtcClient, &appState, &videoStreaming](const luna::auth::AuthSession& session) {
-        std::printf("[Main] Sesion recibida desde puente LAN\n");
-        if (!session.sdpAnswer.empty()) {
-            rtcClient.applySdpAnswer(session.sdpAnswer);
-        }
-        if (!session.publicIp.empty() && session.port > 0) {
-            rtcClient.setRemoteEndpoint(session.publicIp, session.port);
-        }
-        if (!session.iceUfrag.empty() && !session.icePwd.empty()) {
-            rtcClient.setRemoteIceCredentials(session.iceUfrag, session.icePwd);
-        }
-        rtcClient.start();
-        videoStreaming = true;
-        appState = AppState::Streaming;
-    });
-
-    authSrv.start(8085);
-    std::string consoleIp = detectLocalLanIp();
-
-    // 8. Cliente de Autenticacion Amazon Code-Based Linking (CBL)
     luna::auth::CblClient cbl;
     std::string storageDir = ".";
 #if defined(LUNA_TARGET_PS5)
@@ -389,12 +330,20 @@ int main(int argc, char* argv[]) {
                 } else if (sessionClient.getState() == luna::session::SessionState::Failed) {
                     std::printf("[Main] Error al iniciar sesion: %s\n", sessionClient.getStatusMessage().c_str());
                     g_lastStatusText = sessionClient.getStatusMessage();
-                    if (g_lastStatusText.find("not fresh") != std::string::npos ||
-                        g_lastStatusText.find("re-authenticate") != std::string::npos) {
+                    if (g_lastStatusText.find("caducada") != std::string::npos ||
+                        g_lastStatusText.find("403") != std::string::npos ||
+                        g_lastStatusText.find("401") != std::string::npos) {
+                        std::printf("[Main] Sesión de cuenta inválida o revocada. Reseteando a código QR...\n");
+                        cbl.logout();
+                        appState = AppState::LoginCBL;
+                    } else if (g_lastStatusText.find("not fresh") != std::string::npos ||
+                               g_lastStatusText.find("re-authenticate") != std::string::npos) {
                         cbl.refreshAccessToken();
-                        g_lastStatusText = "Token de acceso refrescado. Pulsa (X) para iniciar conexion.";
+                        g_lastStatusText = "Token refrescado. Pulsa (X) para reintentar.";
+                        appState = AppState::Catalog;
+                    } else {
+                        appState = AppState::Catalog;
                     }
-                    appState = AppState::Catalog;
                 }
 
                 display.drawCatalogScreen(
@@ -408,8 +357,8 @@ int main(int argc, char* argv[]) {
             }
 
             case AppState::Streaming: {
-                // Serializar y enviar entrada de mando al juego en tiempo real a 60 Hz
-                padMgr.serializeReport(reportBuf, sizeof(reportBuf), reportLen, seq++);
+                // Serializar y enviar entrada de mando al juego en formato Protobuf oficial de Luna a 60 Hz
+                padMgr.serializeLunaProtobufReport(reportBuf, sizeof(reportBuf), reportLen, seq++);
                 if (rtcClient.isConnected() && reportLen > 0) {
                     rtcClient.sendInputPacket(reportBuf, reportLen);
                 }
@@ -445,7 +394,6 @@ int main(int argc, char* argv[]) {
         sessionClient.terminateSession(cbl.getAccessToken());
     }
 
-    authSrv.stop();
     rtcClient.stop();
     audioDecoder.shutdown();
     videoDecoder.shutdown();

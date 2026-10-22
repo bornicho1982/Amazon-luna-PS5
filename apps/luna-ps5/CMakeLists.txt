@@ -21,10 +21,8 @@ set(LUNA_SOURCES
     src/main.cpp
     src/net/http_client.cpp
     src/auth/cbl_client.cpp
-    src/auth/auth_server.cpp
     src/session/luna_session.cpp
     src/input/pad_manager.cpp
-    src/signaling/kvs_signaling.cpp
     src/stream/webrtc_client.cpp
     src/display/font_inter_bold.cpp
     src/display/font_renderer.cpp

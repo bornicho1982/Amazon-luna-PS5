@@ -54,6 +54,7 @@ public:
     void setLightBar(uint8_t r, uint8_t g, uint8_t b);
 
     void serializeReport(uint8_t* buffer, size_t maxLen, size_t& outLen, uint32_t seq, int padIndex = 0);
+    void serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, size_t& outLen, uint32_t packetNum, int padIndex = 0);
 
 private:
     int32_t userId_ = -1;
