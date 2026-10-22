@@ -1,0 +1,11 @@
+index	value	size	type	bind	other	shndx	name
+0	0x0	0	NOTYPE	0	0x0	0	
+1	0x1550	6	FUNC	1	0x0	6	sceVideodec2AllocateComputeQueue
+2	0x1560	6	FUNC	1	0x0	6	sceVideodec2ReleaseComputeQueue
+3	0x1570	6	FUNC	1	0x0	6	sceVideodec2QueryDecoderMemoryInfo
+4	0x1590	6	FUNC	1	0x0	6	sceVideodec2DeleteDecoder
+5	0x15c0	6	FUNC	1	0x0	6	sceVideodec2Reset
+6	0x1540	6	FUNC	1	0x0	6	sceVideodec2QueryComputeMemoryInfo
+7	0x1580	6	FUNC	1	0x0	6	sceVideodec2CreateDecoder
+8	0x15a0	6	FUNC	1	0x0	6	sceVideodec2Decode
+9	0x15b0	6	FUNC	1	0x0	6	sceVideodec2Flush

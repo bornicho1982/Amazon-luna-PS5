@@ -1,0 +1,82 @@
+#pragma once
+
+#include <cstdint>
+#include <cstddef>
+#include <string>
+#include <vector>
+#include <functional>
+#include "display/font_renderer.h"
+
+namespace luna::display {
+
+struct GameTile {
+    std::string id;
+    std::string title;
+    std::string publisher;
+    uint32_t badgeColor = 0xFF3B82F6;
+    std::string category = "LUNA+";
+    std::string synopsis = "Disponible para jugar al instante en Amazon Luna Cloud.";
+    uint32_t heroColor = 0xFF7C3AED;
+};
+
+class DisplayManager {
+public:
+    DisplayManager();
+    ~DisplayManager();
+
+    bool init(int width = 1920, int height = 1080);
+    void shutdown();
+
+    void clear(uint32_t colorArgb);
+    void fillRect(int x, int y, int w, int h, uint32_t colorArgb);
+    void drawText(int x, int y, int scale, const std::string& text, uint32_t colorArgb);
+    void drawQrCode(int x, int y, int moduleScale, const std::string& text);
+
+    void drawLoginScreen(const std::string& publicCode,
+                         const std::string& verificationUri,
+                         int qrSize,
+                         const std::function<bool(int, int)>& qrModuleLookup,
+                         const std::string& statusText,
+                         uint64_t frameCount);
+
+    void drawCatalogScreen(const std::vector<GameTile>& games,
+                           int selectedIndex,
+                           const std::string& customerId,
+                           const std::string& statusText,
+                           uint64_t frameCount);
+
+    void drawDashboard(const std::string& consoleIp,
+                       int authPort,
+                       const std::string& serverStatus,
+                       bool padConnected,
+                       uint32_t padButtons,
+                       int16_t stickX,
+                       int16_t stickY,
+                       const std::string& statusText,
+                       uint64_t frameCount);
+
+    bool presentYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v,
+                       int strideY, int strideU, int strideV,
+                       int width, int height);
+    void present();
+
+    bool isReady() const { return isReady_; }
+
+private:
+    void setPixelSwizzled(uint8_t* base, int x, int y, uint32_t colorArgb);
+    uint32_t getPixelSwizzled(const uint8_t* base, int x, int y) const;
+    void blendPixelSwizzled(uint8_t* base, int x, int y, uint32_t colorArgb, uint8_t alpha);
+
+    FontRenderer fontRenderer_;
+
+    int width_ = 1920;
+    int height_ = 1080;
+    bool isReady_ = false;
+
+    int videoHandle_ = -1;
+    void* mappedMemory_ = nullptr;
+    int currentBuffer_ = 0;
+    int64_t flipMarker_ = 0;
+};
+
+} // namespace luna::display

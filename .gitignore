@@ -1,0 +1,53 @@
+# Dumps and firmware
+dumps/
+*.pup
+*.img
+*.dec
+*.self
+*.sprx
+
+# Build artifacts and compiled binaries
+build/
+out/
+dist/
+ps5/obj/
+apps/luna-ps5/build/
+apps/luna-ps5/build_desktop/
+apps/luna-ps5/ps5/obj/
+*.o
+*.obj
+*.elf
+
+# Packaged binaries (compiled via build_ps5.ps1 or provided in Releases)
+PPSA99825/eboot.bin
+PPSA99825/sce_module/*.prx
+
+# Credentials, tokens, sessions and private accounts (CRITICAL)
+account.json
+device_id.txt
+*.key
+*.pem
+*.crt
+*.cert
+tools/luna_probe/chrome_profile/
+tools/luna_probe/session.json
+tools/luna_probe/*.jsonl
+tools/ps5_browser_bridge/*.pem
+tools/ps5_browser_bridge/*.key
+
+# External reference clones and SDK toolchains
+tools/reference/
+tools/ps5-payload-sdk/
+
+# Environment, OS and IDE files
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Private notes
+notes/private/

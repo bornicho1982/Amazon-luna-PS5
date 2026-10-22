@@ -1,0 +1,459 @@
+#include <cstdio>
+#include <chrono>
+#include <thread>
+#include <atomic>
+#include <vector>
+#include <csignal>
+#include <cstring>
+#include <sys/stat.h>
+
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
+
+#include "input/pad_manager.h"
+#include "signaling/kvs_signaling.h"
+#include "stream/webrtc_client.h"
+#include "auth/auth_server.h"
+#include "auth/cbl_client.h"
+#include "session/luna_session.h"
+#include "net/http_client.h"
+#include "display/display_manager.h"
+#include "audio/audio_manager.h"
+#include "media/media_decoder.h"
+
+namespace {
+std::atomic<bool> g_running{true};
+
+void signalHandler(int) {
+    g_running = false;
+}
+
+enum class AppState {
+    LoginCBL,
+    Catalog,
+    StartingSession,
+    Streaming
+};
+
+std::string detectLocalLanIp() {
+    int sock = static_cast<int>(::socket(AF_INET, SOCK_DGRAM, 0));
+    if (sock < 0) return "192.168.18.21";
+
+    sockaddr_in remote{};
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(53);
+    ::inet_pton(AF_INET, "192.168.1.1", &remote.sin_addr);
+
+    std::string result = "192.168.18.21";
+    if (::connect(sock, reinterpret_cast<sockaddr*>(&remote), sizeof(remote)) == 0) {
+        sockaddr_in local{};
+#if defined(_WIN32)
+        int len = sizeof(local);
+#else
+        socklen_t len = sizeof(local);
+#endif
+        if (::getsockname(sock, reinterpret_cast<sockaddr*>(&local), &len) == 0) {
+            char buf[32]{};
+            if (::inet_ntop(AF_INET, &local.sin_addr, buf, sizeof(buf))) {
+                std::string ip(buf);
+                if (ip != "0.0.0.0" && ip != "127.0.0.1") {
+                    result = ip;
+                }
+            }
+        }
+    }
+#if defined(_WIN32)
+    closesocket(sock);
+#else
+    ::close(sock);
+#endif
+    return result;
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    (void)argc;
+    (void)argv;
+
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
+
+    std::printf("====================================================\n");
+    std::printf("  Amazon Luna PS5 - Native Autonomous Client v1.3.0 \n");
+    std::printf("====================================================\n");
+
+    // 1. Inicializar HTTP nativo
+    luna::net::HttpClient::init();
+
+    // 2. Inicializar subsistema de pantalla (1080p60 64KB Macro-Tiled Triple-Buffer)
+    luna::display::DisplayManager display;
+    if (!display.init(1920, 1080)) {
+        std::printf("[Main] Advertencia: pantalla no inicializada en modo completo\n");
+    }
+
+    // 3. Inicializar subsistema de audio (48 kHz stereo)
+    luna::audio::AudioManager audio;
+    audio.init(48000, 2);
+
+    // 4. Inicializar decodificadores de medios (H.264 Hardware Vdec2 + Audio)
+    luna::media::VideoDecoder videoDecoder;
+    videoDecoder.init(1920, 1088);
+
+    luna::media::AudioDecoder audioDecoder;
+    audioDecoder.init(48000, 2);
+
+    // 5. Inicializar mando DualSense (sceUserService + scePad)
+    luna::input::PadManager padMgr;
+    if (!padMgr.init()) {
+        std::printf("[Main] Mando DualSense no detectado inicialmente, reintentando...\n");
+    }
+
+    // 6. Cliente WebRTC y enlace de flujo de medios
+    luna::stream::WebRtcClient rtcClient;
+    luna::stream::StreamConfig cfg;
+    cfg.targetWidth = 1920;
+    cfg.targetHeight = 1080;
+    cfg.targetFps = 60;
+    rtcClient.init(cfg);
+
+    std::atomic<bool> videoStreaming{false};
+
+    rtcClient.onVideo([&videoDecoder, &display, &rtcClient, &videoStreaming](const uint8_t* h264, size_t size, uint64_t pts) {
+        luna::media::DecodedVideoFrame frame;
+        if (videoDecoder.decode(h264, size, pts, frame)) {
+            videoStreaming = true;
+            display.presentYuv420(frame.y, frame.u, frame.v,
+                                  frame.strideY, frame.strideU, frame.strideV,
+                                  frame.width, frame.height);
+        } else if (videoDecoder.needsKeyframe()) {
+            rtcClient.requestKeyframe();
+        }
+    });
+
+    rtcClient.onAudio([&audioDecoder, &audio](const uint8_t* opus, size_t size, uint64_t pts) {
+        (void)pts;
+        std::vector<int16_t> pcmSamples;
+        if (audioDecoder.decode(opus, size, pcmSamples)) {
+            audio.outputPcm(pcmSamples.data(), pcmSamples.size() / 2);
+        }
+    });
+
+    // 7. Servidor de soporte LAN en puerto 8085 (backup/bridge)
+    luna::auth::AuthServer authSrv;
+    AppState appState = AppState::LoginCBL;
+
+    authSrv.onSessionReceived([&rtcClient, &appState, &videoStreaming](const luna::auth::AuthSession& session) {
+        std::printf("[Main] Sesion recibida desde puente LAN\n");
+        if (!session.sdpAnswer.empty()) {
+            rtcClient.applySdpAnswer(session.sdpAnswer);
+        }
+        if (!session.publicIp.empty() && session.port > 0) {
+            rtcClient.setRemoteEndpoint(session.publicIp, session.port);
+        }
+        if (!session.iceUfrag.empty() && !session.icePwd.empty()) {
+            rtcClient.setRemoteIceCredentials(session.iceUfrag, session.icePwd);
+        }
+        rtcClient.start();
+        videoStreaming = true;
+        appState = AppState::Streaming;
+    });
+
+    authSrv.start(8085);
+    std::string consoleIp = detectLocalLanIp();
+
+    // 8. Cliente de Autenticacion Amazon Code-Based Linking (CBL)
+    luna::auth::CblClient cbl;
+    std::string storageDir = ".";
+#if defined(LUNA_TARGET_PS5)
+    struct stat st{};
+    if (::stat("/data/homebrew/PPSA99825", &st) == 0) {
+        storageDir = "/data/homebrew/PPSA99825";
+    } else if (::stat("/data/psbox", &st) == 0) {
+        storageDir = "/data/psbox";
+    }
+#endif
+
+    cbl.init(storageDir);
+    if (cbl.isAuthenticated()) {
+        appState = AppState::Catalog;
+    } else {
+        appState = AppState::LoginCBL;
+    }
+
+    // 9. Cliente de Sesion Amazon Tempo
+    luna::session::LunaSessionClient sessionClient;
+    std::string g_lastStatusText = "";
+
+    // 10. Catalogo oficial de juegos Amazon Luna (con portadas y detalles oficiales)
+    std::vector<luna::display::GameTile> games = {
+        {
+            "amzn1.luna.product.bef8572c-d814-4c91-b8e7-980d5c84ad16",
+            "Fortnite Battle Royale",
+            "Epic Games",
+            0xFF0284C7, // Sky Blue
+            "GRATIS CON PRIME",
+            "Compite para ser el ultimo superviviente en el battle royale mas popular.",
+            0xFF0284C7
+        },
+        {
+            "amzn1.luna.product.47a3c580-8ff5-42d9-85cd-ade28138cf51",
+            "Star Wars Outlaws",
+            "Ubisoft",
+            0xFFF59E0B, // Amber
+            "UBISOFT CONNECT",
+            "Disfruta del primer mundo abierto de Star Wars explorando el bajo mundo galactico.",
+            0xFFF59E0B
+        },
+        {
+            "amzn1.luna.product.91338a7f-29a1-462e-95f0-72b46ceff340",
+            "Avatar: Frontiers of Pandora",
+            "Ubisoft",
+            0xFF10B981, // Emerald Green
+            "UBISOFT CONNECT",
+            "Reconecta con tus origenes na'vi y defiende la frontera occidental de Pandora.",
+            0xFF10B981
+        },
+        {
+            "amzn1.luna.product.trackmania",
+            "Trackmania",
+            "Ubisoft",
+            0xFF06B6D4, // Cyan
+            "LUNA+",
+            "Conduce a velocidades de vertigo en pistas desafiantes creadas por la comunidad.",
+            0xFF06B6D4
+        },
+        {
+            "amzn1.luna.product.588cc88e-de1f-427b-97ba-7b2e42846894",
+            "Sonic x Shadow Generations",
+            "SEGA",
+            0xFFEF4444, // Red
+            "LUNA+",
+            "Juega como Shadow en una campana con nuevos poderes y recorre etapas iconicas.",
+            0xFFEF4444
+        },
+        {
+            "amzn1.luna.product.falloutnv",
+            "Fallout: New Vegas",
+            "Bethesda Softworks",
+            0xFF8B5CF6, // Purple
+            "PRIME GAMING",
+            "Lucha por el control del Mojave y la presa Hoover en este aclamado juego de rol.",
+            0xFF8B5CF6
+        }
+    };
+
+    int selectedGameIndex = 1; // Star Wars Outlaws destacado por defecto
+    auto lastNavTime = std::chrono::steady_clock::now();
+    uint32_t lastButtons = 0;
+
+    uint32_t seq = 0;
+    uint64_t frameCount = 0;
+    uint8_t reportBuf[64];
+    size_t reportLen = 0;
+
+    std::printf("[Main] Bucle principal activo a 60 FPS\n");
+
+    while (g_running) {
+        padMgr.poll();
+
+        if (padMgr.isExitComboPressed()) {
+            break;
+        }
+
+        const auto& padState = padMgr.getState(0);
+        uint32_t pressedNow = padState.buttons & (~lastButtons);
+        lastButtons = padState.buttons;
+
+        auto now = std::chrono::steady_clock::now();
+        int navElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastNavTime).count();
+
+        switch (appState) {
+            case AppState::LoginCBL: {
+                cbl.tick();
+
+                if (cbl.isAuthenticated()) {
+                    std::printf("[Main] Usuario autenticado con exito. Mostrando catalogo...\n");
+                    appState = AppState::Catalog;
+                    break;
+                }
+
+                display.drawLoginScreen(
+                    cbl.getPublicCode(),
+                    cbl.getVerificationUri(),
+                    cbl.getQrSize(),
+                    [&cbl](int x, int y) { return cbl.getQrModule(x, y); },
+                    cbl.getErrorMessage().empty() ? "Esperando a que autorices en tu telefono/PC..." : cbl.getErrorMessage(),
+                    frameCount
+                );
+                break;
+            }
+
+            case AppState::Catalog: {
+                // Navegacion horizontal fluida por carrusel de juegos
+                if (navElapsedMs > 160) {
+                    bool moved = false;
+                    if ((padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000)) {
+                        if (selectedGameIndex + 1 < static_cast<int>(games.size())) {
+                            selectedGameIndex++;
+                            moved = true;
+                        }
+                    } else if ((padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000)) {
+                        if (selectedGameIndex > 0) {
+                            selectedGameIndex--;
+                            moved = true;
+                        }
+                    }
+                    if (moved) {
+                        lastNavTime = now;
+                        g_lastStatusText.clear();
+                    }
+                }
+
+                // Cruz (X) -> Iniciar Juego
+                if (pressedNow & luna::input::PAD_CROSS) {
+                    std::string targetGameId = games[selectedGameIndex].id;
+                    if (targetGameId.find('-') == std::string::npos) {
+                        targetGameId = "amzn1.luna.product.bef8572c-d814-4c91-b8e7-980d5c84ad16"; // Fortnite Fallback con UUID valido
+                    }
+                    std::printf("[Main] Juego seleccionado: %s (%s). Iniciando stream WebRTC...\n",
+                                games[selectedGameIndex].title.c_str(), targetGameId.c_str());
+
+                    // Refrescar access token antes de solicitar juego para garantizar validez (freshness)
+                    cbl.refreshAccessToken();
+
+                    std::string sdpOffer = rtcClient.generateSdpOffer();
+                    bool ok = sessionClient.startSession(targetGameId, cbl.getAccessToken(), sdpOffer,
+                                                         cbl.getDeviceSerial(), cbl.getCustomerId());
+                    if (ok) {
+                        g_lastStatusText = "Solicitando sesion de juego a Amazon Tempo...";
+                        appState = AppState::StartingSession;
+                    } else {
+                        g_lastStatusText = sessionClient.getStatusMessage();
+                    }
+                }
+
+                // Triangulo (Y) -> Cerrar sesion
+                if (pressedNow & luna::input::PAD_TRIANGLE) {
+                    std::printf("[Main] Cerrando sesion de Amazon...\n");
+                    cbl.logout();
+                    appState = AppState::LoginCBL;
+                }
+
+                std::string catalogStatus;
+                if (!g_lastStatusText.empty()) {
+                    catalogStatus = g_lastStatusText;
+                } else if (padMgr.isConnected()) {
+                    catalogStatus = "Listo para jugar | Pulsa (X) para iniciar " + games[selectedGameIndex].title;
+                } else {
+                    catalogStatus = "Buscando mando DualSense... (pulsa el boton PS si no responde)";
+                }
+
+                display.drawCatalogScreen(
+                    games,
+                    selectedGameIndex,
+                    cbl.getCustomerId(),
+                    catalogStatus,
+                    frameCount
+                );
+                break;
+            }
+
+            case AppState::StartingSession: {
+                sessionClient.tick();
+
+                if (sessionClient.getState() == luna::session::SessionState::Ready) {
+                    const auto& info = sessionClient.getSessionInfo();
+                    std::printf("[Main] Sesion lista: Endpoint %s:%d\n", info.publicIp.c_str(), info.port);
+
+                    if (!info.sdpAnswer.empty()) {
+                        rtcClient.applySdpAnswer(info.sdpAnswer);
+                    }
+                    if (!info.publicIp.empty() && info.port > 0) {
+                        rtcClient.setRemoteEndpoint(info.publicIp, info.port);
+                    }
+                    if (!info.iceUfrag.empty() && !info.icePwd.empty()) {
+                        rtcClient.setRemoteIceCredentials(info.iceUfrag, info.icePwd);
+                    }
+                    rtcClient.start();
+                    videoStreaming = true;
+                    g_lastStatusText.clear();
+                    appState = AppState::Streaming;
+                } else if (sessionClient.getState() == luna::session::SessionState::Failed) {
+                    std::printf("[Main] Error al iniciar sesion: %s\n", sessionClient.getStatusMessage().c_str());
+                    g_lastStatusText = sessionClient.getStatusMessage();
+                    if (g_lastStatusText.find("not fresh") != std::string::npos ||
+                        g_lastStatusText.find("re-authenticate") != std::string::npos) {
+                        cbl.refreshAccessToken();
+                        g_lastStatusText = "Token de acceso refrescado. Pulsa (X) para iniciar conexion.";
+                    }
+                    appState = AppState::Catalog;
+                }
+
+                display.drawCatalogScreen(
+                    games,
+                    selectedGameIndex,
+                    cbl.getCustomerId(),
+                    sessionClient.getStatusMessage(),
+                    frameCount
+                );
+                break;
+            }
+
+            case AppState::Streaming: {
+                // Serializar y enviar entrada de mando al juego en tiempo real a 60 Hz
+                padMgr.serializeReport(reportBuf, sizeof(reportBuf), reportLen, seq++);
+                if (rtcClient.isConnected() && reportLen > 0) {
+                    rtcClient.sendInputPacket(reportBuf, reportLen);
+                }
+
+                // Si se presiona Options + Touchpad -> Terminar stream y volver al catalogo
+                if ((padState.buttons & luna::input::PAD_OPTIONS) && (padState.buttons & luna::input::PAD_TOUCH)) {
+                    std::printf("[Main] Deteniendo stream WebRTC y regresando al catalogo...\n");
+                    sessionClient.terminateSession(cbl.getAccessToken());
+                    rtcClient.stop();
+                    videoStreaming = false;
+                    appState = AppState::Catalog;
+                }
+
+                // Mientras no haya frames de video descodificados, mostrar pantalla de carga
+                if (!videoStreaming.load()) {
+                    display.drawCatalogScreen(
+                        games,
+                        selectedGameIndex,
+                        cbl.getCustomerId(),
+                        "Conectando WebRTC a Amazon Luna...",
+                        frameCount
+                    );
+                }
+                break;
+            }
+        }
+
+        frameCount++;
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+
+    if (appState == AppState::Streaming) {
+        sessionClient.terminateSession(cbl.getAccessToken());
+    }
+
+    authSrv.stop();
+    rtcClient.stop();
+    audioDecoder.shutdown();
+    videoDecoder.shutdown();
+    padMgr.shutdown();
+    audio.shutdown();
+    display.shutdown();
+    luna::net::HttpClient::shutdown();
+
+    std::printf("[Main] Cierre ordenado completado con exito.\n");
+    return 0;
+}

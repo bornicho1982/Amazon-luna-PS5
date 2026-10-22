@@ -1,0 +1,33 @@
+0000035d	sceVideodec2QueryComputeMemoryInfo
+00000380	sceVideodec2AllocateComputeQueue
+000003a1	sceVideodec2ReleaseComputeQueue
+000003c1	sceVideodec2QueryDecoderMemoryInfo
+000003e4	sceVideodec2CreateDecoder
+000003fe	sceVideodec2DeleteDecoder
+00000418	sceVideodec2Decode
+0000042b	sceVideodec2Flush
+0000043d	sceVideodec2Reset
+0000044f	libSceVideodec2.sprx
+00000648	Linker: LLD 22.1.3 (https://github.com/llvm/llvm-project e9846648fd6183ee6d8cbdb4502213fcf902a211)
+000006ac	clang version 22.1.3 (https://github.com/llvm/llvm-project e9846648fd6183ee6d8cbdb4502213fcf902a211)
+00000839	.dynsym
+00000841	.gnu.hash
+00000851	.dynstr
+00000859	.eh_frame
+00000869	.dynamic
+00000872	.relro_padding
+00000881	.comment
+0000088a	.symtab
+00000892	.shstrtab
+0000089c	.strtab
+000008a5	libSceVideodec2.c
+000008b7	sceVideodec2QueryComputeMemoryInfo
+000008da	sceVideodec2AllocateComputeQueue
+000008fb	sceVideodec2ReleaseComputeQueue
+0000091b	sceVideodec2QueryDecoderMemoryInfo
+0000093e	sceVideodec2CreateDecoder
+00000958	sceVideodec2DeleteDecoder
+00000972	sceVideodec2Decode
+00000985	sceVideodec2Flush
+00000997	sceVideodec2Reset
+000009a9	_DYNAMIC
