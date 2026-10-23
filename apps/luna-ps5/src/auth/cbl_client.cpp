@@ -1,6 +1,7 @@
 #include "auth/cbl_client.h"
 #include "net/http_client.h"
 #include "util/qrcodegen.h"
+#include "util/crash_logger.h"
 
 #include <cstdio>
 #include <ctime>
@@ -192,6 +193,13 @@ bool CblClient::refreshAccessToken() {
         return false;
     }
 
+    int64_t now = static_cast<int64_t>(std::time(nullptr));
+    if (m_tokens.expiresAt > (now + 300) && !m_tokens.accessToken.empty()) {
+        std::printf("[CBL] El token actual todavia es valido durante %lld s, omitiendo refresco\n",
+                    static_cast<long long>(m_tokens.expiresAt - now));
+        return true;
+    }
+
     std::printf("[CBL] Refrescando access_token en api.amazon.com/auth/token...\n");
     std::string url = "https://api.amazon.com/auth/token";
     std::string payload = "{\n"
@@ -209,6 +217,8 @@ bool CblClient::refreshAccessToken() {
 
     auto resp = luna::net::HttpClient::post(url, payload, headers);
     if (!resp.ok()) {
+        luna::util::CrashLogger::log("[CBL] Error al refrescar token: HTTP %d %s: %.150s",
+                                     resp.statusCode, resp.error.c_str(), resp.body.c_str());
         std::printf("[CBL] Error al refrescar token: HTTP %d %s: %s\n",
                     resp.statusCode, resp.error.c_str(), resp.body.c_str());
         return false;

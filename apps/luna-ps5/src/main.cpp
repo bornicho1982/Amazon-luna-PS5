@@ -321,9 +321,12 @@ int main(int argc, char* argv[]) {
                                                          cbl.getDeviceSerial(), cbl.getCustomerId());
                     if (ok) {
                         g_lastStatusText = "Solicitando sesion de juego a Amazon Tempo...";
+                        g_catalogDiagnostic.clear();
                         appState = AppState::StartingSession;
                     } else {
                         g_lastStatusText = sessionClient.getStatusMessage();
+                        g_catalogDiagnostic = g_lastStatusText;
+                        luna::util::CrashLogger::logStep(4, ("Fallo: " + g_lastStatusText).c_str());
                         luna::util::CrashLogger::log("[Main ERROR] startSession fallo: %s", g_lastStatusText.c_str());
                     }
                 }
@@ -383,6 +386,8 @@ int main(int argc, char* argv[]) {
                 } else if (sessionClient.getState() == luna::session::SessionState::Failed) {
                     luna::util::CrashLogger::log("[Main CRITICAL] Error al iniciar sesion: %s", sessionClient.getStatusMessage().c_str());
                     g_lastStatusText = sessionClient.getStatusMessage();
+                    g_catalogDiagnostic = g_lastStatusText;
+                    luna::util::CrashLogger::logStep(4, ("Fallo: " + g_lastStatusText).c_str());
                     if (g_lastStatusText.find("caducada") != std::string::npos ||
                         g_lastStatusText.find("403") != std::string::npos ||
                         g_lastStatusText.find("401") != std::string::npos) {
@@ -394,6 +399,7 @@ int main(int argc, char* argv[]) {
                                g_lastStatusText.find("re-authenticate") != std::string::npos) {
                         cbl.refreshAccessToken();
                         g_lastStatusText = "Token refrescado. Pulsa (X) para reintentar.";
+                        g_catalogDiagnostic = g_lastStatusText;
                         appState = AppState::Catalog;
                     } else {
                         appState = AppState::Catalog;

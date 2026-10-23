@@ -838,7 +838,7 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
     uint32_t textColor = isError ? 0xFFFCA5A5 : (isBusy ? 0xFFFDE68A : 0xFF34D399);
     std::string stepInfo = luna::util::CrashLogger::getCurrentStepText();
     std::string line1 = "Amazon Luna: " + statusText;
-    if (!stepInfo.empty() && (isBusy || isError)) {
+    if (!stepInfo.empty() && isBusy && line1.find(stepInfo) == std::string::npos) {
         line1 += "  |  " + stepInfo;
     }
     drawText(110, footerY + 18, 2, line1, textColor);

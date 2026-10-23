@@ -95,50 +95,34 @@ LunaSessionClient::~LunaSessionClient() = default;
 
 std::string LunaSessionClient::resolvePlayToken(const std::string& gameId,
                                                 const std::vector<std::pair<std::string, std::string>>& headers) {
-    std::string pageUrl = m_proxyHost + "/getPage";
+    const char* candidateHosts[] = {
+        m_proxyHost.c_str(),
+        "https://proxy-prod.tempo.digital.a2z.com"
+    };
 
-    // 1. Consultar pagina provision_game con pageUri
-    std::string payload1 = "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageUri\":\"provision_game\",\"productStage\":\"Release\"}}";
-    auto resp1 = luna::net::HttpClient::post(pageUrl, payload1, headers);
-    std::printf("[LunaSession] getPage(provision_game uri, %s) -> HTTP %d (tam: %zu)\n",
-                gameId.c_str(), resp1.statusCode, resp1.body.size());
+    std::vector<std::string> payloads = {
+        "{\"featureScheme\":\"default\",\"pageContext\":{\"pageType\":\"provision_game\",\"pageId\":\"" + gameId + "\",\"productStage\":\"Release\"}}",
+        "{\"featureScheme\":\"default\",\"pageContext\":{\"pageType\":\"multistate_detail\",\"pageId\":\"" + gameId + "\"}}",
+        "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageType\":\"provision_game\"}}"
+    };
 
-    if (resp1.ok()) {
-        std::string tok = extractJsonString(resp1.body, "playToken");
-        if (!tok.empty()) {
-            std::printf("[LunaSession] playToken detectado en provision_game!\n");
-            return tok;
+    for (const char* host : candidateHosts) {
+        std::string pageUrl = std::string(host) + "/getPage";
+        for (const auto& payload : payloads) {
+            auto resp = luna::net::HttpClient::post(pageUrl, payload, headers);
+            luna::util::CrashLogger::log("[LunaSession] resolvePlayToken (%s) -> HTTP %d (tam: %zu): %.150s",
+                                         host, resp.statusCode, resp.body.size(), resp.body.c_str());
+            if (resp.ok()) {
+                std::string tok = extractJsonString(resp.body, "playToken");
+                if (!tok.empty()) {
+                    luna::util::CrashLogger::log("[LunaSession] playToken detectado con exito: %.30s...", tok.c_str());
+                    return tok;
+                }
+            }
         }
     }
 
-    // 2. Consultar con pageType: provision_game
-    std::string payload2 = "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageType\":\"provision_game\",\"productStage\":\"Release\"}}";
-    auto resp2 = luna::net::HttpClient::post(pageUrl, payload2, headers);
-    std::printf("[LunaSession] getPage(provision_game type, %s) -> HTTP %d (tam: %zu)\n",
-                gameId.c_str(), resp2.statusCode, resp2.body.size());
-
-    if (resp2.ok()) {
-        std::string tok = extractJsonString(resp2.body, "playToken");
-        if (!tok.empty()) {
-            std::printf("[LunaSession] playToken detectado en provision_game type!\n");
-            return tok;
-        }
-    }
-
-    // 3. Fallback: Consultar pagina multistate_detail
-    std::string payload3 = "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageType\":\"multistate_detail\"}}";
-    auto resp3 = luna::net::HttpClient::post(pageUrl, payload3, headers);
-    std::printf("[LunaSession] getPage(multistate_detail, %s) -> HTTP %d (tam: %zu)\n",
-                gameId.c_str(), resp3.statusCode, resp3.body.size());
-
-    if (resp3.ok()) {
-        std::string tok = extractJsonString(resp3.body, "playToken");
-        if (!tok.empty()) {
-            std::printf("[LunaSession] playToken detectado en multistate_detail!\n");
-            return tok;
-        }
-    }
-
+    luna::util::CrashLogger::log("[LunaSession] playToken no detectado en getPage (se intentara sin playToken)");
     return "";
 }
 
@@ -149,13 +133,13 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
     // 1. Obtener TDI para telemetria IoT Amazon
     std::string iotUrl = m_proxyHost + "/getIotConnectionInfo";
     auto iotResp = luna::net::HttpClient::post(iotUrl, "{}", headers);
-    std::printf("[LunaSession] getIotConnectionInfo -> HTTP %d (tam: %zu)\n",
-                iotResp.statusCode, iotResp.body.size());
+    luna::util::CrashLogger::log("[LunaSession] getIotConnectionInfo -> HTTP %d (tam: %zu): %.150s",
+                                 iotResp.statusCode, iotResp.body.size(), iotResp.body.c_str());
     if (iotResp.ok()) {
         std::string tdi = extractJsonString(iotResp.body, "tdi");
         if (!tdi.empty()) {
             headers.push_back({"x-amz-tdi", tdi});
-            std::printf("[LunaSession] Cabecera x-amz-tdi configurada con exito\n");
+            luna::util::CrashLogger::log("[LunaSession] Cabecera x-amz-tdi configurada con exito");
         }
     }
 
@@ -165,13 +149,13 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
     if (!customerId.empty()) {
         std::string loginPayload = "{\"profileId\":\"" + customerId + "\"}";
         auto lResp = luna::net::HttpClient::post(loginUrl, loginPayload, headers);
-        std::printf("[LunaSession] playerLogin(%s) -> HTTP %d, body: %s\n",
-                    customerId.c_str(), lResp.statusCode, lResp.body.c_str());
+        luna::util::CrashLogger::log("[LunaSession] playerLogin(%s) -> HTTP %d: %.150s",
+                                     customerId.c_str(), lResp.statusCode, lResp.body.c_str());
         if (lResp.ok()) {
             std::string tok = extractJsonString(lResp.body, "token");
             if (!tok.empty()) {
                 m_profileToken = tok;
-                std::printf("[LunaSession] Token de perfil Luna (x-amz-profile-token) obtenido con exito!\n");
+                luna::util::CrashLogger::log("[LunaSession] Token de perfil Luna (x-amz-profile-token) obtenido con exito!");
                 return m_profileToken;
             }
         }
@@ -181,13 +165,13 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
     {
         std::string loginPayload = "{\"profileId\":\"default\"}";
         auto lResp = luna::net::HttpClient::post(loginUrl, loginPayload, headers);
-        std::printf("[LunaSession] playerLogin(default) -> HTTP %d, body: %s\n",
-                    lResp.statusCode, lResp.body.c_str());
+        luna::util::CrashLogger::log("[LunaSession] playerLogin(default) -> HTTP %d: %.150s",
+                                     lResp.statusCode, lResp.body.c_str());
         if (lResp.ok()) {
             std::string tok = extractJsonString(lResp.body, "token");
             if (!tok.empty()) {
                 m_profileToken = tok;
-                std::printf("[LunaSession] Token de perfil Luna adquirido via playerLogin(default)!\n");
+                luna::util::CrashLogger::log("[LunaSession] Token de perfil Luna adquirido via playerLogin(default)!");
                 return m_profileToken;
             }
         }
@@ -196,13 +180,13 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
     // 4. Intentar playerLogin con payload vacio {}
     {
         auto lRespEmpty = luna::net::HttpClient::post(loginUrl, "{}", headers);
-        std::printf("[LunaSession] playerLogin({}) -> HTTP %d, body: %s\n",
-                    lRespEmpty.statusCode, lRespEmpty.body.c_str());
+        luna::util::CrashLogger::log("[LunaSession] playerLogin({}) -> HTTP %d: %.150s",
+                                     lRespEmpty.statusCode, lRespEmpty.body.c_str());
         if (lRespEmpty.ok()) {
             std::string tok = extractJsonString(lRespEmpty.body, "token");
             if (!tok.empty()) {
                 m_profileToken = tok;
-                std::printf("[LunaSession] Token de perfil adquirido via playerLogin({})!\n");
+                luna::util::CrashLogger::log("[LunaSession] Token de perfil adquirido via playerLogin({})!");
                 return m_profileToken;
             }
         }
@@ -213,8 +197,8 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
         std::string createUrl = m_proxyHost + "/player/createPlayerFromProfile";
         std::string createPayload = "{\"profileId\":\"" + customerId + "\"}";
         auto cResp = luna::net::HttpClient::post(createUrl, createPayload, headers);
-        std::printf("[LunaSession] createPlayerFromProfile(%s) -> HTTP %d: %s\n",
-                    customerId.c_str(), cResp.statusCode, cResp.body.c_str());
+        luna::util::CrashLogger::log("[LunaSession] createPlayerFromProfile(%s) -> HTTP %d: %.150s",
+                                     customerId.c_str(), cResp.statusCode, cResp.body.c_str());
         if (cResp.ok()) {
             std::string tok = extractJsonString(cResp.body, "token");
             if (!tok.empty()) {
@@ -231,7 +215,11 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
                                                                     const std::string& customerId,
                                                                     const std::string& deviceSerial) {
     std::vector<luna::display::GameTile> result;
-    if (accessToken.empty()) return result;
+    if (accessToken.empty()) {
+        m_statusMessage = "Error: Token de acceso vacio";
+        luna::util::CrashLogger::log("[LunaCatalog ERROR] Token de acceso vacio");
+        return result;
+    }
 
     luna::util::CrashLogger::log("[LunaCatalog] Solicitando catalogo dinamico a Amazon Luna...");
 
@@ -241,17 +229,13 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
         {"x-amz-access-token", accessToken},
         {"x-amz-platform", "smart_tv_web"},
         {"x-amz-device-type", "A2U9WJDSJD7QG9"},
-        {"x-amz-device-model", "LG TV"},
         {"x-amz-client-version", "1.0.37063.0"},
         {"x-amz-react-version", "1.0.37063.0"},
         {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
         {"x-amz-country-of-residence", "ES"},
         {"x-amz-timezone", "Europe/Madrid"},
         {"x-amz-locale", "es-ES"},
-        {"Accept-Language", "es-ES"},
-        {"Origin", "https://luna.amazon.es"},
-        {"Referer", "https://luna.amazon.es/"},
-        {"User-Agent", "Mozilla/5.0 (Web0S; SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 WebAppManager"}
+        {"Accept-Language", "es-ES"}
     };
 
     if (!deviceSerial.empty()) {
@@ -263,32 +247,32 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
         headers.push_back({"x-amz-profile-token", m_profileToken});
     }
 
-    std::string pageUrl = m_proxyHost + "/getPage";
+    const char* candidateHosts[] = {
+        m_proxyHost.c_str(),
+        "https://proxy-prod.tempo.digital.a2z.com"
+    };
 
-    // 1. Probar con pageUri: home
-    std::string pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageUri\":\"home\",\"productStage\":\"Release\"}}";
-    auto resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
-    std::printf("[LunaCatalog] getPage(pageUri: home) -> HTTP %d (tam: %zu)\n", resp.statusCode, resp.body.size());
+    std::vector<std::string> payloads = {
+        "{\"featureScheme\":\"default\",\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"multistate_navigation\"}}",
+        "{\"pageContext\":{\"pageId\":\"default\",\"pageUri\":\"home\"}}",
+        "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"home\"}}"
+    };
 
-    // 2. Fallback con pageUri simple
-    if (!resp.ok() || resp.body.empty() || resp.body.find("amzn1.luna.product.") == std::string::npos) {
-        pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageUri\":\"home\"}}";
-        resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
-        std::printf("[LunaCatalog] getPage(pageUri: home simple) -> HTTP %d (tam: %zu)\n", resp.statusCode, resp.body.size());
-    }
+    luna::net::HttpResponse resp;
+    bool foundCatalog = false;
 
-    // 3. Fallback con pageType: home
-    if (!resp.ok() || resp.body.empty() || resp.body.find("amzn1.luna.product.") == std::string::npos) {
-        pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"home\",\"productStage\":\"Release\"}}";
-        resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
-        std::printf("[LunaCatalog] getPage(pageType: home) -> HTTP %d (tam: %zu)\n", resp.statusCode, resp.body.size());
-    }
-
-    // 4. Fallback con pageType: multistate_navigation
-    if (!resp.ok() || resp.body.empty() || resp.body.find("amzn1.luna.product.") == std::string::npos) {
-        pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"multistate_navigation\"}}";
-        resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
-        std::printf("[LunaCatalog] getPage(multistate_navigation) -> HTTP %d (tam: %zu)\n", resp.statusCode, resp.body.size());
+    for (const char* host : candidateHosts) {
+        std::string pageUrl = std::string(host) + "/getPage";
+        for (const auto& payload : payloads) {
+            resp = luna::net::HttpClient::post(pageUrl, payload, headers);
+            luna::util::CrashLogger::log("[LunaCatalog] getPage (%s) -> HTTP %d (tam: %zu): %.180s",
+                                         host, resp.statusCode, resp.body.size(), resp.body.c_str());
+            if (resp.ok() && !resp.body.empty() && resp.body.find("amzn1.luna.product.") != std::string::npos) {
+                foundCatalog = true;
+                break;
+            }
+        }
+        if (foundCatalog) break;
     }
 
     static const uint32_t kCardColors[] = {
@@ -399,9 +383,16 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
             m_statusMessage += " [Token no autorizado]";
         } else if (resp.statusCode == 400) {
             m_statusMessage += " [Peticion invalida]";
+        } else if (resp.statusCode == 500) {
+            m_statusMessage += " [Error interno Amazon/Token invalido]";
+        }
+        if (!resp.body.empty()) {
+            std::string sub = resp.body.substr(0, 80);
+            for (char& c : sub) { if (c == '\r' || c == '\n') c = ' '; }
+            m_statusMessage += " " + sub;
         }
     } else {
-        m_statusMessage = "Error de red al conectar con Amazon Luna";
+        m_statusMessage = "Error de red al conectar con Amazon Luna: " + resp.error;
     }
 
     luna::util::CrashLogger::log("[LunaCatalog] Total de juegos dinamicos cargados: %zu - %s",
@@ -428,10 +419,10 @@ bool LunaSessionClient::startSession(const std::string& gameId,
 
     std::vector<std::pair<std::string, std::string>> headers = {
         {"Content-Type", "application/json"},
+        {"Accept", "application/json"},
         {"x-amz-access-token", accessToken},
         {"x-amz-platform", "smart_tv_web"},
         {"x-amz-device-type", "A2U9WJDSJD7QG9"},
-        {"x-amz-device-model", "LG TV"},
         {"x-amz-client-version", "1.0.37063.0"},
         {"x-amz-react-version", "1.0.37063.0"},
         {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
@@ -484,18 +475,28 @@ bool LunaSessionClient::startSession(const std::string& gameId,
 
     std::string url = m_proxyHost + "/createGameSessionJob";
     auto resp = luna::net::HttpClient::post(url, payload, headers);
-    std::printf("[LunaSession] createGameSessionJob EU -> HTTP %d: %s\n",
-                resp.statusCode, resp.body.c_str());
+    luna::util::CrashLogger::log("[LunaSession] createGameSessionJob EU -> HTTP %d: %.250s",
+                                 resp.statusCode, resp.body.c_str());
 
-    // Si devuelve 499 o error de gateway, probar fallback Web con cabeceras completas
+    // Si regional devuelve error, probar endpoint global
+    if (!resp.ok()) {
+        luna::util::CrashLogger::log("[LunaSession] Fallo regional EU (HTTP %d). Probando endpoint global...", resp.statusCode);
+        m_proxyHost = "https://proxy-prod.tempo.digital.a2z.com";
+        url = m_proxyHost + "/createGameSessionJob";
+        resp = luna::net::HttpClient::post(url, payload, headers);
+        luna::util::CrashLogger::log("[LunaSession] createGameSessionJob Global -> HTTP %d: %.250s",
+                                     resp.statusCode, resp.body.c_str());
+    }
+
+    // Si aún falla con 400/499/500, probar con perfil Web directo
     if (!resp.ok() && (resp.statusCode == 499 || resp.statusCode == 400 || resp.statusCode == 500)) {
-        std::printf("[LunaSession] HTTP %d recibido. Probando con perfil Web directo...\n", resp.statusCode);
+        luna::util::CrashLogger::log("[LunaSession] Probando perfil Web de rescate...");
         std::vector<std::pair<std::string, std::string>> webHeaders = {
             {"Content-Type", "application/json"},
+            {"Accept", "application/json"},
             {"x-amz-access-token", accessToken},
             {"x-amz-platform", "web"},
             {"x-amz-device-type", "A1PY8QQU9P0WJV"},
-            {"x-amz-device-model", "Chrome/120.0.0.0"},
             {"x-amz-client-version", "1.0.37063.0"},
             {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
             {"x-amz-country-of-residence", "ES"},
@@ -512,40 +513,33 @@ bool LunaSessionClient::startSession(const std::string& gameId,
             if (h.first == "x-amz-tdi") webHeaders.push_back(h);
         }
         resp = luna::net::HttpClient::post(url, payload, webHeaders);
-        std::printf("[LunaSession] createGameSessionJob Web fallback -> HTTP %d: %s\n",
-                    resp.statusCode, resp.body.c_str());
-    }
-
-    // Fallback a endpoint global si regional falla
-    if (!resp.ok() && (resp.statusCode == 404 || resp.statusCode == 499 || resp.statusCode == 500 || resp.statusCode == 0)) {
-        std::printf("[LunaSession] Fallo regional EU (HTTP %d). Probando endpoint global...\n", resp.statusCode);
-        m_proxyHost = "https://proxy-prod.tempo.digital.a2z.com";
-        url = m_proxyHost + "/createGameSessionJob";
-        resp = luna::net::HttpClient::post(url, payload, headers);
+        luna::util::CrashLogger::log("[LunaSession] createGameSessionJob Web fallback -> HTTP %d: %.250s",
+                                     resp.statusCode, resp.body.c_str());
     }
 
     if (!resp.ok()) {
         m_state = SessionState::Failed;
-        std::string err = "Error Amazon (HTTP " + std::to_string(resp.statusCode) + ")";
+        std::string err = "Fallo Amazon (HTTP " + std::to_string(resp.statusCode) + ")";
         if (resp.statusCode == 403) {
-            err = "Sesion Amazon caducada (403). Pulsa [TRIANGULO] para revincular.";
+            err = "Sesion caducada (403). Pulsa [TRIANGULO] para revincular.";
         } else if (resp.statusCode == 499) {
             err = std::string("Amazon 499: perfil no autorizado (") + (m_profileToken.empty() ? "sin profileToken" : "token rechazado") + ")";
         } else if (!resp.body.empty() && resp.body != "{}") {
-            err += ": " + resp.body.substr(0, 90);
+            err += ": " + resp.body.substr(0, 110);
         } else if (!resp.error.empty()) {
-            err += ": " + resp.error.substr(0, 90);
+            err += ": " + resp.error.substr(0, 110);
         }
         m_statusMessage = err;
-        std::printf("[LunaSession] createGameSessionJob falló con HTTP %d: %s | %s\n",
-                    resp.statusCode, resp.error.c_str(), resp.body.c_str());
+        luna::util::CrashLogger::log("[LunaSession CRITICAL] createGameSessionJob fallo con HTTP %d: %s | %s",
+                                     resp.statusCode, resp.error.c_str(), resp.body.c_str());
         return false;
     }
 
     m_info.jobId = extractJsonString(resp.body, "gameSessionJobId");
     if (m_info.jobId.empty()) {
         m_state = SessionState::Failed;
-        m_statusMessage = "No se recibio gameSessionJobId de Amazon";
+        m_statusMessage = "No se recibio gameSessionJobId de Amazon: " + resp.body.substr(0, 80);
+        luna::util::CrashLogger::log("[LunaSession ERROR] %s", m_statusMessage.c_str());
         return false;
     }
 
@@ -596,7 +590,10 @@ bool LunaSessionClient::pollJob() {
     }
 
     auto resp = luna::net::HttpClient::post(url, payload, headers);
+    luna::util::CrashLogger::log("[LunaSession] pollJob (%d/40) -> HTTP %d (tam: %zu): %.120s",
+                                 m_pollAttempts, resp.statusCode, resp.body.size(), resp.body.c_str());
     if (!resp.ok()) {
+        m_statusMessage = "Fallo Amazon /getGameSessionJob (HTTP " + std::to_string(resp.statusCode) + "): " + resp.body.substr(0, 90);
         return false;
     }
 
