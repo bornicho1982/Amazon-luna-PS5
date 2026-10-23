@@ -38,6 +38,8 @@ try {
 
     $sources = @(
         "main",
+        "util/crash_logger",
+        "util/image_loader",
         "net/http_client",
         "auth/cbl_client",
         "session/luna_session",

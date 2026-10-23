@@ -1,4 +1,5 @@
 #include "display/display_manager.h"
+#include "util/crash_logger.h"
 #include "util/qrcodegen.h"
 #include <cstdio>
 #include <cstring>
@@ -291,6 +292,40 @@ void DisplayManager::fillRect(int rx, int ry, int rw, int rh, uint32_t colorArgb
     for (int y = y0; y < y1; ++y) {
         for (int x = x0; x < x1; ++x) {
             setPixelSwizzled(base, x, y, colorArgb);
+        }
+    }
+}
+
+void DisplayManager::drawImage(int rx, int ry, int rw, int rh, const uint8_t* rgba, int imgW, int imgH) {
+    if (!isReady_ || !mappedMemory_ || !rgba || imgW <= 0 || imgH <= 0 || rw <= 0 || rh <= 0) return;
+    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+
+    int x0 = rx < 0 ? 0 : rx;
+    int y0 = ry < 0 ? 0 : ry;
+    int x1 = (rx + rw) > width_ ? width_ : (rx + rw);
+    int y1 = (ry + rh) > height_ ? height_ : (ry + rh);
+
+    for (int y = y0; y < y1; ++y) {
+        int srcY = ((y - ry) * imgH) / rh;
+        if (srcY >= imgH) srcY = imgH - 1;
+        const uint8_t* row = rgba + (static_cast<size_t>(srcY) * static_cast<size_t>(imgW) * 4);
+        for (int x = x0; x < x1; ++x) {
+            int srcX = ((x - rx) * imgW) / rw;
+            if (srcX >= imgW) srcX = imgW - 1;
+            const uint8_t* p = row + (srcX * 4);
+            uint8_t r = p[0];
+            uint8_t g = p[1];
+            uint8_t b = p[2];
+            uint8_t a = p[3];
+            uint32_t argb = (static_cast<uint32_t>(a) << 24) |
+                            (static_cast<uint32_t>(r) << 16) |
+                            (static_cast<uint32_t>(g) << 8)  |
+                            static_cast<uint32_t>(b);
+            if (a == 255) {
+                setPixelSwizzled(base, x, y, argb);
+            } else if (a > 0) {
+                blendPixelSwizzled(base, x, y, argb, a);
+            }
         }
     }
 }
@@ -668,6 +703,16 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
                 fillRect(dotX, dotY, 8, 8, 0xFF475569);
             }
         }
+
+        // Portada destacada del juego en el banner si esta disponible
+        if (!cur.coverRgba.empty() && cur.coverWidth > 0 && cur.coverHeight > 0) {
+            int heroCoverW = 250;
+            int heroCoverH = 340;
+            int heroCoverX = heroX + heroW - heroCoverW - 50;
+            int heroCoverY = heroY + (heroH - heroCoverH) / 2;
+            drawCard(*this, heroCoverX - 4, heroCoverY - 4, heroCoverW + 8, heroCoverH + 8, 0xFF0B0716, 0xFF8B5CF6, 2);
+            drawImage(heroCoverX, heroCoverY, heroCoverW, heroCoverH, cur.coverRgba.data(), cur.coverWidth, cur.coverHeight);
+        }
     }
 
     // 4. Seccion de Carrusel: "Las mejores novedades en juegos"
@@ -706,53 +751,58 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
 
         drawCard(*this, artX, artY, artW, artH, 0xFF0A0716, isSelected ? 0xFF6D28D9 : 0xFF1A1233, 1);
 
-        // Arte tematico distintivo por juego
-        switch (i) {
-            case 0: { // Fortnite
-                fillRect(artX, artY, artW, 80, 0xFF0284C7);
-                fillRect(artX + 30, artY + 40, artW - 60, 8, 0xFF38BDF8);
-                fillRect(artX + artW / 2 - 20, artY + 70, 40, 40, 0xFFF59E0B);
-                drawText(artX + 35, artY + 130, 3, "FORTNITE", 0xFFFFFFFF);
-                break;
+        if (!games[i].coverRgba.empty() && games[i].coverWidth > 0 && games[i].coverHeight > 0) {
+            drawImage(artX + 1, artY + 1, artW - 2, artH - 2,
+                      games[i].coverRgba.data(), games[i].coverWidth, games[i].coverHeight);
+        } else {
+            // Arte tematico distintivo por juego
+            switch (i) {
+                case 0: { // Fortnite
+                    fillRect(artX, artY, artW, 80, 0xFF0284C7);
+                    fillRect(artX + 30, artY + 40, artW - 60, 8, 0xFF38BDF8);
+                    fillRect(artX + artW / 2 - 20, artY + 70, 40, 40, 0xFFF59E0B);
+                    drawText(artX + 35, artY + 130, 3, "FORTNITE", 0xFFFFFFFF);
+                    break;
+                }
+                case 1: { // Star Wars Outlaws
+                    fillRect(artX, artY, artW, artH, 0xFF181026);
+                    fillRect(artX + artW / 2 - 40, artY + 30, 80, 80, 0xFFD97706);
+                    fillRect(artX + 15, artY + 100, artW - 30, 6, 0xFFF59E0B);
+                    drawText(artX + 35, artY + 125, 3, "OUTLAWS", 0xFFFFFFFF);
+                    break;
+                }
+                case 2: { // Avatar: Frontiers of Pandora
+                    fillRect(artX, artY, artW, artH, 0xFF064E3B);
+                    fillRect(artX + 20, artY + 30, artW - 40, 60, 0xFF059669);
+                    fillRect(artX + 30, artY + 70, artW - 60, 4, 0xFF34D399);
+                    drawText(artX + 45, artY + 125, 3, "AVATAR", 0xFFFFFFFF);
+                    break;
+                }
+                case 3: { // Trackmania
+                    fillRect(artX, artY, artW, artH, 0xFF0E7490);
+                    fillRect(artX + 10, artY + 50, artW - 20, 16, 0xFF22D3EE);
+                    fillRect(artX + 30, artY + 75, artW - 60, 16, 0xFFFFFFFF);
+                    drawText(artX + 15, artY + 125, 3, "TRACKMANIA", 0xFFFFFFFF);
+                    break;
+                }
+                case 4: { // Sonic x Shadow
+                    fillRect(artX, artY, artW, artH, 0xFF881337);
+                    fillRect(artX + 20, artY + 40, artW - 40, 6, 0xFFEF4444);
+                    fillRect(artX + 35, artY + 60, artW - 70, 6, 0xFFF43F5E);
+                    drawText(artX + 45, artY + 125, 3, "SHADOW", 0xFFFFFFFF);
+                    break;
+                }
+                case 5: { // Fallout: New Vegas
+                    fillRect(artX, artY, artW, artH, 0xFF581C87);
+                    fillRect(artX + 25, artY + 30, artW - 50, 70, 0xFF7E22CE);
+                    fillRect(artX + 40, artY + 70, artW - 80, 6, 0xFFC084FC);
+                    drawText(artX + 25, artY + 125, 3, "NEW VEGAS", 0xFFFFFFFF);
+                    break;
+                }
+                default:
+                    drawText(artX + 20, artY + 100, 3, "LUNA", 0xFFFFFFFF);
+                    break;
             }
-            case 1: { // Star Wars Outlaws
-                fillRect(artX, artY, artW, artH, 0xFF181026);
-                fillRect(artX + artW / 2 - 40, artY + 30, 80, 80, 0xFFD97706);
-                fillRect(artX + 15, artY + 100, artW - 30, 6, 0xFFF59E0B);
-                drawText(artX + 35, artY + 125, 3, "OUTLAWS", 0xFFFFFFFF);
-                break;
-            }
-            case 2: { // Avatar: Frontiers of Pandora
-                fillRect(artX, artY, artW, artH, 0xFF064E3B);
-                fillRect(artX + 20, artY + 30, artW - 40, 60, 0xFF059669);
-                fillRect(artX + 30, artY + 70, artW - 60, 4, 0xFF34D399);
-                drawText(artX + 45, artY + 125, 3, "AVATAR", 0xFFFFFFFF);
-                break;
-            }
-            case 3: { // Trackmania
-                fillRect(artX, artY, artW, artH, 0xFF0E7490);
-                fillRect(artX + 10, artY + 50, artW - 20, 16, 0xFF22D3EE);
-                fillRect(artX + 30, artY + 75, artW - 60, 16, 0xFFFFFFFF);
-                drawText(artX + 15, artY + 125, 3, "TRACKMANIA", 0xFFFFFFFF);
-                break;
-            }
-            case 4: { // Sonic x Shadow
-                fillRect(artX, artY, artW, artH, 0xFF881337);
-                fillRect(artX + 20, artY + 40, artW - 40, 6, 0xFFEF4444);
-                fillRect(artX + 35, artY + 60, artW - 70, 6, 0xFFF43F5E);
-                drawText(artX + 45, artY + 125, 3, "SHADOW", 0xFFFFFFFF);
-                break;
-            }
-            case 5: { // Fallout: New Vegas
-                fillRect(artX, artY, artW, artH, 0xFF581C87);
-                fillRect(artX + 25, artY + 30, artW - 50, 70, 0xFF7E22CE);
-                fillRect(artX + 40, artY + 70, artW - 80, 6, 0xFFC084FC);
-                drawText(artX + 25, artY + 125, 3, "NEW VEGAS", 0xFFFFFFFF);
-                break;
-            }
-            default:
-                drawText(artX + 20, artY + 100, 3, "LUNA", 0xFFFFFFFF);
-                break;
         }
 
         // Informacion textual del juego
@@ -786,7 +836,12 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
     fillRect(85, footerY + 22, 14, 14, pulseDot);
 
     uint32_t textColor = isError ? 0xFFFCA5A5 : (isBusy ? 0xFFFDE68A : 0xFF34D399);
-    drawText(110, footerY + 18, 2, "Amazon Luna: " + statusText, textColor);
+    std::string stepInfo = luna::util::CrashLogger::getCurrentStepText();
+    std::string line1 = "Amazon Luna: " + statusText;
+    if (!stepInfo.empty() && (isBusy || isError)) {
+        line1 += "  |  " + stepInfo;
+    }
+    drawText(110, footerY + 18, 2, line1, textColor);
 
     drawText(110, footerY + 52, 1,
              "[D-PAD / Stick Izq] Seleccionar Juego   |   [CRUZ (X)] Jugar en la Nube   |   [TRIANGULO] Cerrar Sesion   |   [L1+R1+OPTIONS+TOUCH] Salir",

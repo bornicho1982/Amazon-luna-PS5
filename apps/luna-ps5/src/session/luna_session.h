@@ -4,6 +4,7 @@
 #include <vector>
 #include <utility>
 #include <chrono>
+#include "display/display_manager.h"
 
 namespace luna::session {
 
@@ -32,6 +33,9 @@ class LunaSessionClient {
 public:
     LunaSessionClient();
     ~LunaSessionClient();
+
+    std::vector<luna::display::GameTile> fetchCatalog(const std::string& accessToken,
+                                                      const std::string& customerId = "");
 
     bool startSession(const std::string& gameId,
                       const std::string& accessToken,

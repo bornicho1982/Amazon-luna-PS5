@@ -1,7 +1,10 @@
 #include "session/luna_session.h"
 #include "net/http_client.h"
+#include "util/crash_logger.h"
+#include "util/image_loader.h"
 
 #include <cstdio>
+#include <algorithm>
 
 namespace luna::session {
 
@@ -202,6 +205,128 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
     return "";
 }
 
+std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::string& accessToken,
+                                                                    const std::string& customerId) {
+    std::vector<luna::display::GameTile> result;
+    if (accessToken.empty()) return result;
+
+    luna::util::CrashLogger::log("[LunaCatalog] Solicitando catalogo dinamico a Amazon Luna...");
+
+    std::vector<std::pair<std::string, std::string>> headers = {
+        {"Content-Type", "application/json"},
+        {"x-amz-access-token", accessToken},
+        {"x-amz-platform", "smart_tv_web"},
+        {"x-amz-device-type", "A2U9WJDSJD7QG9"},
+        {"x-amz-device-model", "LG TV"},
+        {"x-amz-client-version", "1.0.37063.0"},
+        {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
+        {"x-amz-country-of-residence", "ES"},
+        {"x-amz-timezone", "Europe/Madrid"},
+        {"x-amz-locale", "es-ES"},
+        {"Accept-Language", "es-ES"}
+    };
+
+    resolveProfileToken(headers, customerId);
+    if (!m_profileToken.empty()) {
+        headers.push_back({"x-amz-profile-token", m_profileToken});
+    }
+
+    // Probar primero con pagina "home"
+    std::string pageUrl = m_proxyHost + "/getPage";
+    std::string pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"home\",\"productStage\":\"Release\"}}";
+    auto resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
+
+    if (!resp.ok() || resp.body.empty() || resp.body.find("amzn1.luna.product.") == std::string::npos) {
+        // Fallback a multistate_navigation
+        pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"multistate_navigation\"}}";
+        resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
+    }
+
+    if (resp.ok() && !resp.body.empty()) {
+        const std::string& body = resp.body;
+        size_t searchPos = 0;
+        const std::string needle = "amzn1.luna.product.";
+
+        while (result.size() < 12 && (searchPos = body.find(needle, searchPos)) != std::string::npos) {
+            size_t idEnd = body.find_first_of("\"' \t\r\n,}", searchPos);
+            if (idEnd == std::string::npos) break;
+            std::string gameId = body.substr(searchPos, idEnd - searchPos);
+
+            bool dup = false;
+            for (const auto& item : result) {
+                if (item.id == gameId) { dup = true; break; }
+            }
+            if (dup) {
+                searchPos = idEnd;
+                continue;
+            }
+
+            size_t winStart = (searchPos > 2000) ? (searchPos - 2000) : 0;
+            size_t winEnd = std::min(body.size(), searchPos + 2000);
+            std::string window = body.substr(winStart, winEnd - winStart);
+
+            std::string title = extractJsonString(window, "title");
+            if (title.empty()) title = extractJsonString(window, "productTitle");
+            if (title.empty()) title = extractJsonString(window, "gameTitle");
+            if (title.empty()) title = extractJsonString(window, "name");
+
+            std::string publisher = extractJsonString(window, "publisher");
+            if (publisher.empty()) publisher = extractJsonString(window, "developer");
+            if (publisher.empty()) publisher = extractJsonString(window, "publisherName");
+
+            std::string synopsis = extractJsonString(window, "synopsis");
+            if (synopsis.empty()) synopsis = extractJsonString(window, "shortDescription");
+            if (synopsis.empty()) synopsis = extractJsonString(window, "description");
+
+            std::string category = extractJsonString(window, "badgeText");
+            if (category.empty()) category = extractJsonString(window, "subscription");
+            if (category.empty()) category = extractJsonString(window, "category");
+
+            std::string coverUrl = extractJsonString(window, "heroImageUrl");
+            if (coverUrl.empty()) coverUrl = extractJsonString(window, "thumbnailUrl");
+            if (coverUrl.empty()) coverUrl = extractJsonString(window, "boxArtUrl");
+            if (coverUrl.empty()) coverUrl = extractJsonString(window, "imageUrl");
+            if (coverUrl.empty()) coverUrl = extractJsonString(window, "squareImageUrl");
+
+            if (!title.empty()) {
+                luna::display::GameTile tile;
+                tile.id = gameId;
+                tile.title = title;
+                tile.publisher = publisher.empty() ? "Amazon Luna" : publisher;
+                tile.synopsis = synopsis.empty() ? "Disponible para jugar al instante en Amazon Luna Cloud." : synopsis;
+                tile.category = category.empty() ? "LUNA+" : category;
+                tile.badgeColor = 0xFF3B82F6;
+                tile.heroColor = 0xFF7C3AED;
+                tile.coverUrl = coverUrl;
+
+                // Descargar y decodificar portada en memoria para los primeros 6 juegos
+                if (result.size() < 6 && !tile.coverUrl.empty() && tile.coverUrl.rfind("http", 0) == 0) {
+                    luna::util::CrashLogger::log("[LunaCatalog] Descargando portada para '%s'...", tile.title.c_str());
+                    auto imgResp = luna::net::HttpClient::get(tile.coverUrl);
+                    if (imgResp.ok() && !imgResp.body.empty()) {
+                        int w = 0, h = 0;
+                        if (luna::util::decodeImageRgba(reinterpret_cast<const uint8_t*>(imgResp.body.data()),
+                                                        imgResp.body.size(), tile.coverRgba, w, h)) {
+                            tile.coverWidth = w;
+                            tile.coverHeight = h;
+                            luna::util::CrashLogger::log("[LunaCatalog] Portada decodificada con exito: %dx%d (%zu bytes RGBA)",
+                                                         w, h, tile.coverRgba.size());
+                        }
+                    }
+                }
+
+                result.push_back(std::move(tile));
+                luna::util::CrashLogger::log("[LunaCatalog] Juego detectado: %s (%s)", title.c_str(), gameId.c_str());
+            }
+
+            searchPos = idEnd;
+        }
+    }
+
+    luna::util::CrashLogger::log("[LunaCatalog] Total de juegos dinamicos cargados: %zu", result.size());
+    return result;
+}
+
 bool LunaSessionClient::startSession(const std::string& gameId,
                                     const std::string& accessToken,
                                     const std::string& sdpOffer,
@@ -214,6 +339,8 @@ bool LunaSessionClient::startSession(const std::string& gameId,
     m_lastPollTime = std::chrono::steady_clock::now();
     m_state = SessionState::CreatingJob;
     m_statusMessage = "Solicitando sesion de juego a Amazon Tempo...";
+
+    luna::util::CrashLogger::logStep(4, "createGameSessionJob sent to Amazon Tempo...");
 
     m_proxyHost = "https://proxy-prod.eu-west-1.tempo.digital.a2z.com";
 
@@ -437,8 +564,9 @@ bool LunaSessionClient::pollJob() {
         if (!m_info.publicIp.empty()) {
             m_state = SessionState::Ready;
             m_statusMessage = "¡Sesion asignada! Conectando a " + m_info.publicIp + ":" + std::to_string(m_info.port);
-            std::printf("[LunaSession] Asignada con exito: IP=%s:%d, SessionId=%s\n",
-                        m_info.publicIp.c_str(), m_info.port, m_info.sessionId.c_str());
+            luna::util::CrashLogger::logStep(5, "Polling getGameSessionJob completed successfully...");
+            luna::util::CrashLogger::log("[LunaSession] Asignada con exito: IP=%s:%d, SessionId=%s",
+                                         m_info.publicIp.c_str(), m_info.port, m_info.sessionId.c_str());
             return true;
         }
     } else if (resp.body.find("\"COMPLETED_FAILED\"") != std::string::npos) {

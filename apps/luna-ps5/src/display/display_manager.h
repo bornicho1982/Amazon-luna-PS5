@@ -17,6 +17,10 @@ struct GameTile {
     std::string category = "LUNA+";
     std::string synopsis = "Disponible para jugar al instante en Amazon Luna Cloud.";
     uint32_t heroColor = 0xFF7C3AED;
+    std::string coverUrl;
+    std::vector<uint8_t> coverRgba;
+    int coverWidth = 0;
+    int coverHeight = 0;
 };
 
 class DisplayManager {
@@ -31,6 +35,7 @@ public:
     void fillRect(int x, int y, int w, int h, uint32_t colorArgb);
     void drawText(int x, int y, int scale, const std::string& text, uint32_t colorArgb);
     void drawQrCode(int x, int y, int moduleScale, const std::string& text);
+    void drawImage(int x, int y, int w, int h, const uint8_t* rgba, int imgW, int imgH);
 
     void drawLoginScreen(const std::string& publicCode,
                          const std::string& verificationUri,

@@ -25,6 +25,7 @@
 #include "display/display_manager.h"
 #include "audio/audio_manager.h"
 #include "media/media_decoder.h"
+#include "util/crash_logger.h"
 
 namespace {
 std::atomic<bool> g_running{true};
@@ -49,9 +50,11 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
-    std::printf("====================================================\n");
-    std::printf("  Amazon Luna PS5 - Native Autonomous Client v1.3.0 \n");
-    std::printf("====================================================\n");
+    // 0. Inicializar CrashLogger sincronizado para diagnostico nativo
+    luna::util::CrashLogger::init();
+    luna::util::CrashLogger::log("====================================================");
+    luna::util::CrashLogger::log("  Amazon Luna PS5 - Native Autonomous Client v1.4.0 ");
+    luna::util::CrashLogger::log("====================================================");
 
     // 1. Inicializar HTTP nativo
     luna::net::HttpClient::init();
@@ -132,6 +135,7 @@ int main(int argc, char* argv[]) {
     // 9. Cliente de Sesion Amazon Tempo
     luna::session::LunaSessionClient sessionClient;
     std::string g_lastStatusText = "";
+    bool catalogFetched = false;
 
     // 10. Catalogo oficial de juegos Amazon Luna (con portadas y detalles oficiales)
     std::vector<luna::display::GameTile> games = {
@@ -142,7 +146,8 @@ int main(int argc, char* argv[]) {
             0xFF0284C7, // Sky Blue
             "GRATIS CON PRIME",
             "Compite para ser el ultimo superviviente en el battle royale mas popular.",
-            0xFF0284C7
+            0xFF0284C7,
+            "", {}, 0, 0
         },
         {
             "amzn1.luna.product.47a3c580-8ff5-42d9-85cd-ade28138cf51",
@@ -151,7 +156,8 @@ int main(int argc, char* argv[]) {
             0xFFF59E0B, // Amber
             "UBISOFT CONNECT",
             "Disfruta del primer mundo abierto de Star Wars explorando el bajo mundo galactico.",
-            0xFFF59E0B
+            0xFFF59E0B,
+            "", {}, 0, 0
         },
         {
             "amzn1.luna.product.91338a7f-29a1-462e-95f0-72b46ceff340",
@@ -160,7 +166,8 @@ int main(int argc, char* argv[]) {
             0xFF10B981, // Emerald Green
             "UBISOFT CONNECT",
             "Reconecta con tus origenes na'vi y defiende la frontera occidental de Pandora.",
-            0xFF10B981
+            0xFF10B981,
+            "", {}, 0, 0
         },
         {
             "amzn1.luna.product.trackmania",
@@ -169,7 +176,8 @@ int main(int argc, char* argv[]) {
             0xFF06B6D4, // Cyan
             "LUNA+",
             "Conduce a velocidades de vertigo en pistas desafiantes creadas por la comunidad.",
-            0xFF06B6D4
+            0xFF06B6D4,
+            "", {}, 0, 0
         },
         {
             "amzn1.luna.product.588cc88e-de1f-427b-97ba-7b2e42846894",
@@ -178,7 +186,8 @@ int main(int argc, char* argv[]) {
             0xFFEF4444, // Red
             "LUNA+",
             "Juega como Shadow en una campana con nuevos poderes y recorre etapas iconicas.",
-            0xFFEF4444
+            0xFFEF4444,
+            "", {}, 0, 0
         },
         {
             "amzn1.luna.product.falloutnv",
@@ -187,9 +196,26 @@ int main(int argc, char* argv[]) {
             0xFF8B5CF6, // Purple
             "PRIME GAMING",
             "Lucha por el control del Mojave y la presa Hoover en este aclamado juego de rol.",
-            0xFF8B5CF6
+            0xFF8B5CF6,
+            "", {}, 0, 0
         }
     };
+
+    auto loadCatalogIfAuthenticated = [&]() {
+        if (cbl.isAuthenticated() && !catalogFetched) {
+            luna::util::CrashLogger::log("[Main] Cargando catalogo dinamico desde Amazon Luna...");
+            auto dyn = sessionClient.fetchCatalog(cbl.getAccessToken(), cbl.getCustomerId());
+            if (!dyn.empty()) {
+                games = std::move(dyn);
+                luna::util::CrashLogger::log("[Main] ¡Catalogo dinamico actualizado con %zu juegos!", games.size());
+            }
+            catalogFetched = true;
+        }
+    };
+
+    if (cbl.isAuthenticated()) {
+        loadCatalogIfAuthenticated();
+    }
 
     int selectedGameIndex = 1; // Star Wars Outlaws destacado por defecto
     auto lastNavTime = std::chrono::steady_clock::now();
@@ -221,7 +247,8 @@ int main(int argc, char* argv[]) {
                 cbl.tick();
 
                 if (cbl.isAuthenticated()) {
-                    std::printf("[Main] Usuario autenticado con exito. Mostrando catalogo...\n");
+                    luna::util::CrashLogger::log("[Main] Usuario autenticado con exito. Cargando catalogo...");
+                    loadCatalogIfAuthenticated();
                     appState = AppState::Catalog;
                     break;
                 }
@@ -264,8 +291,8 @@ int main(int argc, char* argv[]) {
                     if (targetGameId.find('-') == std::string::npos) {
                         targetGameId = "amzn1.luna.product.bef8572c-d814-4c91-b8e7-980d5c84ad16"; // Fortnite Fallback con UUID valido
                     }
-                    std::printf("[Main] Juego seleccionado: %s (%s). Iniciando stream WebRTC...\n",
-                                games[selectedGameIndex].title.c_str(), targetGameId.c_str());
+                    luna::util::CrashLogger::log("[Main] Juego seleccionado: %s (%s). Iniciando stream WebRTC...",
+                                                 games[selectedGameIndex].title.c_str(), targetGameId.c_str());
 
                     // Refrescar access token antes de solicitar juego para garantizar validez (freshness)
                     cbl.refreshAccessToken();
@@ -278,13 +305,15 @@ int main(int argc, char* argv[]) {
                         appState = AppState::StartingSession;
                     } else {
                         g_lastStatusText = sessionClient.getStatusMessage();
+                        luna::util::CrashLogger::log("[Main ERROR] startSession fallo: %s", g_lastStatusText.c_str());
                     }
                 }
 
                 // Triangulo (Y) -> Cerrar sesion
                 if (pressedNow & luna::input::PAD_TRIANGLE) {
-                    std::printf("[Main] Cerrando sesion de Amazon...\n");
+                    luna::util::CrashLogger::log("[Main] Cerrando sesion de Amazon...");
                     cbl.logout();
+                    catalogFetched = false;
                     appState = AppState::LoginCBL;
                 }
 
@@ -312,7 +341,7 @@ int main(int argc, char* argv[]) {
 
                 if (sessionClient.getState() == luna::session::SessionState::Ready) {
                     const auto& info = sessionClient.getSessionInfo();
-                    std::printf("[Main] Sesion lista: Endpoint %s:%d\n", info.publicIp.c_str(), info.port);
+                    luna::util::CrashLogger::log("[Main] Sesion lista: Endpoint %s:%d", info.publicIp.c_str(), info.port);
 
                     if (!info.sdpAnswer.empty()) {
                         rtcClient.applySdpAnswer(info.sdpAnswer);
@@ -324,17 +353,19 @@ int main(int argc, char* argv[]) {
                         rtcClient.setRemoteIceCredentials(info.iceUfrag, info.icePwd);
                     }
                     rtcClient.start();
+                    luna::util::CrashLogger::logStep(7, "Hardware video & audio decoders ready, streaming active.");
                     videoStreaming = true;
                     g_lastStatusText.clear();
                     appState = AppState::Streaming;
                 } else if (sessionClient.getState() == luna::session::SessionState::Failed) {
-                    std::printf("[Main] Error al iniciar sesion: %s\n", sessionClient.getStatusMessage().c_str());
+                    luna::util::CrashLogger::log("[Main CRITICAL] Error al iniciar sesion: %s", sessionClient.getStatusMessage().c_str());
                     g_lastStatusText = sessionClient.getStatusMessage();
                     if (g_lastStatusText.find("caducada") != std::string::npos ||
                         g_lastStatusText.find("403") != std::string::npos ||
                         g_lastStatusText.find("401") != std::string::npos) {
-                        std::printf("[Main] Sesión de cuenta inválida o revocada. Reseteando a código QR...\n");
+                        luna::util::CrashLogger::log("[Main] Sesión de cuenta inválida o revocada. Reseteando a código QR...");
                         cbl.logout();
+                        catalogFetched = false;
                         appState = AppState::LoginCBL;
                     } else if (g_lastStatusText.find("not fresh") != std::string::npos ||
                                g_lastStatusText.find("re-authenticate") != std::string::npos) {
