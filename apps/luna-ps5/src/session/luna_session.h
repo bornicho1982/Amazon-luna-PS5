@@ -53,22 +53,30 @@ public:
 
 private:
     bool pollJob();
-    std::string resolveProfileToken(std::vector<std::pair<std::string, std::string>>& headers,
-                                    const std::string& customerId);
-    std::string resolvePlayToken(const std::string& gameId,
-                                 const std::vector<std::pair<std::string, std::string>>& headers);
+    bool fetchAppConfig(const std::string& accessToken);
+    bool resolveGameDetails(const std::string& gameId,
+                            const std::string& accessToken,
+                            const std::string& deviceSerial,
+                            std::string& outPlayToken,
+                            std::string& outBuildId,
+                            std::string& outProfileId);
+    bool loginPlayer(const std::string& profileId,
+                     const std::string& accessToken,
+                     const std::string& deviceSerial);
 
     SessionState m_state = SessionState::Idle;
     GameSessionInfo m_info;
     std::string m_accessToken;
+    std::string m_deviceSerial;
     std::string m_profileToken;
+    std::string m_tdi;
     std::string m_proxyHost = "https://proxy-prod.eu-west-1.tempo.digital.a2z.com";
     std::string m_statusMessage;
 
     int m_pollAttempts = 0;
     static constexpr int kMaxPollAttempts = 40;
     std::chrono::steady_clock::time_point m_lastPollTime;
-    int m_pollIntervalMs = 1200;
+    int m_pollIntervalMs = 1500;
 };
 
 } // namespace luna::session

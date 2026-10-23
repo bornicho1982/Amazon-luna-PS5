@@ -38,6 +38,13 @@ std::wstring toWString(const std::string& str) {
 }
 #endif
 
+static std::string trimString(const std::string& str) {
+    size_t start = str.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    size_t end = str.find_last_not_of(" \t\r\n");
+    return str.substr(start, end - start + 1);
+}
+
 } // namespace
 
 bool HttpClient::init() {
@@ -235,7 +242,11 @@ HttpResponse HttpClient::post(const std::string& url,
     sceHttpSetRecvTimeOut(reqId, 60000000);
 
     for (const auto& h : headers) {
-        sceHttpAddRequestHeader(reqId, h.first.c_str(), h.second.c_str(), SCE_HTTP_HEADER_OVERWRITE);
+        std::string k = trimString(h.first);
+        std::string v = trimString(h.second);
+        if (!k.empty() && !v.empty()) {
+            sceHttpAddRequestHeader(reqId, k.c_str(), v.c_str(), SCE_HTTP_HEADER_OVERWRITE);
+        }
     }
 
     int sendRes = sceHttpSendRequest(reqId, jsonBody.empty() ? nullptr : jsonBody.data(), jsonBody.size());
@@ -378,7 +389,11 @@ HttpResponse HttpClient::get(const std::string& url,
     sceHttpSetRecvTimeOut(reqId, 60000000);
 
     for (const auto& h : headers) {
-        sceHttpAddRequestHeader(reqId, h.first.c_str(), h.second.c_str(), SCE_HTTP_HEADER_OVERWRITE);
+        std::string k = trimString(h.first);
+        std::string v = trimString(h.second);
+        if (!k.empty() && !v.empty()) {
+            sceHttpAddRequestHeader(reqId, k.c_str(), v.c_str(), SCE_HTTP_HEADER_OVERWRITE);
+        }
     }
 
     int sendRes = sceHttpSendRequest(reqId, nullptr, 0);
