@@ -117,12 +117,25 @@ bool CblClient::init(const std::string& storageDir) {
     generateQrCode();
 
     if (loadAccountFile()) {
-        int64_t now = static_cast<int64_t>(std::time(nullptr));
-        if (!m_tokens.accessToken.empty() && m_tokens.expiresAt > (now + 60)) {
-            m_state = CblState::Authenticated;
-            std::printf("[CBL] Sesion activa cargada desde %s\n", m_storagePath.c_str());
-            return true;
+        if (!m_tokens.accessToken.empty()) {
+            int64_t now = static_cast<int64_t>(std::time(nullptr));
+            if (m_tokens.expiresAt > (now + 60)) {
+                m_state = CblState::Authenticated;
+                std::printf("[CBL] Sesion activa cargada desde %s (expira en %lld s)\n",
+                            m_storagePath.c_str(), static_cast<long long>(m_tokens.expiresAt - now));
+                return true;
+            }
         }
+        if (!m_tokens.refreshToken.empty()) {
+            std::printf("[CBL] Token posiblemente caducado, refrescando con refresh_token...\n");
+            if (refreshAccessToken()) {
+                m_state = CblState::Authenticated;
+                std::printf("[CBL] Sesion refrescada con exito desde %s\n", m_storagePath.c_str());
+                return true;
+            }
+        }
+        std::printf("[CBL] Sesion previa no valida ni renovable. Eliminando %s\n", m_storagePath.c_str());
+        std::remove(m_storagePath.c_str());
     }
 
     return requestCblCodePair();

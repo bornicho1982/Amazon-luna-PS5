@@ -20,9 +20,6 @@ extern "C"
     [[noreturn]] void exit(int status);
     int application_main(int argc, char **argv, char **envp) __asm__("main");
 
-    extern const char __eh_frame_start[];
-    void __register_frame(const void *fde);
-    void __deregister_frame(const void *fde);
     int scePthreadSetDefaultstacksize(std::size_t size) __attribute__((weak));
 
     extern Initializer __preinit_array_start[] __attribute__((weak));
@@ -61,7 +58,6 @@ extern "C" void _init()
 {
     if (scePthreadSetDefaultstacksize != nullptr)
         scePthreadSetDefaultstacksize(2 * 1024 * 1024);
-    __register_frame(__eh_frame_start);
     run_forward(__preinit_array_start, __preinit_array_end);
     run_forward(__init_array_start, __init_array_end);
 }
@@ -69,7 +65,6 @@ extern "C" void _init()
 extern "C" void _fini()
 {
     run_reverse(__fini_array_start, __fini_array_end);
-    __deregister_frame(__eh_frame_start);
 }
 
 extern "C" [[noreturn]] __attribute__((visibility("default"))) void

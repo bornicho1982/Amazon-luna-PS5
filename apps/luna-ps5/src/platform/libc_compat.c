@@ -24,27 +24,6 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-/* --- PS5 Native Kernel Thread Creation with 2 MB Default Stack --- */
-extern int scePthreadCreate(void *thread, const void *attr, void *(*entry)(void *), void *arg);
-extern int scePthreadAttrInit(void *attr);
-extern int scePthreadAttrSetstacksize(void *attr, size_t size);
-extern int scePthreadAttrDestroy(void *attr);
-extern int scePthreadSetDefaultstacksize(size_t size);
-
-int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-                   void *(*start_routine)(void *), void *arg) {
-    if (!attr) {
-        pthread_attr_t new_attr = NULL;
-        if (scePthreadAttrInit(&new_attr) == 0 && new_attr) {
-            scePthreadAttrSetstacksize(new_attr, 2 * 1024 * 1024); // 2 MB stack
-            int rc = scePthreadCreate(thread, new_attr, start_routine, arg);
-            scePthreadAttrDestroy(&new_attr);
-            return rc;
-        }
-    }
-    return scePthreadCreate(thread, attr, start_routine, arg);
-}
-
 /* usrsctp: constant-time comparison of authentication data. */
 int timingsafe_bcmp(const void *b1, const void *b2, size_t n) {
     const unsigned char *p1 = (const unsigned char*)b1, *p2 = (const unsigned char*)b2;

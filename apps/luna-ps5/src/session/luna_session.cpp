@@ -95,11 +95,12 @@ LunaSessionClient::~LunaSessionClient() = default;
 
 std::string LunaSessionClient::resolvePlayToken(const std::string& gameId,
                                                 const std::vector<std::pair<std::string, std::string>>& headers) {
-    // 1. Consultar pagina provision_game
     std::string pageUrl = m_proxyHost + "/getPage";
-    std::string payload1 = "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageType\":\"provision_game\",\"productStage\":\"Release\"}}";
+
+    // 1. Consultar pagina provision_game con pageUri
+    std::string payload1 = "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageUri\":\"provision_game\",\"productStage\":\"Release\"}}";
     auto resp1 = luna::net::HttpClient::post(pageUrl, payload1, headers);
-    std::printf("[LunaSession] getPage(provision_game, %s) -> HTTP %d (tam: %zu)\n",
+    std::printf("[LunaSession] getPage(provision_game uri, %s) -> HTTP %d (tam: %zu)\n",
                 gameId.c_str(), resp1.statusCode, resp1.body.size());
 
     if (resp1.ok()) {
@@ -110,14 +111,28 @@ std::string LunaSessionClient::resolvePlayToken(const std::string& gameId,
         }
     }
 
-    // 2. Fallback: Consultar pagina multistate_detail
-    std::string payload2 = "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageType\":\"multistate_detail\"}}";
+    // 2. Consultar con pageType: provision_game
+    std::string payload2 = "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageType\":\"provision_game\",\"productStage\":\"Release\"}}";
     auto resp2 = luna::net::HttpClient::post(pageUrl, payload2, headers);
-    std::printf("[LunaSession] getPage(multistate_detail, %s) -> HTTP %d (tam: %zu)\n",
+    std::printf("[LunaSession] getPage(provision_game type, %s) -> HTTP %d (tam: %zu)\n",
                 gameId.c_str(), resp2.statusCode, resp2.body.size());
 
     if (resp2.ok()) {
         std::string tok = extractJsonString(resp2.body, "playToken");
+        if (!tok.empty()) {
+            std::printf("[LunaSession] playToken detectado en provision_game type!\n");
+            return tok;
+        }
+    }
+
+    // 3. Fallback: Consultar pagina multistate_detail
+    std::string payload3 = "{\"pageContext\":{\"pageId\":\"" + gameId + "\",\"pageType\":\"multistate_detail\"}}";
+    auto resp3 = luna::net::HttpClient::post(pageUrl, payload3, headers);
+    std::printf("[LunaSession] getPage(multistate_detail, %s) -> HTTP %d (tam: %zu)\n",
+                gameId.c_str(), resp3.statusCode, resp3.body.size());
+
+    if (resp3.ok()) {
+        std::string tok = extractJsonString(resp3.body, "playToken");
         if (!tok.empty()) {
             std::printf("[LunaSession] playToken detectado en multistate_detail!\n");
             return tok;
@@ -144,39 +159,14 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
         }
     }
 
-    std::string profileId;
-
-    // 2. Solicitar pagina de navegacion inicial para identificar perfil
-    std::string pageUrl = m_proxyHost + "/getPage";
-    std::string pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"multistate_navigation\"}}";
-    auto pageResp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
-    std::printf("[LunaSession] getPage(multistate_navigation) -> HTTP %d (tam: %zu)\n",
-                pageResp.statusCode, pageResp.body.size());
-
-    if (pageResp.ok()) {
-        profileId = extractJsonString(pageResp.body, "profileId");
-        if (profileId.empty()) profileId = extractJsonString(pageResp.body, "directedProfileId");
-        if (profileId.empty()) profileId = extractJsonString(pageResp.body, "directedId");
-        if (profileId.empty()) profileId = extractJsonString(pageResp.body, "ownerProfileId");
-        if (profileId.empty()) profileId = extractJsonString(pageResp.body, "defaultProfileId");
-        if (!profileId.empty()) {
-            std::printf("[LunaSession] profileId encontrado en catalogo: %s\n", profileId.c_str());
-        }
-    }
-
-    // 3. Si no vino en getPage, usar customerId de la cuenta activa
-    if (profileId.empty() && !customerId.empty()) {
-        profileId = customerId;
-        std::printf("[LunaSession] Usando customerId como profileId: %s\n", profileId.c_str());
-    }
-
-    // 4. Con profileId obtenido, realizar playerLogin para obtener x-amz-profile-token
     std::string loginUrl = m_proxyHost + "/player/playerLogin";
-    if (!profileId.empty()) {
-        std::string loginPayload = "{\"profileId\":\"" + profileId + "\"}";
+
+    // 2. Intentar playerLogin con customerId
+    if (!customerId.empty()) {
+        std::string loginPayload = "{\"profileId\":\"" + customerId + "\"}";
         auto lResp = luna::net::HttpClient::post(loginUrl, loginPayload, headers);
         std::printf("[LunaSession] playerLogin(%s) -> HTTP %d, body: %s\n",
-                    profileId.c_str(), lResp.statusCode, lResp.body.c_str());
+                    customerId.c_str(), lResp.statusCode, lResp.body.c_str());
         if (lResp.ok()) {
             std::string tok = extractJsonString(lResp.body, "token");
             if (!tok.empty()) {
@@ -187,7 +177,23 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
         }
     }
 
-    // 5. Fallback: playerLogin con payload vacio para perfil por defecto
+    // 3. Intentar playerLogin con "default"
+    {
+        std::string loginPayload = "{\"profileId\":\"default\"}";
+        auto lResp = luna::net::HttpClient::post(loginUrl, loginPayload, headers);
+        std::printf("[LunaSession] playerLogin(default) -> HTTP %d, body: %s\n",
+                    lResp.statusCode, lResp.body.c_str());
+        if (lResp.ok()) {
+            std::string tok = extractJsonString(lResp.body, "token");
+            if (!tok.empty()) {
+                m_profileToken = tok;
+                std::printf("[LunaSession] Token de perfil Luna adquirido via playerLogin(default)!\n");
+                return m_profileToken;
+            }
+        }
+    }
+
+    // 4. Intentar playerLogin con payload vacio {}
     {
         auto lRespEmpty = luna::net::HttpClient::post(loginUrl, "{}", headers);
         std::printf("[LunaSession] playerLogin({}) -> HTTP %d, body: %s\n",
@@ -197,6 +203,22 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
             if (!tok.empty()) {
                 m_profileToken = tok;
                 std::printf("[LunaSession] Token de perfil adquirido via playerLogin({})!\n");
+                return m_profileToken;
+            }
+        }
+    }
+
+    // 5. Fallback: createPlayerFromProfile
+    if (!customerId.empty()) {
+        std::string createUrl = m_proxyHost + "/player/createPlayerFromProfile";
+        std::string createPayload = "{\"profileId\":\"" + customerId + "\"}";
+        auto cResp = luna::net::HttpClient::post(createUrl, createPayload, headers);
+        std::printf("[LunaSession] createPlayerFromProfile(%s) -> HTTP %d: %s\n",
+                    customerId.c_str(), cResp.statusCode, cResp.body.c_str());
+        if (cResp.ok()) {
+            std::string tok = extractJsonString(cResp.body, "token");
+            if (!tok.empty()) {
+                m_profileToken = tok;
                 return m_profileToken;
             }
         }
@@ -231,16 +253,48 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
         headers.push_back({"x-amz-profile-token", m_profileToken});
     }
 
-    // Probar primero con pagina "home"
     std::string pageUrl = m_proxyHost + "/getPage";
-    std::string pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"home\",\"productStage\":\"Release\"}}";
-    auto resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
 
+    // 1. Probar con pageUri: home
+    std::string pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageUri\":\"home\",\"productStage\":\"Release\"}}";
+    auto resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
+    std::printf("[LunaCatalog] getPage(pageUri: home) -> HTTP %d (tam: %zu)\n", resp.statusCode, resp.body.size());
+
+    // 2. Fallback con pageUri simple
     if (!resp.ok() || resp.body.empty() || resp.body.find("amzn1.luna.product.") == std::string::npos) {
-        // Fallback a multistate_navigation
+        pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageUri\":\"home\"}}";
+        resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
+        std::printf("[LunaCatalog] getPage(pageUri: home simple) -> HTTP %d (tam: %zu)\n", resp.statusCode, resp.body.size());
+    }
+
+    // 3. Fallback con pageType: home
+    if (!resp.ok() || resp.body.empty() || resp.body.find("amzn1.luna.product.") == std::string::npos) {
+        pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"home\",\"productStage\":\"Release\"}}";
+        resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
+        std::printf("[LunaCatalog] getPage(pageType: home) -> HTTP %d (tam: %zu)\n", resp.statusCode, resp.body.size());
+    }
+
+    // 4. Fallback con pageType: multistate_navigation
+    if (!resp.ok() || resp.body.empty() || resp.body.find("amzn1.luna.product.") == std::string::npos) {
         pagePayload = "{\"pageContext\":{\"pageId\":\"default\",\"pageType\":\"multistate_navigation\"}}";
         resp = luna::net::HttpClient::post(pageUrl, pagePayload, headers);
+        std::printf("[LunaCatalog] getPage(multistate_navigation) -> HTTP %d (tam: %zu)\n", resp.statusCode, resp.body.size());
     }
+
+    static const uint32_t kCardColors[] = {
+        0xFF0284C7, // Sky Blue
+        0xFFF59E0B, // Amber
+        0xFF10B981, // Emerald
+        0xFF06B6D4, // Cyan
+        0xFFEF4444, // Red
+        0xFF8B5CF6, // Purple
+        0xFFEC4899, // Pink
+        0xFF14B8A6, // Teal
+        0xFFF97316, // Orange
+        0xFF6366F1, // Indigo
+        0xFF84CC16, // Lime
+        0xFF3B82F6  // Blue
+    };
 
     if (resp.ok() && !resp.body.empty()) {
         const std::string& body = resp.body;
@@ -295,13 +349,15 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
                 tile.publisher = publisher.empty() ? "Amazon Luna" : publisher;
                 tile.synopsis = synopsis.empty() ? "Disponible para jugar al instante en Amazon Luna Cloud." : synopsis;
                 tile.category = category.empty() ? "LUNA+" : category;
-                tile.badgeColor = 0xFF3B82F6;
-                tile.heroColor = 0xFF7C3AED;
+                uint32_t col = kCardColors[result.size() % 12];
+                tile.badgeColor = col;
+                tile.heroColor = col;
                 tile.coverUrl = coverUrl;
 
                 // Descargar y decodificar portada en memoria para los primeros 6 juegos
                 if (result.size() < 6 && !tile.coverUrl.empty() && tile.coverUrl.rfind("http", 0) == 0) {
-                    luna::util::CrashLogger::log("[LunaCatalog] Descargando portada para '%s'...", tile.title.c_str());
+                    luna::util::CrashLogger::log("[LunaCatalog] Descargando portada para '%s' (%s)...",
+                                                 tile.title.c_str(), tile.coverUrl.c_str());
                     auto imgResp = luna::net::HttpClient::get(tile.coverUrl);
                     if (imgResp.ok() && !imgResp.body.empty()) {
                         int w = 0, h = 0;
@@ -323,7 +379,16 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
         }
     }
 
-    luna::util::CrashLogger::log("[LunaCatalog] Total de juegos dinamicos cargados: %zu", result.size());
+    if (!result.empty()) {
+        m_statusMessage = "Catálogo cargado: " + std::to_string(result.size()) + " juegos de Amazon Luna";
+    } else if (resp.ok()) {
+        m_statusMessage = "Catálogo vacío (HTTP " + std::to_string(resp.statusCode) + ")";
+    } else {
+        m_statusMessage = "Error catálogo Amazon (HTTP " + std::to_string(resp.statusCode) + ")";
+    }
+
+    luna::util::CrashLogger::log("[LunaCatalog] Total de juegos dinamicos cargados: %zu - %s",
+                                 result.size(), m_statusMessage.c_str());
     return result;
 }
 

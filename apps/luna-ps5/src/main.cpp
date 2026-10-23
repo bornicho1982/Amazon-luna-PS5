@@ -201,13 +201,24 @@ int main(int argc, char* argv[]) {
         }
     };
 
+    int selectedGameIndex = 0;
+
     auto loadCatalogIfAuthenticated = [&]() {
         if (cbl.isAuthenticated() && !catalogFetched) {
             luna::util::CrashLogger::log("[Main] Cargando catalogo dinamico desde Amazon Luna...");
+            cbl.refreshAccessToken();
             auto dyn = sessionClient.fetchCatalog(cbl.getAccessToken(), cbl.getCustomerId());
             if (!dyn.empty()) {
                 games = std::move(dyn);
+                selectedGameIndex = 0;
+                g_lastStatusText = "Catalogo cargado: " + std::to_string(games.size()) + " juegos de Amazon Luna";
                 luna::util::CrashLogger::log("[Main] ¡Catalogo dinamico actualizado con %zu juegos!", games.size());
+            } else {
+                g_lastStatusText = sessionClient.getStatusMessage();
+                if (g_lastStatusText.empty()) {
+                    g_lastStatusText = "Catalogo: no se recibieron juegos (usando juegos base)";
+                }
+                luna::util::CrashLogger::log("[Main] fetchCatalog status: %s", g_lastStatusText.c_str());
             }
             catalogFetched = true;
         }
@@ -217,7 +228,6 @@ int main(int argc, char* argv[]) {
         loadCatalogIfAuthenticated();
     }
 
-    int selectedGameIndex = 1; // Star Wars Outlaws destacado por defecto
     auto lastNavTime = std::chrono::steady_clock::now();
     uint32_t lastButtons = 0;
 
