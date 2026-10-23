@@ -42,6 +42,7 @@ tools/reference/
 tools/ps5-payload-sdk/
 
 # Environment, OS and IDE files
+scratch/
 .venv/
 node_modules/
 __pycache__/

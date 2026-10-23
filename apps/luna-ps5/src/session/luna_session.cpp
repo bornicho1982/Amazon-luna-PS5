@@ -228,7 +228,8 @@ std::string LunaSessionClient::resolveProfileToken(std::vector<std::pair<std::st
 }
 
 std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::string& accessToken,
-                                                                    const std::string& customerId) {
+                                                                    const std::string& customerId,
+                                                                    const std::string& deviceSerial) {
     std::vector<luna::display::GameTile> result;
     if (accessToken.empty()) return result;
 
@@ -236,17 +237,26 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
 
     std::vector<std::pair<std::string, std::string>> headers = {
         {"Content-Type", "application/json"},
+        {"Accept", "application/json"},
         {"x-amz-access-token", accessToken},
         {"x-amz-platform", "smart_tv_web"},
         {"x-amz-device-type", "A2U9WJDSJD7QG9"},
         {"x-amz-device-model", "LG TV"},
         {"x-amz-client-version", "1.0.37063.0"},
+        {"x-amz-react-version", "1.0.37063.0"},
         {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
         {"x-amz-country-of-residence", "ES"},
         {"x-amz-timezone", "Europe/Madrid"},
         {"x-amz-locale", "es-ES"},
-        {"Accept-Language", "es-ES"}
+        {"Accept-Language", "es-ES"},
+        {"Origin", "https://luna.amazon.es"},
+        {"Referer", "https://luna.amazon.es/"},
+        {"User-Agent", "Mozilla/5.0 (Web0S; SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 WebAppManager"}
     };
+
+    if (!deviceSerial.empty()) {
+        headers.push_back({"x-amz-device-serial-number", deviceSerial});
+    }
 
     resolveProfileToken(headers, customerId);
     if (!m_profileToken.empty()) {
@@ -381,10 +391,17 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
 
     if (!result.empty()) {
         m_statusMessage = "Catálogo cargado: " + std::to_string(result.size()) + " juegos de Amazon Luna";
-    } else if (resp.ok()) {
-        m_statusMessage = "Catálogo vacío (HTTP " + std::to_string(resp.statusCode) + ")";
+    } else if (resp.statusCode > 0) {
+        m_statusMessage = "Error Amazon /getPage (HTTP " + std::to_string(resp.statusCode) + ")";
+        if (resp.statusCode == 403) {
+            m_statusMessage += " [Sesion caducada o perfil no activo]";
+        } else if (resp.statusCode == 401) {
+            m_statusMessage += " [Token no autorizado]";
+        } else if (resp.statusCode == 400) {
+            m_statusMessage += " [Peticion invalida]";
+        }
     } else {
-        m_statusMessage = "Error catálogo Amazon (HTTP " + std::to_string(resp.statusCode) + ")";
+        m_statusMessage = "Error de red al conectar con Amazon Luna";
     }
 
     luna::util::CrashLogger::log("[LunaCatalog] Total de juegos dinamicos cargados: %zu - %s",

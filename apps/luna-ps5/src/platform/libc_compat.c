@@ -24,6 +24,64 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+/* Hardware entropy & random number generation for PS5 (Zen 2 RDRAND + RDTSC fallback) */
+static inline uint64_t ps5_hw_random64(void) {
+    uint64_t val = 0;
+    unsigned char ok = 0;
+    for (int i = 0; i < 10; ++i) {
+        __asm__ volatile ("rdrand %0; setc %1" : "=r"(val), "=qm"(ok));
+        if (ok) return val;
+    }
+    uint64_t tsc = 0;
+#if defined(__x86_64__) || defined(_M_X64)
+    tsc = __builtin_ia32_rdtsc();
+#endif
+    static uint64_t state = 0x853c49e6748fea9bULL;
+    state ^= (tsc + 0xda942042e4dd58b5ULL);
+    state ^= state >> 30;
+    state *= 0xbf58476d1ce4e5b9ULL;
+    state ^= state >> 27;
+    state *= 0x94d049bb133111ebULL;
+    state ^= state >> 31;
+    return state;
+}
+
+uint32_t arc4random(void) {
+    return (uint32_t)ps5_hw_random64();
+}
+
+void arc4random_buf(void *buf, size_t nbytes) {
+    uint8_t *p = (uint8_t *)buf;
+    while (nbytes >= 8) {
+        uint64_t r = ps5_hw_random64();
+        memcpy(p, &r, 8);
+        p += 8;
+        nbytes -= 8;
+    }
+    if (nbytes > 0) {
+        uint64_t r = ps5_hw_random64();
+        memcpy(p, &r, nbytes);
+    }
+}
+
+void arc4random_stir(void) {
+    /* Hardware RNG needs no seed */
+}
+
+uint32_t arc4random_uniform(uint32_t upper_bound) {
+    if (upper_bound < 2) return 0;
+    uint32_t min = -upper_bound % upper_bound;
+    for (;;) {
+        uint32_t r = arc4random();
+        if (r >= min) return r % upper_bound;
+    }
+}
+
+int isatty(int fd) {
+    (void)fd;
+    return 0;
+}
+
 /* usrsctp: constant-time comparison of authentication data. */
 int timingsafe_bcmp(const void *b1, const void *b2, size_t n) {
     const unsigned char *p1 = (const unsigned char*)b1, *p2 = (const unsigned char*)b2;

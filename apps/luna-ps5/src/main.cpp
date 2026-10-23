@@ -135,6 +135,7 @@ int main(int argc, char* argv[]) {
     // 9. Cliente de Sesion Amazon Tempo
     luna::session::LunaSessionClient sessionClient;
     std::string g_lastStatusText = "";
+    std::string g_catalogDiagnostic = "";
     bool catalogFetched = false;
 
     // 10. Catalogo oficial de juegos Amazon Luna (con portadas y detalles oficiales)
@@ -207,18 +208,20 @@ int main(int argc, char* argv[]) {
         if (cbl.isAuthenticated() && !catalogFetched) {
             luna::util::CrashLogger::log("[Main] Cargando catalogo dinamico desde Amazon Luna...");
             cbl.refreshAccessToken();
-            auto dyn = sessionClient.fetchCatalog(cbl.getAccessToken(), cbl.getCustomerId());
+            auto dyn = sessionClient.fetchCatalog(cbl.getAccessToken(), cbl.getCustomerId(), cbl.getDeviceSerial());
             if (!dyn.empty()) {
                 games = std::move(dyn);
                 selectedGameIndex = 0;
                 g_lastStatusText = "Catalogo cargado: " + std::to_string(games.size()) + " juegos de Amazon Luna";
+                g_catalogDiagnostic.clear();
                 luna::util::CrashLogger::log("[Main] ¡Catalogo dinamico actualizado con %zu juegos!", games.size());
             } else {
-                g_lastStatusText = sessionClient.getStatusMessage();
-                if (g_lastStatusText.empty()) {
-                    g_lastStatusText = "Catalogo: no se recibieron juegos (usando juegos base)";
+                g_catalogDiagnostic = sessionClient.getStatusMessage();
+                if (g_catalogDiagnostic.empty()) {
+                    g_catalogDiagnostic = "Aviso Catalogo: no se recibieron juegos (usando juegos base)";
                 }
-                luna::util::CrashLogger::log("[Main] fetchCatalog status: %s", g_lastStatusText.c_str());
+                g_lastStatusText = g_catalogDiagnostic;
+                luna::util::CrashLogger::log("[Main] fetchCatalog status: %s", g_catalogDiagnostic.c_str());
             }
             catalogFetched = true;
         }
@@ -291,7 +294,13 @@ int main(int argc, char* argv[]) {
                     }
                     if (moved) {
                         lastNavTime = now;
-                        g_lastStatusText.clear();
+                        // No borrar texto si contiene informacion de diagnostico o error
+                        if (g_lastStatusText.find("Error") == std::string::npos &&
+                            g_lastStatusText.find("Fallo") == std::string::npos &&
+                            g_lastStatusText.find("HTTP") == std::string::npos &&
+                            g_lastStatusText.find("Aviso") == std::string::npos) {
+                            g_lastStatusText.clear();
+                        }
                     }
                 }
 
@@ -324,12 +333,16 @@ int main(int argc, char* argv[]) {
                     luna::util::CrashLogger::log("[Main] Cerrando sesion de Amazon...");
                     cbl.logout();
                     catalogFetched = false;
+                    g_catalogDiagnostic.clear();
+                    g_lastStatusText.clear();
                     appState = AppState::LoginCBL;
                 }
 
                 std::string catalogStatus;
                 if (!g_lastStatusText.empty()) {
                     catalogStatus = g_lastStatusText;
+                } else if (!g_catalogDiagnostic.empty()) {
+                    catalogStatus = g_catalogDiagnostic;
                 } else if (padMgr.isConnected()) {
                     catalogStatus = "Listo para jugar | Pulsa (X) para iniciar " + games[selectedGameIndex].title;
                 } else {

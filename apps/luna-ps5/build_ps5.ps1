@@ -83,7 +83,7 @@ try {
     }
 
     Write-Host "[3/5] Enlazando imagen intermedia PIE y convirtiendo a modulo PS5 (0xFE10 + NIDs + ORBI)..." -ForegroundColor Cyan
-    $sdkStubs = Get-ChildItem "$sdkDir\target\lib\*.so" | ForEach-Object { $_.FullName }
+    $sdkStubs = Get-ChildItem "$sdkDir\target\lib\*.so" | Where-Object { $_.Name -notmatch "WebKit|mono|VSH" } | ForEach-Object { $_.FullName }
 
     $webrtcLibs = @(
         "$here\ps5\lib\libdatachannel-static.a",

@@ -35,7 +35,8 @@ public:
     ~LunaSessionClient();
 
     std::vector<luna::display::GameTile> fetchCatalog(const std::string& accessToken,
-                                                      const std::string& customerId = "");
+                                                      const std::string& customerId = "",
+                                                      const std::string& deviceSerial = "");
 
     bool startSession(const std::string& gameId,
                       const std::string& accessToken,
