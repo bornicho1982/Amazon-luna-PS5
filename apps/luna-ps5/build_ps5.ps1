@@ -149,9 +149,15 @@ try {
     Copy-Item "ps5\sce_sys\param.json" "$appRoot\sce_sys\param.json" -Force
     Copy-Item "ps5\sce_sys\icon0.png" "$appRoot\sce_sys\icon0.png" -Force
 
-    Write-Host "[5/5] Verificando integridad FSELF de los modulos..." -ForegroundColor Cyan
+    Write-Host "[5/5] Verificando integridad FSELF de los modulos y auditoria de simbolos..." -ForegroundColor Cyan
     & $toolExe self --inspect --file "$appRoot\eboot.bin"
     & $toolExe self --inspect --file "$appRoot\sce_module\libc.prx"
+
+    & python "$here\..\..\scratch\check_syscalls.py"
+    if ($LASTEXITCODE -ne 0) { throw "Fallo en la verificacion de syscalls (0f 05)" }
+
+    & python "$here\..\..\scratch\verify_all_imports.py"
+    if ($LASTEXITCODE -ne 0) { throw "Fallo en la auditoria estricta de imports dinamicos" }
 
     Write-Host "`nPaquete nativo PS5 generado con exito en: $(Resolve-Path $appRoot)" -ForegroundColor Green
 }

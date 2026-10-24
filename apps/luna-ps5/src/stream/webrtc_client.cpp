@@ -17,8 +17,8 @@ constexpr uint8_t kVideoPayloadType = 108; // Amazon Luna H.264
 constexpr uint8_t kAudioPayloadType = 111; // Opus 48kHz stereo
 
 void initRtcLogging() {
-    static std::once_flag s_once;
-    std::call_once(s_once, [] {
+    static std::atomic<bool> s_inited{false};
+    if (!s_inited.exchange(true)) {
         rtc::InitLogger(rtc::LogLevel::Warning, [](rtc::LogLevel level, std::string message) {
             if (level <= rtc::LogLevel::Error) {
                 luna::util::CrashLogger::log("[libdatachannel ERROR] %s", message.c_str());
@@ -26,7 +26,7 @@ void initRtcLogging() {
                 luna::util::CrashLogger::log("[libdatachannel WARN] %s", message.c_str());
             }
         });
-    });
+    }
 }
 
 } // namespace
