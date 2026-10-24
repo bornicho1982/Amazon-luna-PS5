@@ -65,6 +65,11 @@ public:
     bool isConnected() const { return isConnected_.load(); }
     const StreamStats& getStats() const { return stats_; }
 
+    std::string getIceStateStr() const { return iceStateStr_; }
+    std::string getPeerStateStr() const { return peerStateStr_; }
+    size_t getLocalCandidateCount() const { return localCandidateCount_.load(); }
+    size_t getRemoteCandidateCount() const { return remoteCandidateCount_.load(); }
+
     void processVideoRtp(const uint8_t* pkt, size_t len);
     void processAudioRtp(const uint8_t* pkt, size_t len);
 
@@ -84,6 +89,13 @@ private:
     std::atomic<bool> isGatheringComplete_{false};
     std::mutex gatheringMutex_;
     std::condition_variable gatheringCv_;
+
+    std::string iceStateStr_ = "New";
+    std::string peerStateStr_ = "New";
+    std::atomic<size_t> localCandidateCount_{0};
+    std::atomic<size_t> remoteCandidateCount_{0};
+    std::vector<std::string> localCandidatesList_;
+    std::mutex candidateMutex_;
 
     std::mutex txMutex_;
     std::vector<uint8_t> currentAccessUnit_;

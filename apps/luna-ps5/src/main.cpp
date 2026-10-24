@@ -591,10 +591,15 @@ int main(int argc, char* argv[]) {
                                            "   |   RTP Video: " + std::to_string(stats.rtpPacketsReceived) +
                                            "   |   Audio: " + std::to_string(stats.audioFramesReceived) +
                                            "   |   Frames: " + std::to_string(stats.videoFramesAssembled);
+                    std::string iceStatsStr = "ICE: " + rtcClient.getIceStateStr() +
+                                              "   |   PC: " + rtcClient.getPeerStateStr() +
+                                              "   |   Candidatos Locales: " + std::to_string(rtcClient.getLocalCandidateCount()) +
+                                              "   |   Remotos: " + std::to_string(rtcClient.getRemoteCandidateCount());
                     display.drawStreamingStatusScreen(
                         curGame,
                         sessionClient.getStatusMessage().empty() ? "Conectando WebRTC a Amazon Luna Cloud..." : sessionClient.getStatusMessage(),
                         statsStr,
+                        iceStatsStr,
                         frameCount
                     );
                 }

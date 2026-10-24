@@ -59,17 +59,29 @@ void WebRtcClient::setupPeerConnection() {
 
     pc_ = std::make_shared<rtc::PeerConnection>(rtcConfig);
 
+    pc_->onLocalCandidate([this](rtc::Candidate c) {
+        std::string candStr = std::string(c);
+        {
+            std::lock_guard<std::mutex> lock(candidateMutex_);
+            localCandidatesList_.push_back(candStr);
+            localCandidateCount_ = localCandidatesList_.size();
+        }
+        luna::util::CrashLogger::log("[WebRTC] Candidato ICE local detectado: %s (mid=%s)",
+                                     candStr.c_str(), c.mid().c_str());
+    });
+
     pc_->onGatheringStateChange([this](rtc::PeerConnection::GatheringState state) {
         luna::util::CrashLogger::log("[WebRTC] Gathering state: %d", static_cast<int>(state));
         if (state == rtc::PeerConnection::GatheringState::Complete) {
             std::lock_guard<std::mutex> lock(gatheringMutex_);
             isGatheringComplete_ = true;
             gatheringCv_.notify_all();
-            luna::util::CrashLogger::log("[WebRTC] Recolección de candidatos ICE locales completada.");
+            luna::util::CrashLogger::log("[WebRTC] Recolección de candidatos ICE locales completada (total: %zu).",
+                                         localCandidateCount_.load());
         }
     });
 
-    pc_->onIceStateChange([](rtc::PeerConnection::IceState state) {
+    pc_->onIceStateChange([this](rtc::PeerConnection::IceState state) {
         const char* stateStr = "Unknown";
         switch (state) {
             case rtc::PeerConnection::IceState::New: stateStr = "New"; break;
@@ -80,11 +92,22 @@ void WebRtcClient::setupPeerConnection() {
             case rtc::PeerConnection::IceState::Disconnected: stateStr = "Disconnected"; break;
             case rtc::PeerConnection::IceState::Closed: stateStr = "Closed"; break;
         }
+        iceStateStr_ = stateStr;
         luna::util::CrashLogger::log("[WebRTC] ICE state transition: %s (%d)", stateStr, static_cast<int>(state));
     });
 
     pc_->onStateChange([this](rtc::PeerConnection::State state) {
-        luna::util::CrashLogger::log("[WebRTC] PeerConnection estado: %d", static_cast<int>(state));
+        const char* stStr = "Unknown";
+        switch (state) {
+            case rtc::PeerConnection::State::New: stStr = "New"; break;
+            case rtc::PeerConnection::State::Connecting: stStr = "Connecting"; break;
+            case rtc::PeerConnection::State::Connected: stStr = "Connected"; break;
+            case rtc::PeerConnection::State::Disconnected: stStr = "Disconnected"; break;
+            case rtc::PeerConnection::State::Failed: stStr = "Failed"; break;
+            case rtc::PeerConnection::State::Closed: stStr = "Closed"; break;
+        }
+        peerStateStr_ = stStr;
+        luna::util::CrashLogger::log("[WebRTC] PeerConnection estado: %s (%d)", stStr, static_cast<int>(state));
         if (state == rtc::PeerConnection::State::Connected) {
             isConnected_ = true;
             luna::util::CrashLogger::log("[WebRTC] ¡Conexión WebRTC DTLS/SRTP establecida con éxito con Amazon Luna!");
@@ -163,7 +186,7 @@ std::string WebRtcClient::generateSdpOffer() {
 
         // Esperar a que ICE gathering complete para incluir candidatos locales
         std::unique_lock<std::mutex> lock(gatheringMutex_);
-        gatheringCv_.wait_for(lock, std::chrono::milliseconds(1500), [this]() {
+        gatheringCv_.wait_for(lock, std::chrono::milliseconds(2500), [this]() {
             return isGatheringComplete_.load();
         });
 
@@ -175,7 +198,9 @@ std::string WebRtcClient::generateSdpOffer() {
 
         std::string sdp = std::string(*localDesc);
         luna::util::CrashLogger::logStep(3, "Local SDP gathered and offer created.");
-        luna::util::CrashLogger::log("[WebRTC] Oferta SDP generada con éxito con huella DTLS real (%zu bytes).", sdp.size());
+        luna::util::CrashLogger::log("[WebRTC] Oferta SDP generada (%zu bytes, %zu candidatos locales):",
+                                     sdp.size(), localCandidateCount_.load());
+        luna::util::CrashLogger::log("%s", sdp.c_str());
         return sdp;
     } catch (const std::exception& e) {
         luna::util::CrashLogger::log("[WebRTC CRITICAL] Excepción en generateSdpOffer: %s", e.what());
@@ -194,32 +219,24 @@ bool WebRtcClient::applySdpAnswer(const std::string& sdpAnswer) {
 
     try {
         luna::util::CrashLogger::logStep(6, "Applying SDP Answer & ICE candidates...");
+        luna::util::CrashLogger::log("[WebRTC] SDP Answer recibido (%zu bytes):", sdpAnswer.size());
+        luna::util::CrashLogger::log("%s", sdpAnswer.c_str());
+
         rtc::Description answer(sdpAnswer, rtc::Description::Type::Answer);
         pc_->setRemoteDescription(answer);
-        luna::util::CrashLogger::log("[WebRTC] SDP Answer aplicado con éxito en libdatachannel (%zu bytes).", sdpAnswer.size());
+        luna::util::CrashLogger::log("[WebRTC] SDP Answer aplicado con éxito en libdatachannel.");
 
-        // Extraer e inyectar candidatos remotos de sdpAnswer si están presentes
-        std::istringstream iss(sdpAnswer);
-        std::string line;
-        while (std::getline(iss, line)) {
-            while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) {
-                line.pop_back();
-            }
-            if (line.rfind("a=candidate:", 0) == 0) {
-                std::string cand = line.substr(2); // quitar "a="
-                addRemoteIceCandidate(cand, "0");
-                addRemoteIceCandidate(cand, "1");
-                addRemoteIceCandidate(cand, "2");
-            }
-        }
-
-        // Si ya tenemos el endpoint remoto configurado, inyectar candidato directo
-        if (!config_.remoteHost.empty() && config_.remoteUdpPort > 0) {
+        bool hasCandidates = (sdpAnswer.find("a=candidate:") != std::string::npos);
+        if (!hasCandidates && !config_.remoteHost.empty() && config_.remoteUdpPort > 0) {
+            luna::util::CrashLogger::log("[WebRTC WARN] sdpAnswer no contiene a=candidate:, inyectando fallback...");
             std::string directCand = "candidate:1 1 UDP 2122260223 " + config_.remoteHost + " " +
                                      std::to_string(config_.remoteUdpPort) + " typ host";
             addRemoteIceCandidate(directCand, "0");
             addRemoteIceCandidate(directCand, "1");
             addRemoteIceCandidate(directCand, "2");
+        } else {
+            luna::util::CrashLogger::log("[WebRTC] sdpAnswer contiene candidatos remotos; procesados nativamente por libdatachannel.");
+            remoteCandidateCount_ = 1;
         }
 
         return true;
@@ -235,13 +252,7 @@ bool WebRtcClient::applySdpAnswer(const std::string& sdpAnswer) {
 void WebRtcClient::setRemoteEndpoint(const std::string& host, int port) {
     config_.remoteHost = host;
     config_.remoteUdpPort = port;
-    std::printf("[WebRTC] Endpoint remoto configurado: %s:%d\n", host.c_str(), port);
-    if (pc_ && !host.empty() && port > 0) {
-        std::string cand = "candidate:1 1 UDP 2122260223 " + host + " " + std::to_string(port) + " typ host";
-        addRemoteIceCandidate(cand, "0");
-        addRemoteIceCandidate(cand, "1");
-        addRemoteIceCandidate(cand, "2");
-    }
+    luna::util::CrashLogger::log("[WebRTC] Endpoint remoto configurado: %s:%d", host.c_str(), port);
 }
 
 void WebRtcClient::setRemoteIceCredentials(const std::string& ufrag, const std::string& pwd) {
@@ -257,9 +268,10 @@ void WebRtcClient::addRemoteIceCandidate(const std::string& candidateLine, const
             cand.pop_back();
         }
         pc_->addRemoteCandidate(rtc::Candidate(cand, mid));
+        remoteCandidateCount_++;
         luna::util::CrashLogger::log("[WebRTC] Candidato ICE remoto añadido: %s (mid=%s)", cand.c_str(), mid.c_str());
     } catch (const std::exception& e) {
-        luna::util::CrashLogger::log("[WebRTC ERROR] Error añadiendo candidato ICE remoto: %s", e.what());
+        luna::util::CrashLogger::log("[WebRTC WARN] Error añadiendo candidato ICE remoto: %s", e.what());
     }
 }
 
@@ -270,6 +282,14 @@ bool WebRtcClient::start() {
 
 void WebRtcClient::stop() {
     isConnected_ = false;
+    iceStateStr_ = "Closed";
+    peerStateStr_ = "Closed";
+    localCandidateCount_ = 0;
+    remoteCandidateCount_ = 0;
+    {
+        std::lock_guard<std::mutex> lock(candidateMutex_);
+        localCandidatesList_.clear();
+    }
     if (pc_) {
         pc_->close();
         pc_.reset();

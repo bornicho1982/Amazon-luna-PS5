@@ -1030,6 +1030,7 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
 void DisplayManager::drawStreamingStatusScreen(const GameTile& game,
                                                const std::string& statusText,
                                                const std::string& statsText,
+                                               const std::string& iceStatsText,
                                                uint64_t frameCount) {
     if (!isReady_ || !mappedMemory_) return;
 
@@ -1103,9 +1104,10 @@ void DisplayManager::drawStreamingStatusScreen(const GameTile& game,
     drawText(textX, textY + 225, 4, statusText, 0xFFFDE68A);
 
     // Metricas tecnicas WebRTC / Hardware
-    fillRect(textX, textY + 285, 800, 70, 0xFF17112C);
-    drawText(textX + 20, textY + 300, 2, statsText, 0xFF38BDF8);
-    drawText(textX + 20, textY + 330, 2, "Hardware: libSceVideodec2 (H.264 High 1080p60) + SceAudioOut (Opus 48kHz)", 0xFF34D399);
+    fillRect(textX, textY + 275, 800, 95, 0xFF17112C);
+    drawText(textX + 20, textY + 287, 2, statsText, 0xFF38BDF8);
+    drawText(textX + 20, textY + 315, 2, iceStatsText, 0xFFFCD34D);
+    drawText(textX + 20, textY + 343, 2, "Hardware: libSceVideodec2 (H.264 High 1080p60) + SceAudioOut (Opus 48kHz)", 0xFF34D399);
 
     // 4. Barra inferior de control
     fillRect(0, 980, 1920, 100, 0xFF0D0A1C);

@@ -22,15 +22,26 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <net/if.h>
+#include <ifaddrs.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
 
-int fcntl(int fd, int cmd, ...);
+int _ioctl(int fd, unsigned long request, ...);
+int socket(int domain, int type, int protocol);
+int connect(int fd, const struct sockaddr *addr, socklen_t len);
+int getsockname(int fd, struct sockaddr *addr, socklen_t *len);
+int close(int fd);
+
+#define SCE_NET_SO_NBIO 0x1200
 
 /* Socket ioctl wrapper for PS5 FreeBSD user-space.
- * Overrides libkernel/generic ioctl to avoid sandbox EACCES (errno 13)
- * on non-blocking socket configuration in libjuice (udp.c). */
+ * On PS5 Orbis kernel, non-blocking mode on sockets is configured exclusively
+ * via setsockopt(fd, SOL_SOCKET, 0x1200 (SO_NBIO), &on, sizeof(on)).
+ * Standard BSD ioctl(FIONBIO) and fcntl(O_NONBLOCK) return EACCES (errno 13).
+ * Other ioctls are forwarded directly to _ioctl. */
 int ioctl(int fd, unsigned long request, ...) {
     va_list ap;
     va_start(ap, request);
@@ -39,16 +50,86 @@ int ioctl(int fd, unsigned long request, ...) {
 
     /* FIONBIO (0x8004667e on FreeBSD, 0x5421 on Linux) */
     if (request == FIONBIO || (request & 0xFFFF) == 0x667e || request == 0x5421) {
-        int nbio = arg ? *(int *)arg : 1;
-        int flags = fcntl(fd, F_GETFL, 0);
-        if (flags >= 0) {
-            flags = nbio ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
-            fcntl(fd, F_SETFL, flags);
+        int on = arg ? (*(const int *)arg ? 1 : 0) : 1;
+        if (setsockopt(fd, SOL_SOCKET, SCE_NET_SO_NBIO, &on, (socklen_t)sizeof(on)) == 0) {
+            return 0;
         }
-        return 0;
     }
 
+    return _ioctl(fd, request, arg);
+}
+
+/* Local network interface discovery for libjuice / libdatachannel on PS5.
+ * Probes the active outbound network interface and provides a valid
+ * struct ifaddrs entry with the console's LAN IP address. */
+int getifaddrs(struct ifaddrs **ifap) {
+    if (!ifap) return -1;
+    *ifap = NULL;
+
+    struct in_addr local_in;
+    memset(&local_in, 0, sizeof(local_in));
+
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s >= 0) {
+        struct sockaddr_in dst;
+        memset(&dst, 0, sizeof(dst));
+        dst.sin_family = AF_INET;
+        dst.sin_port = htons(80);
+        inet_pton(AF_INET, "8.8.8.8", &dst.sin_addr);
+        if (connect(s, (struct sockaddr *)&dst, sizeof(dst)) == 0) {
+            struct sockaddr_in local;
+            socklen_t len = sizeof(local);
+            if (getsockname(s, (struct sockaddr *)&local, &len) == 0) {
+                local_in = local.sin_addr;
+            }
+        }
+        close(s);
+    }
+
+    /* Fallback if unconnected: default to PS5 LAN IP */
+    if (local_in.s_addr == 0 || local_in.s_addr == htonl(INADDR_LOOPBACK)) {
+        inet_pton(AF_INET, "192.168.18.21", &local_in);
+    }
+
+    struct ifaddrs *ifa = (struct ifaddrs *)calloc(1, sizeof(struct ifaddrs));
+    if (!ifa) return -1;
+
+    ifa->ifa_name = strdup("eth0");
+    ifa->ifa_flags = IFF_UP | IFF_BROADCAST | IFF_RUNNING;
+
+    struct sockaddr_in *sa_addr = (struct sockaddr_in *)calloc(1, sizeof(struct sockaddr_in));
+    sa_addr->sin_family = AF_INET;
+    sa_addr->sin_port = 0;
+    sa_addr->sin_addr = local_in;
+    ifa->ifa_addr = (struct sockaddr *)sa_addr;
+
+    struct sockaddr_in *sa_mask = (struct sockaddr_in *)calloc(1, sizeof(struct sockaddr_in));
+    sa_mask->sin_family = AF_INET;
+    sa_mask->sin_port = 0;
+    inet_pton(AF_INET, "255.255.255.0", &sa_mask->sin_addr);
+    ifa->ifa_netmask = (struct sockaddr *)sa_mask;
+
+    struct sockaddr_in *sa_broad = (struct sockaddr_in *)calloc(1, sizeof(struct sockaddr_in));
+    sa_broad->sin_family = AF_INET;
+    sa_broad->sin_port = 0;
+    sa_broad->sin_addr.s_addr = local_in.s_addr | ~sa_mask->sin_addr.s_addr;
+    ifa->ifa_dstaddr = (struct sockaddr *)sa_broad;
+
+    ifa->ifa_next = NULL;
+    *ifap = ifa;
     return 0;
+}
+
+void freeifaddrs(struct ifaddrs *ifa) {
+    while (ifa) {
+        struct ifaddrs *next = ifa->ifa_next;
+        if (ifa->ifa_name) free(ifa->ifa_name);
+        if (ifa->ifa_addr) free(ifa->ifa_addr);
+        if (ifa->ifa_netmask) free(ifa->ifa_netmask);
+        if (ifa->ifa_dstaddr) free(ifa->ifa_dstaddr);
+        free(ifa);
+        ifa = next;
+    }
 }
 
 /* Hardware entropy & random number generation for PS5 (Zen 2 RDRAND + RDTSC fallback) */
@@ -124,9 +205,9 @@ int __cxa_thread_atexit_impl(void (*dtor)(void *), void *obj, void *dso_symbol) 
 }
 
 /* plog (libdatachannel logger): returns current thread id via legal pthread_self() */
-long syscall(long number, ...) {
+int syscall(int number, ...) {
     (void)number;
-    return (long)(uintptr_t)pthread_self();
+    return (int)(uintptr_t)pthread_self();
 }
 
 /* emulated TLS resolver for clang -femulated-tls */

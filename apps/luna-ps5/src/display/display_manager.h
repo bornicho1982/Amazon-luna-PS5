@@ -62,6 +62,7 @@ public:
     void drawStreamingStatusScreen(const GameTile& game,
                                    const std::string& statusText,
                                    const std::string& statsText,
+                                   const std::string& iceStatsText,
                                    uint64_t frameCount);
 
     void drawDashboard(const std::string& consoleIp,
