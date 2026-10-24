@@ -26,6 +26,7 @@
 #include "audio/audio_manager.h"
 #include "media/media_decoder.h"
 #include "util/crash_logger.h"
+#include "util/image_loader.h"
 
 namespace {
 std::atomic<bool> g_running{true};
@@ -37,6 +38,7 @@ void signalHandler(int) {
 enum class AppState {
     LoginCBL,
     Catalog,
+    GameDetail,
     StartingSession,
     Streaming
 };
@@ -278,6 +280,16 @@ int main(int argc, char* argv[]) {
             }
 
             case AppState::Catalog: {
+                // Navegacion rapida por paginas con L1 / R1
+                if (pressedNow & luna::input::PAD_L1) {
+                    selectedGameIndex = std::max(0, selectedGameIndex - 5);
+                    lastNavTime = now;
+                }
+                if (pressedNow & luna::input::PAD_R1) {
+                    selectedGameIndex = std::min(static_cast<int>(games.size()) - 1, selectedGameIndex + 5);
+                    lastNavTime = now;
+                }
+
                 // Navegacion horizontal fluida por carrusel de juegos
                 if (navElapsedMs > 160) {
                     bool moved = false;
@@ -304,30 +316,34 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Cruz (X) -> Iniciar Juego
-                if (pressedNow & luna::input::PAD_CROSS) {
-                    std::string targetGameId = games[selectedGameIndex].id;
-                    if (targetGameId.find('-') == std::string::npos) {
-                        targetGameId = "amzn1.luna.product.bef8572c-d814-4c91-b8e7-980d5c84ad16"; // Fortnite Fallback con UUID valido
+                // Carga progresiva bajo demanda de portadas visibles (max 1 por frame a 60 FPS)
+                if (!games.empty()) {
+                    int visibleStart = std::max(0, selectedGameIndex - 2);
+                    int visibleEnd = std::min(static_cast<int>(games.size()), selectedGameIndex + 5);
+                    for (int vi = visibleStart; vi < visibleEnd; ++vi) {
+                        if (games[vi].coverRgba.empty() && !games[vi].coverUrl.empty() && games[vi].coverUrl.rfind("http", 0) == 0) {
+                            auto imgResp = luna::net::HttpClient::get(games[vi].coverUrl);
+                            if (imgResp.ok() && !imgResp.body.empty()) {
+                                int w = 0, h = 0;
+                                if (luna::util::decodeImageRgba(reinterpret_cast<const uint8_t*>(imgResp.body.data()),
+                                                                imgResp.body.size(), games[vi].coverRgba, w, h)) {
+                                    games[vi].coverWidth = w;
+                                    games[vi].coverHeight = h;
+                                }
+                            }
+                            break; // 1 sola descarga por tick para no congelar el bucle a 60 FPS
+                        }
                     }
-                    luna::util::CrashLogger::log("[Main] Juego seleccionado: %s (%s). Iniciando stream WebRTC...",
-                                                 games[selectedGameIndex].title.c_str(), targetGameId.c_str());
+                }
 
-                    // Refrescar access token antes de solicitar juego para garantizar validez (freshness)
-                    cbl.refreshAccessToken();
-
-                    std::string sdpOffer = rtcClient.generateSdpOffer();
-                    bool ok = sessionClient.startSession(targetGameId, cbl.getAccessToken(), sdpOffer,
-                                                         cbl.getDeviceSerial(), cbl.getCustomerId());
-                    if (ok) {
-                        g_lastStatusText = "Solicitando sesion de juego a Amazon Tempo...";
-                        g_catalogDiagnostic.clear();
-                        appState = AppState::StartingSession;
-                    } else {
-                        g_lastStatusText = sessionClient.getStatusMessage();
-                        g_catalogDiagnostic = g_lastStatusText;
-                        luna::util::CrashLogger::logStep(4, ("Fallo: " + g_lastStatusText).c_str());
-                        luna::util::CrashLogger::log("[Main ERROR] startSession fallo: %s", g_lastStatusText.c_str());
+                // Cruz (X) -> Abrir Segunda Pantalla (Ficha de Detalle del Juego)
+                if (pressedNow & luna::input::PAD_CROSS) {
+                    if (selectedGameIndex >= 0 && selectedGameIndex < static_cast<int>(games.size())) {
+                        luna::util::CrashLogger::log("[Main] Abriendo ficha de detalles para: %s (%s)",
+                                                     games[selectedGameIndex].title.c_str(), games[selectedGameIndex].id.c_str());
+                        sessionClient.preloadGameDetails(games[selectedGameIndex], cbl.getAccessToken(), cbl.getDeviceSerial());
+                        appState = AppState::GameDetail;
+                        break;
                     }
                 }
 
@@ -347,7 +363,7 @@ int main(int argc, char* argv[]) {
                 } else if (!g_catalogDiagnostic.empty()) {
                     catalogStatus = g_catalogDiagnostic;
                 } else if (padMgr.isConnected()) {
-                    catalogStatus = "Listo para jugar | Pulsa (X) para iniciar " + games[selectedGameIndex].title;
+                    catalogStatus = "Listo para jugar | Pulsa (X) para ver detalles de " + games[selectedGameIndex].title;
                 } else {
                     catalogStatus = "Buscando mando DualSense... (pulsa el boton PS si no responde)";
                 }
@@ -357,6 +373,58 @@ int main(int argc, char* argv[]) {
                     selectedGameIndex,
                     cbl.getCustomerId(),
                     catalogStatus,
+                    frameCount
+                );
+                break;
+            }
+
+            case AppState::GameDetail: {
+                if (selectedGameIndex < 0 || selectedGameIndex >= static_cast<int>(games.size())) {
+                    appState = AppState::Catalog;
+                    break;
+                }
+
+                auto& curGame = games[selectedGameIndex];
+
+                // Circulo (O) o Triangulo -> Volver al Catalogo
+                if ((pressedNow & luna::input::PAD_CIRCLE) || (pressedNow & luna::input::PAD_TRIANGLE)) {
+                    luna::util::CrashLogger::log("[Main] Regresando al catalogo desde ficha de detalles");
+                    appState = AppState::Catalog;
+                    break;
+                }
+
+                // Cruz (X) -> Iniciar Juego en Cloud
+                if (pressedNow & luna::input::PAD_CROSS) {
+                    std::string targetGameId = curGame.id;
+                    if (targetGameId.find('-') == std::string::npos) {
+                        targetGameId = "amzn1.luna.product.bef8572c-d814-4c91-b8e7-980d5c84ad16";
+                    }
+                    luna::util::CrashLogger::log("[Main] Iniciando sesion de juego Cloud para: %s (%s)...",
+                                                 curGame.title.c_str(), targetGameId.c_str());
+
+                    cbl.refreshAccessToken();
+
+                    std::string sdpOffer = rtcClient.generateSdpOffer();
+                    bool ok = sessionClient.startSession(targetGameId, cbl.getAccessToken(), sdpOffer,
+                                                         cbl.getDeviceSerial(), cbl.getCustomerId());
+                    if (ok) {
+                        g_lastStatusText = "Solicitando sesion de juego a Amazon Tempo...";
+                        g_catalogDiagnostic.clear();
+                        appState = AppState::StartingSession;
+                    } else {
+                        g_lastStatusText = sessionClient.getStatusMessage();
+                        g_catalogDiagnostic = g_lastStatusText;
+                        luna::util::CrashLogger::logStep(4, ("Fallo: " + g_lastStatusText).c_str());
+                        luna::util::CrashLogger::log("[Main ERROR] startSession fallo: %s", g_lastStatusText.c_str());
+                    }
+                    break;
+                }
+
+                display.drawGameDetailScreen(
+                    curGame,
+                    cbl.getCustomerId(),
+                    g_lastStatusText.empty() ? ("Listo para jugar | Pulsa (X) para iniciar sesion Cloud") : g_lastStatusText,
+                    false,
                     frameCount
                 );
                 break;

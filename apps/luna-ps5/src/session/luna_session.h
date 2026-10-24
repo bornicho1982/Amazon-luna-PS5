@@ -38,6 +38,10 @@ public:
                                                       const std::string& customerId = "",
                                                       const std::string& deviceSerial = "");
 
+    bool preloadGameDetails(luna::display::GameTile& tile,
+                            const std::string& accessToken,
+                            const std::string& deviceSerial = "");
+
     bool startSession(const std::string& gameId,
                       const std::string& accessToken,
                       const std::string& sdpOffer,

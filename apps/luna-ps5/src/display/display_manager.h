@@ -21,6 +21,8 @@ struct GameTile {
     std::vector<uint8_t> coverRgba;
     int coverWidth = 0;
     int coverHeight = 0;
+    std::string pegiRating = "PEGI 3";
+    bool detailsLoaded = false;
 };
 
 class DisplayManager {
@@ -49,6 +51,12 @@ public:
                            const std::string& customerId,
                            const std::string& statusText,
                            uint64_t frameCount);
+
+    void drawGameDetailScreen(const GameTile& game,
+                              const std::string& customerId,
+                              const std::string& statusText,
+                              bool isConnecting,
+                              uint64_t frameCount);
 
     void drawDashboard(const std::string& consoleIp,
                        int authPort,

@@ -715,33 +715,49 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
         }
     }
 
-    // 4. Seccion de Carrusel: "Las mejores novedades en juegos"
-    drawText(60, 520, 3, "Las mejores novedades en juegos", 0xFFFFFFFF);
-    drawText(60, 552, 1, "Juegos incluidos y disponibles al instante en tu suscripcion", 0xFF94A3B8);
+    // 4. Seccion de Carrusel Dinamico con desplazamiento suave (todos los juegos de Amazon Luna)
+    std::string catHeading = "Catalogo de Juegos (" + std::to_string(games.size()) + " disponibles)";
+    drawText(60, 520, 3, catHeading, 0xFFFFFFFF);
+
+    std::string pageInfo = "Juego " + std::to_string(selectedIndex + 1) + " de " + std::to_string(games.size()) +
+                           "  |  [L1 / R1] Desplazar 5 juegos  |  Pulsa (X) para ver detalles y jugar";
+    drawText(60, 552, 1, pageInfo, 0xFF94A3B8);
 
     int cardY = 578;
-    int cardW = 280;
+    int cardW = 320;
     int cardH = 390;
-    int cardGap = 20;
+    int cardGap = 24;
+    int visibleCount = 5;
 
-    for (size_t i = 0; i < games.size() && i < 6; ++i) {
-        int cardX = 60 + static_cast<int>(i) * (cardW + cardGap);
-        bool isSelected = (static_cast<int>(i) == selectedIndex);
+    // Calcular scrollOffset dinamico para que el elemento seleccionado siempre sea visible
+    int scrollOffset = 0;
+    if (selectedIndex >= visibleCount) {
+        scrollOffset = selectedIndex - visibleCount + 1;
+    }
+    if (scrollOffset + visibleCount > static_cast<int>(games.size())) {
+        scrollOffset = static_cast<int>(games.size()) - visibleCount;
+    }
+    if (scrollOffset < 0) scrollOffset = 0;
 
-        // Numero de ranking en marca de agua de fondo (1, 2, 3...)
-        drawText(cardX + 10, cardY + 8, 6, std::to_string(i + 1), isSelected ? 0xFF38235E : 0xFF1C1333);
+    int totalVisible = std::min(visibleCount, static_cast<int>(games.size()) - scrollOffset);
+
+    for (int vi = 0; vi < totalVisible; ++vi) {
+        int i = scrollOffset + vi;
+        int cardX = 60 + vi * (cardW + cardGap);
+        bool isSelected = (i == selectedIndex);
 
         // Tarjeta vertical
-        uint32_t cardBg = isSelected ? 0xFF171033 : 0xFF100B22;
+        uint32_t cardBg = isSelected ? 0xFF1A1238 : 0xFF100B22;
         uint32_t cardBorder = isSelected ? 0xFF8B5CF6 : 0xFF241842;
         int borderWidth = isSelected ? 3 : 1;
 
         drawCard(*this, cardX, cardY, cardW, cardH, cardBg, cardBorder, borderWidth);
 
-        // Barra superior con etiqueta de categoria
+        // Barra superior con etiqueta de categoria y PEGI
         fillRect(cardX + borderWidth, cardY + borderWidth, cardW - (borderWidth * 2), 28, isSelected ? 0xFF2B1A56 : 0xFF130E26);
         fillRect(cardX + 14, cardY + 10, 8, 8, games[i].badgeColor);
         drawText(cardX + 28, cardY + 7, 1, games[i].category, isSelected ? 0xFFF59E0B : 0xFF94A3B8);
+        drawText(cardX + cardW - 70, cardY + 7, 1, games[i].pegiRating, 0xFFA5B4FC);
 
         // Marco ilustrativo de portada de juego
         int artX = cardX + 14;
@@ -755,67 +771,39 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
             drawImage(artX + 1, artY + 1, artW - 2, artH - 2,
                       games[i].coverRgba.data(), games[i].coverWidth, games[i].coverHeight);
         } else {
-            // Arte tematico distintivo por juego
-            switch (i) {
-                case 0: { // Fortnite
-                    fillRect(artX, artY, artW, 80, 0xFF0284C7);
-                    fillRect(artX + 30, artY + 40, artW - 60, 8, 0xFF38BDF8);
-                    fillRect(artX + artW / 2 - 20, artY + 70, 40, 40, 0xFFF59E0B);
-                    drawText(artX + 35, artY + 130, 3, "FORTNITE", 0xFFFFFFFF);
-                    break;
-                }
-                case 1: { // Star Wars Outlaws
-                    fillRect(artX, artY, artW, artH, 0xFF181026);
-                    fillRect(artX + artW / 2 - 40, artY + 30, 80, 80, 0xFFD97706);
-                    fillRect(artX + 15, artY + 100, artW - 30, 6, 0xFFF59E0B);
-                    drawText(artX + 35, artY + 125, 3, "OUTLAWS", 0xFFFFFFFF);
-                    break;
-                }
-                case 2: { // Avatar: Frontiers of Pandora
-                    fillRect(artX, artY, artW, artH, 0xFF064E3B);
-                    fillRect(artX + 20, artY + 30, artW - 40, 60, 0xFF059669);
-                    fillRect(artX + 30, artY + 70, artW - 60, 4, 0xFF34D399);
-                    drawText(artX + 45, artY + 125, 3, "AVATAR", 0xFFFFFFFF);
-                    break;
-                }
-                case 3: { // Trackmania
-                    fillRect(artX, artY, artW, artH, 0xFF0E7490);
-                    fillRect(artX + 10, artY + 50, artW - 20, 16, 0xFF22D3EE);
-                    fillRect(artX + 30, artY + 75, artW - 60, 16, 0xFFFFFFFF);
-                    drawText(artX + 15, artY + 125, 3, "TRACKMANIA", 0xFFFFFFFF);
-                    break;
-                }
-                case 4: { // Sonic x Shadow
-                    fillRect(artX, artY, artW, artH, 0xFF881337);
-                    fillRect(artX + 20, artY + 40, artW - 40, 6, 0xFFEF4444);
-                    fillRect(artX + 35, artY + 60, artW - 70, 6, 0xFFF43F5E);
-                    drawText(artX + 45, artY + 125, 3, "SHADOW", 0xFFFFFFFF);
-                    break;
-                }
-                case 5: { // Fallout: New Vegas
-                    fillRect(artX, artY, artW, artH, 0xFF581C87);
-                    fillRect(artX + 25, artY + 30, artW - 50, 70, 0xFF7E22CE);
-                    fillRect(artX + 40, artY + 70, artW - 80, 6, 0xFFC084FC);
-                    drawText(artX + 25, artY + 125, 3, "NEW VEGAS", 0xFFFFFFFF);
-                    break;
-                }
-                default:
-                    drawText(artX + 20, artY + 100, 3, "LUNA", 0xFFFFFFFF);
-                    break;
+            // Arte tematico distintivo y limpio basado en metadatos reales del juego
+            fillRect(artX + 1, artY + 1, artW - 2, artH - 2, 0xFF130E26);
+            fillRect(artX + 10, artY + 10, artW - 20, 6, games[i].badgeColor);
+
+            std::string displayTitle = games[i].title;
+            if (displayTitle.size() > 22) {
+                displayTitle = displayTitle.substr(0, 20) + "...";
             }
+            drawText(artX + 16, artY + 60, 3, displayTitle, 0xFFFFFFFF);
+            drawText(artX + 16, artY + 110, 2, games[i].publisher, 0xFF94A3B8);
+            drawText(artX + 16, artY + 145, 1, games[i].category + " | Cloud Stream", 0xFFA5B4FC);
         }
 
-        // Informacion textual del juego
-        drawText(cardX + 14, cardY + 242, 2, games[i].title, 0xFFFFFFFF);
-        drawText(cardX + 14, cardY + 280, 1, games[i].publisher, 0xFF94A3B8);
-        drawText(cardX + 14, cardY + 304, 1, "1080p 60 FPS | WebRTC", 0xFFA5B4FC);
+        // Informacion textual del juego bajo la caratula
+        std::string cardTitle = games[i].title;
+        if (cardTitle.size() > 24) {
+            cardTitle = cardTitle.substr(0, 22) + "...";
+        }
+        drawText(cardX + 14, cardY + 238, 2, cardTitle, 0xFFFFFFFF);
+
+        std::string cardPub = games[i].publisher;
+        if (cardPub.size() > 28) {
+            cardPub = cardPub.substr(0, 26) + "...";
+        }
+        drawText(cardX + 14, cardY + 276, 1, cardPub, 0xFF94A3B8);
+        drawText(cardX + 14, cardY + 302, 1, "1080p 60 FPS | WebRTC", 0xFFA5B4FC);
 
         // Pie de tarjeta con estado interactivo
         if (isSelected) {
-            fillRect(cardX + 14, cardY + 338, cardW - 28, 36, 0xFF10B981);
-            drawText(cardX + 40, cardY + 346, 2, "PULSA (X) PARA JUGAR", 0xFFFFFFFF);
+            fillRect(cardX + 14, cardY + 338, cardW - 28, 36, 0xFF6D28D9);
+            drawText(cardX + 32, cardY + 346, 2, "PULSA (X) DETALLES", 0xFFFFFFFF);
         } else {
-            drawText(cardX + 14, cardY + 348, 1, "Disponible en tu cuenta", 0xFF64748B);
+            drawText(cardX + 14, cardY + 348, 1, "Pulsa para seleccionar", 0xFF64748B);
         }
     }
 
@@ -844,7 +832,135 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
     drawText(110, footerY + 18, 2, line1, textColor);
 
     drawText(110, footerY + 52, 1,
-             "[D-PAD / Stick Izq] Seleccionar Juego   |   [CRUZ (X)] Jugar en la Nube   |   [TRIANGULO] Cerrar Sesion   |   [L1+R1+OPTIONS+TOUCH] Salir",
+             "[D-PAD / Stick Izq] Seleccionar   |   [L1/R1] Pagina   |   [CRUZ (X)] Ficha y Jugar   |   [TRIANGULO] Cerrar Sesion   |   [L1+R1+OPTIONS+TOUCH] Salir",
+             0xFFCBD5E1);
+
+    present();
+}
+
+void DisplayManager::drawGameDetailScreen(const GameTile& game,
+                                          const std::string& customerId,
+                                          const std::string& statusText,
+                                          bool isConnecting,
+                                          uint64_t frameCount) {
+    if (!isReady_ || !mappedMemory_) return;
+
+    // 1. Fondo principal: Obsidian Luna Dark Slate
+    clear(0xFF090714);
+
+    // 2. Barra de navegacion superior oficial estilo Amazon Luna Smart TV
+    fillRect(0, 0, 1920, 72, 0xFF0D0A1C);
+    fillRect(0, 72, 1920, 2, 0xFF241842);
+
+    // Boton Volver [O]
+    fillRect(50, 18, 42, 36, 0xFF281C4F);
+    drawText(62, 24, 2, "O", 0xFFF43F5E);
+    drawText(105, 24, 2, "Volver al Catalogo", 0xFFE2E8F0);
+
+    // Logotipo de Amazon Luna (▲ luna)
+    fillRect(380, 28, 14, 14, 0xFF8B5CF6);
+    drawText(402, 18, 5, "luna", 0xFFFFFFFF);
+
+    // Indicadores a la derecha: Mando y Cuenta de usuario
+    fillRect(1320, 28, 10, 10, 0xFF10B981);
+    drawText(1338, 25, 2, "DualSense Conectado", 0xFF34D399);
+
+    std::string userTag = customerId.empty() ? "Conectado" : "Usuario: " + customerId.substr(0, 14) + "...";
+    drawText(1600, 25, 2, userTag, 0xFF38BDF8);
+
+    // 3. Ficha Principal del Juego
+    int coverX = 100;
+    int coverY = 120;
+    int coverW = 440;
+    int coverH = 620;
+
+    // Portada en el lado izquierdo
+    drawCard(*this, coverX, coverY, coverW, coverH, 0xFF130E29, 0xFF2A1C52, 2);
+
+    if (!game.coverRgba.empty() && game.coverWidth > 0 && game.coverHeight > 0) {
+        drawImage(coverX + 2, coverY + 2, coverW - 4, coverH - 4,
+                  game.coverRgba.data(), game.coverWidth, game.coverHeight);
+    } else {
+        // Placeholder estilizado
+        fillRect(coverX + 2, coverY + 2, coverW - 4, 120, game.badgeColor);
+        drawText(coverX + 30, coverY + 45, 4, game.category, 0xFFFFFFFF);
+        fillRect(coverX + 2, coverY + 122, coverW - 4, coverH - 124, 0xFF100B22);
+        drawText(coverX + 30, coverY + 260, 4, game.title, 0xFFFFFFFF);
+        drawText(coverX + 30, coverY + 340, 2, game.publisher, 0xFF94A3B8);
+        drawText(coverX + 30, coverY + 420, 3, game.pegiRating, 0xFFF59E0B);
+    }
+
+    // Marco derecho: Metadatos y opciones
+    int infoX = 580;
+    int infoY = 120;
+
+    // Pills de categoria y PEGI
+    fillRect(infoX, infoY, 110, 32, game.badgeColor);
+    drawText(infoX + 16, infoY + 6, 2, game.category, 0xFFFFFFFF);
+
+    fillRect(infoX + 125, infoY, 95, 32, 0xFF374151);
+    drawText(infoX + 138, infoY + 6, 2, game.pegiRating, 0xFFFDE68A);
+
+    fillRect(infoX + 235, infoY, 140, 32, 0xFF065F46);
+    drawText(infoX + 248, infoY + 6, 2, "CLOUD READY", 0xFF6EE7B7);
+
+    // Titulo del juego (Gigante)
+    drawText(infoX, infoY + 48, 6, game.title, 0xFFFFFFFF);
+
+    // Editor / Publisher
+    drawText(infoX, infoY + 125, 3, "Distribuidora: " + game.publisher, 0xFF94A3B8);
+
+    // Ficha tecnica
+    fillRect(infoX, infoY + 170, 720, 42, 0xFF16102E);
+    drawText(infoX + 20, infoY + 180, 2, "1080p 60 FPS   |   WebRTC Low-Latency   |   DualSense Inalambrico", 0xFFA5B4FC);
+
+    // Sinopsis oficial
+    drawText(infoX, infoY + 235, 3, "Acerca de este juego:", 0xFFE2E8F0);
+
+    // Dividir sinopsis en varias lineas si es larga
+    int synY = infoY + 275;
+    std::string syn = game.synopsis;
+    size_t lineLen = 75;
+    for (size_t s = 0; s < syn.size(); s += lineLen) {
+        std::string sub = syn.substr(s, lineLen);
+        drawText(infoX, synY, 2, sub, 0xFFCBD5E1);
+        synY += 30;
+    }
+
+    // Botones de accion grandes
+    int btnPlayX = infoX;
+    int btnPlayY = 620;
+    int btnPlayW = 540;
+    int btnPlayH = 74;
+
+    uint32_t btnPlayBg = isConnecting ? 0xFF047857 : 0xFF6D28D9;
+    uint32_t btnPlayBorder = isConnecting ? 0xFF34D399 : 0xFFA78BFA;
+    drawCard(*this, btnPlayX, btnPlayY, btnPlayW, btnPlayH, btnPlayBg, btnPlayBorder, 3);
+
+    std::string playLabel = isConnecting ? "CONECTANDO A LA NUBE..." : "PULSA (X) PARA JUGAR AHORA";
+    drawText(btnPlayX + 35, btnPlayY + 22, 3, playLabel, 0xFFFFFFFF);
+
+    int btnBackX = infoX + btnPlayW + 30;
+    int btnBackY = 620;
+    int btnBackW = 380;
+    int btnBackH = 74;
+    drawCard(*this, btnBackX, btnBackY, btnBackW, btnBackH, 0xFF1E293B, 0xFF475569, 2);
+    drawText(btnBackX + 35, btnBackY + 22, 3, "PULSA (O) VOLVER", 0xFFE2E8F0);
+
+    // 5. Barra inferior (Footer de diagnostico y estado)
+    int footerY = 980;
+    int footerH = 88;
+    drawCard(*this, 60, footerY, 1800, footerH, 0xFF0D0A1C, 0xFF241842, 1);
+
+    bool isError = (statusText.find("Error") != std::string::npos ||
+                    statusText.find("fallo") != std::string::npos);
+    uint32_t pulseDot = isError ? 0xFFEF4444 : (isConnecting ? (((frameCount / 20) % 2 == 0) ? 0xFFF59E0B : 0xFFD97706) : 0xFF10B981);
+    fillRect(85, footerY + 22, 14, 14, pulseDot);
+
+    uint32_t textColor = isError ? 0xFFFCA5A5 : (isConnecting ? 0xFFFDE68A : 0xFF34D399);
+    drawText(110, footerY + 18, 2, "Amazon Luna: " + statusText, textColor);
+    drawText(110, footerY + 52, 1,
+             "[CRUZ (X)] Iniciar Juego en Cloud   |   [CIRCULO (O)] Volver al Catalogo   |   [L1+R1+OPTIONS+TOUCH] Salir",
              0xFFCBD5E1);
 
     present();
