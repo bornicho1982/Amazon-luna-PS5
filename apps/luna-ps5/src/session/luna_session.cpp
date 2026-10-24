@@ -203,6 +203,7 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
         if (widgets.isArray()) {
             for (size_t i = 0; i < widgets.size(); ++i) {
                 const auto& col = widgets[i];
+                std::string colId = col["id"].asString();
                 const auto& subWidgets = col["widgets"];
                 if (!subWidgets.isArray()) continue;
 
@@ -211,7 +212,9 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
                     std::string swId = sw["id"].asString();
 
                     std::string cleanGid;
-                    size_t prodPos = swId.find("amzn1.luna.product.");
+                    size_t lunaPos = swId.find("amzn1.luna.product.");
+                    size_t adgPos = swId.find("amzn1.adg.product.");
+                    size_t prodPos = (lunaPos != std::string::npos) ? lunaPos : adgPos;
                     if (prodPos != std::string::npos) {
                         size_t ampPos = swId.find_first_of("& \t\r\n\\", prodPos);
                         cleanGid = (ampPos != std::string::npos) ? swId.substr(prodPos, ampPos - prodPos) : swId.substr(prodPos);
@@ -220,9 +223,12 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
                         if (acts.isArray()) {
                             for (size_t a = 0; a < acts.size(); ++a) {
                                 std::string target = acts[a]["target"].asString();
-                                size_t tPos = target.find("amzn1.luna.product.");
+                                size_t tLuna = target.find("amzn1.luna.product.");
+                                size_t tAdg = target.find("amzn1.adg.product.");
+                                size_t tPos = (tLuna != std::string::npos) ? tLuna : tAdg;
                                 if (tPos != std::string::npos) {
-                                    cleanGid = target.substr(tPos, 55); // 19 + 36 = 55
+                                    size_t idLen = (tLuna != std::string::npos) ? 55 : 54;
+                                    cleanGid = target.substr(tPos, idLen);
                                     break;
                                 }
                             }
@@ -261,6 +267,15 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
 
                     std::string category = pdata["category"].asString();
                     if (category.empty()) category = pdata["badgeText"].asString();
+                    if (category.empty()) {
+                        if (colId.find("recently_played") != std::string::npos) category = "MI BIBLIOTECA";
+                        else if (colId.find("popular") != std::string::npos) category = "DESTACADOS";
+                        else if (colId.find("luna_standard") != std::string::npos) category = "LUNA+";
+                        else if (colId.find("editors_pick") != std::string::npos) category = "SELECCION";
+                        else if (colId.find("adventure") != std::string::npos) category = "AVENTURA";
+                        else if (colId.find("highlight") != std::string::npos) category = "PRIME GAMING";
+                        else category = "LUNA+";
+                    }
 
                     std::string pegi = pdata["pegiRating"].asString();
 
@@ -704,8 +719,24 @@ bool LunaSessionClient::pollJob() {
         return true;
     } else if (jobStatus == "COMPLETED_FAILED") {
         m_state = SessionState::Failed;
-        m_statusMessage = "Amazon Luna indico fallo al asignar servidor para este juego";
-        luna::util::CrashLogger::log("[LunaSession ERROR] %s", m_statusMessage.c_str());
+        std::string errCode = extractJsonString(resp.body, "errorCode");
+        std::string errMsg = extractJsonString(resp.body, "errorMessage");
+        if (errMsg.empty()) errMsg = extractJsonString(resp.body, "message");
+        if (errMsg.empty()) errMsg = extractJsonString(resp.body, "failureReason");
+
+        if (errCode == "ENTITLEMENT_REQUIRED" || resp.body.find("ENTITLEMENT") != std::string::npos ||
+            resp.body.find("SUBSCRIPTION") != std::string::npos) {
+            m_statusMessage = "Suscripcion Luna+ requerida para jugar a este titulo.";
+        } else if (errCode == "MAX_CONCURRENT_STREAMS" || resp.body.find("CONCURRENT") != std::string::npos) {
+            m_statusMessage = "Limite de pantallas simultaneas alcanzado en tu cuenta.";
+        } else if (errCode == "SERVER_CAPACITY" || resp.body.find("CAPACITY") != std::string::npos) {
+            m_statusMessage = "Servidores de Amazon Luna ocupados temporalmente. Reintenta en unos minutos.";
+        } else if (!errMsg.empty()) {
+            m_statusMessage = "No se pudo iniciar: " + errMsg;
+        } else {
+            m_statusMessage = "Amazon Luna denego el acceso (Suscripcion requerida o juego no disponible).";
+        }
+        luna::util::CrashLogger::log("[LunaSession ERROR] %s (body: %s)", m_statusMessage.c_str(), resp.body.c_str());
         return false;
     }
 

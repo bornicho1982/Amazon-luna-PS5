@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <chrono>
+#include <sstream>
 
 namespace luna::stream {
 
@@ -59,12 +60,27 @@ void WebRtcClient::setupPeerConnection() {
     pc_ = std::make_shared<rtc::PeerConnection>(rtcConfig);
 
     pc_->onGatheringStateChange([this](rtc::PeerConnection::GatheringState state) {
+        luna::util::CrashLogger::log("[WebRTC] Gathering state: %d", static_cast<int>(state));
         if (state == rtc::PeerConnection::GatheringState::Complete) {
             std::lock_guard<std::mutex> lock(gatheringMutex_);
             isGatheringComplete_ = true;
             gatheringCv_.notify_all();
             luna::util::CrashLogger::log("[WebRTC] Recolección de candidatos ICE locales completada.");
         }
+    });
+
+    pc_->onIceStateChange([](rtc::PeerConnection::IceState state) {
+        const char* stateStr = "Unknown";
+        switch (state) {
+            case rtc::PeerConnection::IceState::New: stateStr = "New"; break;
+            case rtc::PeerConnection::IceState::Checking: stateStr = "Checking"; break;
+            case rtc::PeerConnection::IceState::Connected: stateStr = "Connected"; break;
+            case rtc::PeerConnection::IceState::Completed: stateStr = "Completed"; break;
+            case rtc::PeerConnection::IceState::Failed: stateStr = "Failed"; break;
+            case rtc::PeerConnection::IceState::Disconnected: stateStr = "Disconnected"; break;
+            case rtc::PeerConnection::IceState::Closed: stateStr = "Closed"; break;
+        }
+        luna::util::CrashLogger::log("[WebRTC] ICE state transition: %s (%d)", stateStr, static_cast<int>(state));
     });
 
     pc_->onStateChange([this](rtc::PeerConnection::State state) {
@@ -139,6 +155,7 @@ void WebRtcClient::setupPeerConnection() {
 std::string WebRtcClient::generateSdpOffer() {
     luna::util::CrashLogger::logStep(1, "Starting WebRTC generateSdpOffer...");
     try {
+        stop();
         setupPeerConnection();
 
         isGatheringComplete_ = false;
@@ -180,6 +197,31 @@ bool WebRtcClient::applySdpAnswer(const std::string& sdpAnswer) {
         rtc::Description answer(sdpAnswer, rtc::Description::Type::Answer);
         pc_->setRemoteDescription(answer);
         luna::util::CrashLogger::log("[WebRTC] SDP Answer aplicado con éxito en libdatachannel (%zu bytes).", sdpAnswer.size());
+
+        // Extraer e inyectar candidatos remotos de sdpAnswer si están presentes
+        std::istringstream iss(sdpAnswer);
+        std::string line;
+        while (std::getline(iss, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) {
+                line.pop_back();
+            }
+            if (line.rfind("a=candidate:", 0) == 0) {
+                std::string cand = line.substr(2); // quitar "a="
+                addRemoteIceCandidate(cand, "0");
+                addRemoteIceCandidate(cand, "1");
+                addRemoteIceCandidate(cand, "2");
+            }
+        }
+
+        // Si ya tenemos el endpoint remoto configurado, inyectar candidato directo
+        if (!config_.remoteHost.empty() && config_.remoteUdpPort > 0) {
+            std::string directCand = "candidate:1 1 UDP 2122260223 " + config_.remoteHost + " " +
+                                     std::to_string(config_.remoteUdpPort) + " typ host";
+            addRemoteIceCandidate(directCand, "0");
+            addRemoteIceCandidate(directCand, "1");
+            addRemoteIceCandidate(directCand, "2");
+        }
+
         return true;
     } catch (const std::exception& e) {
         luna::util::CrashLogger::log("[WebRTC CRITICAL] Excepción al aplicar SDP Answer: %s", e.what());
@@ -194,6 +236,12 @@ void WebRtcClient::setRemoteEndpoint(const std::string& host, int port) {
     config_.remoteHost = host;
     config_.remoteUdpPort = port;
     std::printf("[WebRTC] Endpoint remoto configurado: %s:%d\n", host.c_str(), port);
+    if (pc_ && !host.empty() && port > 0) {
+        std::string cand = "candidate:1 1 UDP 2122260223 " + host + " " + std::to_string(port) + " typ host";
+        addRemoteIceCandidate(cand, "0");
+        addRemoteIceCandidate(cand, "1");
+        addRemoteIceCandidate(cand, "2");
+    }
 }
 
 void WebRtcClient::setRemoteIceCredentials(const std::string& ufrag, const std::string& pwd) {
@@ -261,6 +309,9 @@ void WebRtcClient::processAudioRtp(const uint8_t* pkt, size_t len) {
     size_t payloadLen = len - offset;
 
     stats_.audioFramesReceived++;
+    if (stats_.audioFramesReceived == 1 || stats_.audioFramesReceived % 300 == 0) {
+        luna::util::CrashLogger::log("[WebRTC] Paquetes de audio RTP recibidos: %llu", stats_.audioFramesReceived);
+    }
     if (audioCb_) {
         audioCb_(payload, payloadLen, timestamp);
     }
@@ -303,6 +354,9 @@ void WebRtcClient::processVideoRtp(const uint8_t* pkt, size_t len) {
     const uint8_t* payload = pkt + offset;
     size_t payloadLen = end - offset;
     stats_.rtpPacketsReceived++;
+    if (stats_.rtpPacketsReceived == 1 || stats_.rtpPacketsReceived % 300 == 0) {
+        luna::util::CrashLogger::log("[WebRTC] Paquetes de video RTP recibidos: %llu", stats_.rtpPacketsReceived);
+    }
 
     if (currentVideoTs_ != timestamp && !currentAccessUnit_.empty()) {
         currentAccessUnit_.clear();
@@ -345,6 +399,10 @@ void WebRtcClient::processVideoRtp(const uint8_t* pkt, size_t len) {
     // Al llegar al marcador RTP de fin de frame (M=1), entregar el access unit a Videodec2
     if (marker && !currentAccessUnit_.empty()) {
         stats_.videoFramesAssembled++;
+        if (stats_.videoFramesAssembled == 1 || stats_.videoFramesAssembled % 120 == 0) {
+            luna::util::CrashLogger::log("[WebRTC] Frames H.264 ensamblados: %llu (tam: %zu bytes)",
+                                         stats_.videoFramesAssembled, currentAccessUnit_.size());
+        }
         if (videoCb_) {
             videoCb_(currentAccessUnit_.data(), currentAccessUnit_.size(), timestamp);
         }

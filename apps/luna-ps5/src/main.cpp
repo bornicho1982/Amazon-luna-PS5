@@ -204,6 +204,37 @@ int main(int argc, char* argv[]) {
         }
     };
 
+    static const std::vector<std::string> kCategories = {
+        "TODOS LOS JUEGOS",
+        "DESTACADOS",
+        "LUNA+",
+        "PRIME GAMING",
+        "MI BIBLIOTECA"
+    };
+    int selectedCategoryIdx = 0;
+
+    auto getFilteredIndices = [&]() -> std::vector<int> {
+        std::vector<int> indices;
+        const std::string& cat = kCategories[selectedCategoryIdx];
+        for (int i = 0; i < static_cast<int>(games.size()); ++i) {
+            if (cat == "TODOS LOS JUEGOS") {
+                indices.push_back(i);
+            } else if (cat == "DESTACADOS") {
+                if (games[i].category == "DESTACADOS" || games[i].category == "TODOS") indices.push_back(i);
+            } else if (cat == "LUNA+") {
+                if (games[i].category == "LUNA+" || games[i].category == "SELECCION" || games[i].category == "AVENTURA") indices.push_back(i);
+            } else if (cat == "PRIME GAMING") {
+                if (games[i].category == "PRIME GAMING" || games[i].category == "POPULARES") indices.push_back(i);
+            } else if (cat == "MI BIBLIOTECA") {
+                if (games[i].category == "MI BIBLIOTECA") indices.push_back(i);
+            }
+        }
+        if (indices.empty()) {
+            for (int i = 0; i < static_cast<int>(games.size()); ++i) indices.push_back(i);
+        }
+        return indices;
+    };
+
     int selectedGameIndex = 0;
 
     auto loadCatalogIfAuthenticated = [&]() {
@@ -280,13 +311,34 @@ int main(int argc, char* argv[]) {
             }
 
             case AppState::Catalog: {
+                auto filteredIndices = getFilteredIndices();
+                if (filteredIndices.empty()) {
+                    for (int i = 0; i < static_cast<int>(games.size()); ++i) filteredIndices.push_back(i);
+                }
+                if (selectedGameIndex >= static_cast<int>(filteredIndices.size())) {
+                    selectedGameIndex = static_cast<int>(filteredIndices.size()) - 1;
+                }
+                if (selectedGameIndex < 0) selectedGameIndex = 0;
+
+                // Cambio de categorias con L2 / R2
+                if (pressedNow & luna::input::PAD_L2) {
+                    selectedCategoryIdx = (selectedCategoryIdx + static_cast<int>(kCategories.size()) - 1) % kCategories.size();
+                    selectedGameIndex = 0;
+                    lastNavTime = now;
+                }
+                if (pressedNow & luna::input::PAD_R2) {
+                    selectedCategoryIdx = (selectedCategoryIdx + 1) % kCategories.size();
+                    selectedGameIndex = 0;
+                    lastNavTime = now;
+                }
+
                 // Navegacion rapida por paginas con L1 / R1
                 if (pressedNow & luna::input::PAD_L1) {
                     selectedGameIndex = std::max(0, selectedGameIndex - 5);
                     lastNavTime = now;
                 }
                 if (pressedNow & luna::input::PAD_R1) {
-                    selectedGameIndex = std::min(static_cast<int>(games.size()) - 1, selectedGameIndex + 5);
+                    selectedGameIndex = std::min(static_cast<int>(filteredIndices.size()) - 1, selectedGameIndex + 5);
                     lastNavTime = now;
                 }
 
@@ -294,7 +346,7 @@ int main(int argc, char* argv[]) {
                 if (navElapsedMs > 160) {
                     bool moved = false;
                     if ((padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000)) {
-                        if (selectedGameIndex + 1 < static_cast<int>(games.size())) {
+                        if (selectedGameIndex + 1 < static_cast<int>(filteredIndices.size())) {
                             selectedGameIndex++;
                             moved = true;
                         }
@@ -317,18 +369,19 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Carga progresiva bajo demanda de portadas visibles (max 1 por frame a 60 FPS)
-                if (!games.empty()) {
+                if (!filteredIndices.empty()) {
                     int visibleStart = std::max(0, selectedGameIndex - 2);
-                    int visibleEnd = std::min(static_cast<int>(games.size()), selectedGameIndex + 5);
+                    int visibleEnd = std::min(static_cast<int>(filteredIndices.size()), selectedGameIndex + 5);
                     for (int vi = visibleStart; vi < visibleEnd; ++vi) {
-                        if (games[vi].coverRgba.empty() && !games[vi].coverUrl.empty() && games[vi].coverUrl.rfind("http", 0) == 0) {
-                            auto imgResp = luna::net::HttpClient::get(games[vi].coverUrl);
+                        int realIdx = filteredIndices[vi];
+                        if (games[realIdx].coverRgba.empty() && !games[realIdx].coverUrl.empty() && games[realIdx].coverUrl.rfind("http", 0) == 0) {
+                            auto imgResp = luna::net::HttpClient::get(games[realIdx].coverUrl);
                             if (imgResp.ok() && !imgResp.body.empty()) {
                                 int w = 0, h = 0;
                                 if (luna::util::decodeImageRgba(reinterpret_cast<const uint8_t*>(imgResp.body.data()),
-                                                                imgResp.body.size(), games[vi].coverRgba, w, h)) {
-                                    games[vi].coverWidth = w;
-                                    games[vi].coverHeight = h;
+                                                                imgResp.body.size(), games[realIdx].coverRgba, w, h)) {
+                                    games[realIdx].coverWidth = w;
+                                    games[realIdx].coverHeight = h;
                                 }
                             }
                             break; // 1 sola descarga por tick para no congelar el bucle a 60 FPS
@@ -338,10 +391,11 @@ int main(int argc, char* argv[]) {
 
                 // Cruz (X) -> Abrir Segunda Pantalla (Ficha de Detalle del Juego)
                 if (pressedNow & luna::input::PAD_CROSS) {
-                    if (selectedGameIndex >= 0 && selectedGameIndex < static_cast<int>(games.size())) {
+                    if (!filteredIndices.empty() && selectedGameIndex >= 0 && selectedGameIndex < static_cast<int>(filteredIndices.size())) {
+                        int realIdx = filteredIndices[selectedGameIndex];
                         luna::util::CrashLogger::log("[Main] Abriendo ficha de detalles para: %s (%s)",
-                                                     games[selectedGameIndex].title.c_str(), games[selectedGameIndex].id.c_str());
-                        sessionClient.preloadGameDetails(games[selectedGameIndex], cbl.getAccessToken(), cbl.getDeviceSerial());
+                                                     games[realIdx].title.c_str(), games[realIdx].id.c_str());
+                        sessionClient.preloadGameDetails(games[realIdx], cbl.getAccessToken(), cbl.getDeviceSerial());
                         appState = AppState::GameDetail;
                         break;
                     }
@@ -357,34 +411,43 @@ int main(int argc, char* argv[]) {
                     appState = AppState::LoginCBL;
                 }
 
+                std::vector<luna::display::GameTile> currentFiltered;
+                for (int idx : filteredIndices) {
+                    currentFiltered.push_back(games[idx]);
+                }
+
+                int actualRealIdx = filteredIndices.empty() ? 0 : filteredIndices[selectedGameIndex];
                 std::string catalogStatus;
                 if (!g_lastStatusText.empty()) {
                     catalogStatus = g_lastStatusText;
                 } else if (!g_catalogDiagnostic.empty()) {
                     catalogStatus = g_catalogDiagnostic;
                 } else if (padMgr.isConnected()) {
-                    catalogStatus = "Listo para jugar | Pulsa (X) para ver detalles de " + games[selectedGameIndex].title;
+                    catalogStatus = "Listo para jugar | Pulsa (X) para ver detalles de " + games[actualRealIdx].title;
                 } else {
                     catalogStatus = "Buscando mando DualSense... (pulsa el boton PS si no responde)";
                 }
 
                 display.drawCatalogScreen(
-                    games,
+                    currentFiltered,
                     selectedGameIndex,
                     cbl.getCustomerId(),
                     catalogStatus,
-                    frameCount
+                    frameCount,
+                    kCategories[selectedCategoryIdx]
                 );
                 break;
             }
 
             case AppState::GameDetail: {
-                if (selectedGameIndex < 0 || selectedGameIndex >= static_cast<int>(games.size())) {
+                auto filteredIndices = getFilteredIndices();
+                int actualRealIdx = filteredIndices.empty() ? selectedGameIndex : filteredIndices[selectedGameIndex];
+                if (actualRealIdx < 0 || actualRealIdx >= static_cast<int>(games.size())) {
                     appState = AppState::Catalog;
                     break;
                 }
 
-                auto& curGame = games[selectedGameIndex];
+                auto& curGame = games[actualRealIdx];
 
                 // Circulo (O) o Triangulo -> Volver al Catalogo
                 if ((pressedNow & luna::input::PAD_CIRCLE) || (pressedNow & luna::input::PAD_TRIANGLE)) {
@@ -437,18 +500,18 @@ int main(int argc, char* argv[]) {
                     const auto& info = sessionClient.getSessionInfo();
                     luna::util::CrashLogger::log("[Main] Sesion lista: Endpoint %s:%d", info.publicIp.c_str(), info.port);
 
-                    if (!info.sdpAnswer.empty()) {
-                        rtcClient.applySdpAnswer(info.sdpAnswer);
-                    }
                     if (!info.publicIp.empty() && info.port > 0) {
                         rtcClient.setRemoteEndpoint(info.publicIp, info.port);
+                    }
+                    if (!info.sdpAnswer.empty()) {
+                        rtcClient.applySdpAnswer(info.sdpAnswer);
                     }
                     if (!info.iceUfrag.empty() && !info.icePwd.empty()) {
                         rtcClient.setRemoteIceCredentials(info.iceUfrag, info.icePwd);
                     }
                     rtcClient.start();
                     luna::util::CrashLogger::logStep(7, "Hardware video & audio decoders ready, streaming active.");
-                    videoStreaming = true;
+                    videoStreaming = false;
                     g_lastStatusText.clear();
                     appState = AppState::Streaming;
                 } else if (sessionClient.getState() == luna::session::SessionState::Failed) {
@@ -474,21 +537,40 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
+                auto filteredIndices = getFilteredIndices();
+                std::vector<luna::display::GameTile> currentFiltered;
+                for (int idx : filteredIndices) currentFiltered.push_back(games[idx]);
+
                 display.drawCatalogScreen(
-                    games,
+                    currentFiltered,
                     selectedGameIndex,
                     cbl.getCustomerId(),
                     sessionClient.getStatusMessage(),
-                    frameCount
+                    frameCount,
+                    kCategories[selectedCategoryIdx]
                 );
                 break;
             }
 
             case AppState::Streaming: {
+                auto filteredIndices = getFilteredIndices();
+                int actualRealIdx = filteredIndices.empty() ? selectedGameIndex : filteredIndices[selectedGameIndex];
+                const auto& curGame = games[actualRealIdx];
+
                 // Serializar y enviar entrada de mando al juego en formato Protobuf oficial de Luna a 60 Hz
                 padMgr.serializeLunaProtobufReport(reportBuf, sizeof(reportBuf), reportLen, seq++);
                 if (rtcClient.isConnected() && reportLen > 0) {
                     rtcClient.sendInputPacket(reportBuf, reportLen);
+                }
+
+                // Si se presiona [CIRCULO (O)] mientras no hay video streaming -> Cancelar conexion y volver al catalogo
+                if (!videoStreaming.load() && (pressedNow & luna::input::PAD_CIRCLE)) {
+                    luna::util::CrashLogger::log("[Main] Cancelando conexion WebRTC por usuario");
+                    sessionClient.terminateSession(cbl.getAccessToken());
+                    rtcClient.stop();
+                    g_lastStatusText = "Conexion cancelada";
+                    appState = AppState::Catalog;
+                    break;
                 }
 
                 // Si se presiona Options + Touchpad -> Terminar stream y volver al catalogo
@@ -498,15 +580,21 @@ int main(int argc, char* argv[]) {
                     rtcClient.stop();
                     videoStreaming = false;
                     appState = AppState::Catalog;
+                    break;
                 }
 
-                // Mientras no haya frames de video descodificados, mostrar pantalla de carga
+                // Mientras no haya frames de video descodificados, mostrar pantalla de transmision en directo
                 if (!videoStreaming.load()) {
-                    display.drawCatalogScreen(
-                        games,
-                        selectedGameIndex,
-                        cbl.getCustomerId(),
-                        "Conectando WebRTC a Amazon Luna...",
+                    const auto& info = sessionClient.getSessionInfo();
+                    const auto& stats = rtcClient.getStats();
+                    std::string statsStr = "Servidor Luna: " + info.publicIp + ":" + std::to_string(info.port) +
+                                           "   |   RTP Video: " + std::to_string(stats.rtpPacketsReceived) +
+                                           "   |   Audio: " + std::to_string(stats.audioFramesReceived) +
+                                           "   |   Frames: " + std::to_string(stats.videoFramesAssembled);
+                    display.drawStreamingStatusScreen(
+                        curGame,
+                        sessionClient.getStatusMessage().empty() ? "Conectando WebRTC a Amazon Luna Cloud..." : sessionClient.getStatusMessage(),
+                        statsStr,
                         frameCount
                     );
                 }

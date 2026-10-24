@@ -22,6 +22,8 @@ enum PadButton : uint32_t {
     PAD_RIGHT    = 1 << 11,
     PAD_OPTIONS  = 1 << 12, // Start / Menu
     PAD_TOUCH    = 1 << 13, // Select / View
+    PAD_L2       = 1 << 14, // Left Trigger
+    PAD_R2       = 1 << 15, // Right Trigger
 };
 
 struct GamepadState {

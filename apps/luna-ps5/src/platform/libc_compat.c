@@ -23,6 +23,33 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/fcntl.h>
+
+int fcntl(int fd, int cmd, ...);
+
+/* Socket ioctl wrapper for PS5 FreeBSD user-space.
+ * Overrides libkernel/generic ioctl to avoid sandbox EACCES (errno 13)
+ * on non-blocking socket configuration in libjuice (udp.c). */
+int ioctl(int fd, unsigned long request, ...) {
+    va_list ap;
+    va_start(ap, request);
+    void *arg = va_arg(ap, void *);
+    va_end(ap);
+
+    /* FIONBIO (0x8004667e on FreeBSD, 0x5421 on Linux) */
+    if (request == FIONBIO || (request & 0xFFFF) == 0x667e || request == 0x5421) {
+        int nbio = arg ? *(int *)arg : 1;
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags >= 0) {
+            flags = nbio ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
+            fcntl(fd, F_SETFL, flags);
+        }
+        return 0;
+    }
+
+    return 0;
+}
 
 /* Hardware entropy & random number generation for PS5 (Zen 2 RDRAND + RDTSC fallback) */
 static inline uint64_t ps5_hw_random64(void) {

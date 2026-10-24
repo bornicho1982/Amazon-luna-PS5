@@ -204,6 +204,8 @@ void PadManager::poll() {
     if (b & 0x0020)   mapped |= PAD_RIGHT;
     if (b & 0x0008)   mapped |= PAD_OPTIONS;
     if (b & 0x100000) mapped |= PAD_TOUCH;
+    if ((b & 0x0100) || raw.l2 > 30) mapped |= PAD_L2;
+    if ((b & 0x0200) || raw.r2 > 30) mapped |= PAD_R2;
 
     state_.buttons = mapped;
     state_.leftX = static_cast<int16_t>((static_cast<int>(raw.leftStick.x) - 128) * 256);

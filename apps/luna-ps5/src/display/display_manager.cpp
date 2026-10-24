@@ -364,14 +364,60 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
     int lineHeight = fontSize + (fontSize / 3);
     int baseline = static_cast<int>(fontSize * 0.82f);
 
-    for (char ch : text) {
-        if (ch == '\n') {
+    size_t i = 0;
+    while (i < text.size()) {
+        uint8_t c0 = static_cast<uint8_t>(text[i]);
+        uint32_t codepoint = 0;
+        size_t seqLen = 1;
+
+        if (c0 < 0x80) {
+            codepoint = c0;
+            seqLen = 1;
+        } else if ((c0 & 0xE0) == 0xC0 && i + 1 < text.size()) {
+            codepoint = ((c0 & 0x1F) << 6) | (static_cast<uint8_t>(text[i + 1]) & 0x3F);
+            seqLen = 2;
+        } else if ((c0 & 0xF0) == 0xE0 && i + 2 < text.size()) {
+            codepoint = ((c0 & 0x0F) << 12) | ((static_cast<uint8_t>(text[i + 1]) & 0x3F) << 6) | (static_cast<uint8_t>(text[i + 2]) & 0x3F);
+            seqLen = 3;
+        } else if ((c0 & 0xF8) == 0xF0 && i + 3 < text.size()) {
+            codepoint = ((c0 & 0x07) << 18) | ((static_cast<uint8_t>(text[i + 1]) & 0x3F) << 12) | ((static_cast<uint8_t>(text[i + 2]) & 0x3F) << 6) | (static_cast<uint8_t>(text[i + 3]) & 0x3F);
+            seqLen = 4;
+        } else {
+            codepoint = c0;
+            seqLen = 1;
+        }
+        i += seqLen;
+
+        if (codepoint == '\n') {
             cursorX = x;
             cursorY += lineHeight;
             continue;
         }
 
-        uint32_t codepoint = static_cast<uint8_t>(ch);
+        // Simbolos especiales de marca registrada con fallback si la fuente no los incluye
+        if (codepoint == 0x2122) { // ™
+            const auto& gT = fontRenderer_.getGlyph('T', fontSize * 3 / 4);
+            const auto& gM = fontRenderer_.getGlyph('M', fontSize * 3 / 4);
+            if (gT.advance > 0) {
+                int gy = cursorY + (baseline / 2);
+                for (int r = 0; r < gT.height; ++r) {
+                    for (int c = 0; c < gT.width; ++c) {
+                        uint8_t a = gT.bitmap[r * gT.width + c];
+                        if (a > 0) blendPixelSwizzled(base, cursorX + gT.xoff + c, gy + gT.yoff + r, colorArgb, a);
+                    }
+                }
+                cursorX += gT.advance;
+                for (int r = 0; r < gM.height; ++r) {
+                    for (int c = 0; c < gM.width; ++c) {
+                        uint8_t a = gM.bitmap[r * gM.width + c];
+                        if (a > 0) blendPixelSwizzled(base, cursorX + gM.xoff + c, gy + gM.yoff + r, colorArgb, a);
+                    }
+                }
+                cursorX += gM.advance + 2;
+                continue;
+            }
+        }
+
         const auto& glyph = fontRenderer_.getGlyph(codepoint, fontSize);
 
         int gx = cursorX + glyph.xoff;
@@ -385,7 +431,7 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
                 }
             }
         }
-        cursorX += glyph.advance;
+        cursorX += (glyph.advance > 0) ? glyph.advance : (fontSize / 2);
     }
 }
 
@@ -602,7 +648,8 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
                                        int selectedIndex,
                                        const std::string& customerId,
                                        const std::string& statusText,
-                                       uint64_t frameCount) {
+                                       uint64_t frameCount,
+                                       const std::string& currentCategory) {
     if (!isReady_ || !mappedMemory_) return;
 
     // 1. Fondo principal: Obsidian Luna Dark Slate
@@ -619,17 +666,31 @@ void DisplayManager::drawCatalogScreen(const std::vector<GameTile>& games,
     fillRect(120, 28, 14, 14, 0xFF8B5CF6);
     drawText(142, 18, 5, "luna", 0xFFFFFFFF);
 
-    // Pestañas principales
-    // Inicio (Pill activa con fondo violeta sutil)
-    fillRect(290, 18, 86, 36, 0xFF281C4F);
-    drawText(308, 24, 2, "Inicio", 0xFFFFFFFF);
+    // Pestañas de categorías funcionales con navegación L2 / R2
+    drawText(265, 24, 2, "[L2]", 0xFFA78BFA);
 
-    drawText(410, 24, 2, "GameNight", 0xFF9CA3AF);
-    drawText(540, 24, 2, "Mi espacio", 0xFF9CA3AF);
+    static const std::pair<const char*, const char*> kCategories[] = {
+        {"TODOS", "TODOS LOS JUEGOS"},
+        {"DESTACADOS", "DESTACADOS"},
+        {"LUNA+", "LUNA+"},
+        {"PRIME", "PRIME GAMING"},
+        {"BIBLIOTECA", "MI BIBLIOTECA"}
+    };
 
-    drawText(680, 24, 2, "Remote Play", 0xFF9CA3AF);
-    fillRect(805, 22, 60, 22, 0xFF1D4ED8);
-    drawText(812, 26, 1, "NUEVO", 0xFF93C5FD);
+    int tabX = 315;
+    for (const auto& cat : kCategories) {
+        bool isActive = (currentCategory == cat.second || currentCategory == cat.first);
+        int tabW = 20 + fontRenderer_.measureText(cat.first, 20);
+        if (isActive) {
+            fillRect(tabX, 18, tabW, 36, 0xFF6D28D9);
+            drawText(tabX + 10, 24, 2, cat.first, 0xFFFFFFFF);
+        } else {
+            drawText(tabX + 10, 24, 2, cat.first, 0xFF9CA3AF);
+        }
+        tabX += tabW + 15;
+    }
+
+    drawText(tabX + 5, 24, 2, "[R2]", 0xFFA78BFA);
 
     // Indicadores a la derecha: Mando y Cuenta de usuario
     fillRect(1320, 28, 10, 10, 0xFF10B981);
@@ -962,6 +1023,95 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
     drawText(110, footerY + 52, 1,
              "[CRUZ (X)] Iniciar Juego en Cloud   |   [CIRCULO (O)] Volver al Catalogo   |   [L1+R1+OPTIONS+TOUCH] Salir",
              0xFFCBD5E1);
+
+    present();
+}
+
+void DisplayManager::drawStreamingStatusScreen(const GameTile& game,
+                                               const std::string& statusText,
+                                               const std::string& statsText,
+                                               uint64_t frameCount) {
+    if (!isReady_ || !mappedMemory_) return;
+
+    // 1. Fondo principal ultra-oscuro estilo Cloud Gaming
+    clear(0xFF070510);
+
+    // 2. Barra superior
+    fillRect(0, 0, 1920, 72, 0xFF0D0A1C);
+    fillRect(0, 72, 1920, 2, 0xFF6D28D9);
+
+    fillRect(60, 28, 14, 14, 0xFF8B5CF6);
+    drawText(85, 18, 5, "luna", 0xFFFFFFFF);
+    drawText(220, 25, 3, "TRANSMISION EN DIRECTO", 0xFFA5B4FC);
+
+    // Indicador pulsante de transmision
+    uint32_t liveDot = ((frameCount / 25) % 2 == 0) ? 0xFFEF4444 : 0xFF7F1D1D;
+    fillRect(1700, 28, 12, 12, liveDot);
+    drawText(1722, 24, 2, "CLOUD WEBRTC", 0xFFE2E8F0);
+
+    // 3. Tarjeta central de streaming
+    int cardX = 260;
+    int cardY = 160;
+    int cardW = 1400;
+    int cardH = 720;
+    drawCard(*this, cardX, cardY, cardW, cardH, 0xFF120E24, 0xFF2A1C52, 2);
+
+    // Portada del juego a la izquierda si existe
+    int imgX = cardX + 60;
+    int imgY = cardY + 60;
+    int imgW = 280;
+    int imgH = 400;
+    if (!game.coverRgba.empty() && game.coverWidth > 0 && game.coverHeight > 0) {
+        drawImage(imgX, imgY, imgW, imgH, game.coverRgba.data(), game.coverWidth, game.coverHeight);
+        drawCard(*this, imgX, imgY, imgW, imgH, 0x00000000, 0xFF6D28D9, 2);
+    } else {
+        drawCard(*this, imgX, imgY, imgW, imgH, 0xFF1E1538, 0xFF4C1D95, 2);
+        fillRect(imgX + 20, imgY + 20, imgW - 40, imgH - 40, game.badgeColor);
+        drawText(imgX + 30, imgY + 180, 4, game.category, 0xFFFFFFFF);
+    }
+
+    // Informacion del juego a la derecha
+    int textX = imgX + imgW + 60;
+    int textY = imgY + 20;
+
+    // Badge de categoria
+    fillRect(textX, textY, 140, 32, 0xFF2E1065);
+    drawText(textX + 16, textY + 6, 2, game.category, 0xFFA78BFA);
+
+    // Titulo del juego grande
+    drawText(textX, textY + 50, 6, game.title, 0xFFFFFFFF);
+    drawText(textX, textY + 120, 3, "Distribuidora: " + game.publisher, 0xFF94A3B8);
+
+    // Separador decorativo
+    fillRect(textX, textY + 165, 800, 2, 0xFF2A1C52);
+
+    // Spinner o barra de progreso animada
+    int barW = 800;
+    int barH = 10;
+    int barX = textX;
+    int barY = textY + 195;
+    fillRect(barX, barY, barW, barH, 0xFF1E1538);
+    int pulsePos = static_cast<int>((frameCount * 8) % (barW + 200)) - 100;
+    int segW = 140;
+    int segStart = std::max(barX, barX + pulsePos);
+    int segEnd = std::min(barX + barW, barX + pulsePos + segW);
+    if (segEnd > segStart) {
+        fillRect(segStart, barY, segEnd - segStart, barH, 0xFF8B5CF6);
+    }
+
+    // Estado principal
+    drawText(textX, textY + 225, 4, statusText, 0xFFFDE68A);
+
+    // Metricas tecnicas WebRTC / Hardware
+    fillRect(textX, textY + 285, 800, 70, 0xFF17112C);
+    drawText(textX + 20, textY + 300, 2, statsText, 0xFF38BDF8);
+    drawText(textX + 20, textY + 330, 2, "Hardware: libSceVideodec2 (H.264 High 1080p60) + SceAudioOut (Opus 48kHz)", 0xFF34D399);
+
+    // 4. Barra inferior de control
+    fillRect(0, 980, 1920, 100, 0xFF0D0A1C);
+    fillRect(0, 980, 1920, 2, 0xFF241842);
+    drawText(100, 1018, 3, "[CIRCULO (O)] Cancelar conexion y volver al catalogo", 0xFFE2E8F0);
+    drawText(1150, 1018, 3, "[OPTIONS + TOUCHPAD] Salir del juego en cualquier momento", 0xFF94A3B8);
 
     present();
 }

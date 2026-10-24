@@ -50,13 +50,19 @@ public:
                            int selectedIndex,
                            const std::string& customerId,
                            const std::string& statusText,
-                           uint64_t frameCount);
+                           uint64_t frameCount,
+                           const std::string& currentCategory = "TODOS LOS JUEGOS");
 
     void drawGameDetailScreen(const GameTile& game,
                               const std::string& customerId,
                               const std::string& statusText,
                               bool isConnecting,
                               uint64_t frameCount);
+
+    void drawStreamingStatusScreen(const GameTile& game,
+                                   const std::string& statusText,
+                                   const std::string& statsText,
+                                   uint64_t frameCount);
 
     void drawDashboard(const std::string& consoleIp,
                        int authPort,

@@ -72,11 +72,39 @@ const CachedGlyph& FontRenderer::getGlyph(uint32_t codepoint, int fontSizePx) {
 }
 
 int FontRenderer::measureText(const std::string& text, int fontSizePx) {
-    if (!isReady_) return 0;
+    if (!isReady_ || text.empty()) return 0;
     int totalWidth = 0;
-    for (char c : text) {
-        const auto& g = getGlyph(static_cast<uint8_t>(c), fontSizePx);
-        totalWidth += g.advance;
+    size_t i = 0;
+    while (i < text.size()) {
+        uint8_t c0 = static_cast<uint8_t>(text[i]);
+        uint32_t codepoint = 0;
+        size_t seqLen = 1;
+
+        if (c0 < 0x80) {
+            codepoint = c0;
+            seqLen = 1;
+        } else if ((c0 & 0xE0) == 0xC0 && i + 1 < text.size()) {
+            codepoint = ((c0 & 0x1F) << 6) | (static_cast<uint8_t>(text[i + 1]) & 0x3F);
+            seqLen = 2;
+        } else if ((c0 & 0xF0) == 0xE0 && i + 2 < text.size()) {
+            codepoint = ((c0 & 0x0F) << 12) | ((static_cast<uint8_t>(text[i + 1]) & 0x3F) << 6) | (static_cast<uint8_t>(text[i + 2]) & 0x3F);
+            seqLen = 3;
+        } else if ((c0 & 0xF8) == 0xF0 && i + 3 < text.size()) {
+            codepoint = ((c0 & 0x07) << 18) | ((static_cast<uint8_t>(text[i + 1]) & 0x3F) << 12) | ((static_cast<uint8_t>(text[i + 2]) & 0x3F) << 6) | (static_cast<uint8_t>(text[i + 3]) & 0x3F);
+            seqLen = 4;
+        } else {
+            codepoint = c0;
+            seqLen = 1;
+        }
+        i += seqLen;
+
+        if (codepoint == 0x2122) { // ™
+            totalWidth += fontSizePx;
+            continue;
+        }
+
+        const auto& g = getGlyph(codepoint, fontSizePx);
+        totalWidth += (g.advance > 0) ? g.advance : (fontSizePx / 2);
     }
     return totalWidth;
 }
