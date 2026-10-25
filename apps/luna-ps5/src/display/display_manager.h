@@ -78,6 +78,12 @@ public:
     bool presentYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v,
                        int strideY, int strideU, int strideV,
                        int width, int height);
+    bool presentYuv420WithHud(const uint8_t* y, const uint8_t* u, const uint8_t* v,
+                              int strideY, int strideU, int strideV,
+                              int width, int height,
+                              bool showHud,
+                              const std::string& hudLine1,
+                              const std::string& hudLine2 = "");
     void present();
 
     bool isReady() const { return isReady_; }

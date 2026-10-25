@@ -31,6 +31,11 @@ struct StreamStats {
     uint64_t videoFramesAssembled = 0;
     uint64_t audioFramesReceived = 0;
     uint64_t keyframeRequests = 0;
+    uint64_t spsCount = 0;
+    uint64_t ppsCount = 0;
+    uint64_t idrCount = 0;
+    uint64_t sliceCount = 0;
+    uint64_t droppedCorruptFrames = 0;
 };
 
 using VideoFrameCallback = std::function<void(const uint8_t* h264Data, size_t size, uint64_t timestamp)>;
@@ -117,7 +122,15 @@ private:
     std::mutex txMutex_;
     std::mutex videoRtpMutex_;
     std::vector<uint8_t> currentAccessUnit_;
+    std::vector<uint8_t> cachedSps_;
+    std::vector<uint8_t> cachedPps_;
     uint32_t currentVideoTs_ = 0;
+    bool currentAuHasVcl_ = false;
+    bool currentAuIsIdr_ = false;
+    bool currentAuCorrupted_ = false;
+    bool inFuA_ = false;
+    uint16_t lastVideoSeq_ = 0;
+    bool hasLastVideoSeq_ = false;
 
     VideoFrameCallback videoCb_;
     AudioFrameCallback audioCb_;

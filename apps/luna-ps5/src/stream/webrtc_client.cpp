@@ -685,7 +685,15 @@ void WebRtcClient::stop() {
     {
         std::lock_guard<std::mutex> lock(videoRtpMutex_);
         currentAccessUnit_.clear();
+        cachedSps_.clear();
+        cachedPps_.clear();
+        currentAuHasVcl_ = false;
+        currentAuIsIdr_ = false;
+        currentAuCorrupted_ = false;
+        inFuA_ = false;
+        hasLastVideoSeq_ = false;
     }
+    stats_ = StreamStats{};
     std::printf("[WebRTC] Sesión WebRTC cerrada limpiamente.\n");
 }
 
@@ -737,10 +745,23 @@ void WebRtcClient::processVideoRtp(const uint8_t* pkt, size_t len) {
         return;
     }
 
+    uint16_t seq = (static_cast<uint16_t>(pkt[2]) << 8) | static_cast<uint16_t>(pkt[3]);
+
     uint32_t timestamp = (static_cast<uint32_t>(pkt[4]) << 24) |
                          (static_cast<uint32_t>(pkt[5]) << 16) |
                          (static_cast<uint32_t>(pkt[6]) << 8)  |
                          static_cast<uint32_t>(pkt[7]);
+
+    uint32_t pktSsrc = (static_cast<uint32_t>(pkt[8]) << 24) |
+                       (static_cast<uint32_t>(pkt[9]) << 16) |
+                       (static_cast<uint32_t>(pkt[10]) << 8) |
+                       static_cast<uint32_t>(pkt[11]);
+
+    if (pktSsrc != 0 && videoSsrc_.load() != pktSsrc) {
+        videoSsrc_.store(pktSsrc);
+        pliRequested_.store(true);
+        luna::util::CrashLogger::log("[WebRTC] SSRC de Video detectado en RTP: %u (0x%08X)", pktSsrc, pktSsrc);
+    }
 
     size_t offset = 12 + (csrcCount * 4);
     if (extension) {
@@ -761,62 +782,163 @@ void WebRtcClient::processVideoRtp(const uint8_t* pkt, size_t len) {
     const uint8_t* payload = pkt + offset;
     size_t payloadLen = end - offset;
 
-    std::lock_guard<std::mutex> lock(videoRtpMutex_);
-    stats_.rtpPacketsReceived++;
-    if (stats_.rtpPacketsReceived == 1 || stats_.rtpPacketsReceived % 300 == 0) {
-        luna::util::CrashLogger::log("[WebRTC] Paquetes de video RTP recibidos: %llu (PT=%u, len=%zu)",
-                                     stats_.rtpPacketsReceived, payloadType, payloadLen);
-    }
+    VideoFrameCallback cbToInvoke;
+    std::vector<uint8_t> completedFrame;
 
-    if (currentVideoTs_ != timestamp && !currentAccessUnit_.empty()) {
-        currentAccessUnit_.clear();
-    }
-    currentVideoTs_ = timestamp;
+    {
+        std::lock_guard<std::mutex> lock(videoRtpMutex_);
+        stats_.rtpPacketsReceived++;
 
-    uint8_t nalHeader = payload[0];
-    uint8_t nalType = nalHeader & 0x1F;
+        uint8_t nalHeader = payload[0];
+        uint8_t nalType = nalHeader & 0x1F;
 
-    // 1. Unidades NAL simples (tipos 1 a 23): anteponer start code Annex-B 0x00000001
-    if (nalType >= 1 && nalType <= 23) {
-        currentAccessUnit_.insert(currentAccessUnit_.end(), kNalStartCode, kNalStartCode + 4);
-        currentAccessUnit_.insert(currentAccessUnit_.end(), payload, payload + payloadLen);
-    }
-    // 2. Paquetes de agregación STAP-A (tipo 24): separar cada NAL contenida con 0x00000001
-    else if (nalType == 24) {
-        size_t i = 1;
-        while (i + 2 <= payloadLen) {
-            uint16_t unitSize = (static_cast<uint16_t>(payload[i]) << 8) | payload[i + 1];
-            i += 2;
-            if (unitSize == 0 || i + unitSize > payloadLen) break;
+        if (stats_.rtpPacketsReceived <= 12 || stats_.rtpPacketsReceived % 300 == 0) {
+            uint8_t fuHdr = (nalType == 28 && payloadLen > 1) ? payload[1] : 0;
+            luna::util::CrashLogger::log("[WebRTC] Video RTP #%llu seq=%u ts=%u M=%d PT=%u len=%zu nal=%u fu=0x%02X",
+                                         stats_.rtpPacketsReceived, seq, timestamp, marker ? 1 : 0,
+                                         payloadType, payloadLen, nalType, fuHdr);
+        }
+
+        // Check sequence continuity
+        if (hasLastVideoSeq_) {
+            uint16_t expectedSeq = static_cast<uint16_t>(lastVideoSeq_ + 1);
+            if (seq != expectedSeq) {
+                currentAuCorrupted_ = true;
+                pliRequested_.store(true);
+            }
+        }
+        lastVideoSeq_ = seq;
+        hasLastVideoSeq_ = true;
+
+        // Timestamp boundary handling: NEVER discard SPS/PPS/SEI/AUD when timestamp advances to the slice!
+        if (currentVideoTs_ != timestamp && !currentAccessUnit_.empty()) {
+            if (currentAuHasVcl_) {
+                // Previous slice missed its marker packet; discard incomplete VCL and request keyframe
+                stats_.droppedCorruptFrames++;
+                pliRequested_.store(true);
+                currentAccessUnit_.clear();
+                currentAuHasVcl_ = false;
+                currentAuIsIdr_ = false;
+                currentAuCorrupted_ = false;
+                inFuA_ = false;
+            }
+        }
+        currentVideoTs_ = timestamp;
+
+        auto recordNalUnit = [&](const uint8_t* unitData, size_t unitLen) {
+            if (unitLen == 0) return;
+            uint8_t type = unitData[0] & 0x1F;
+            if (type == 7) {
+                stats_.spsCount++;
+                cachedSps_.assign(kNalStartCode, kNalStartCode + 4);
+                cachedSps_.insert(cachedSps_.end(), unitData, unitData + unitLen);
+                if (stats_.spsCount <= 5) {
+                    luna::util::CrashLogger::log("[WebRTC H264] SPS #%llu cacheado (%zu bytes)", stats_.spsCount, unitLen);
+                }
+                return;
+            } else if (type == 8) {
+                stats_.ppsCount++;
+                cachedPps_.assign(kNalStartCode, kNalStartCode + 4);
+                cachedPps_.insert(cachedPps_.end(), unitData, unitData + unitLen);
+                if (stats_.ppsCount <= 5) {
+                    luna::util::CrashLogger::log("[WebRTC H264] PPS #%llu cacheado (%zu bytes)", stats_.ppsCount, unitLen);
+                }
+                return;
+            } else if (type == 5) {
+                stats_.idrCount++;
+                currentAuHasVcl_ = true;
+                currentAuIsIdr_ = true;
+            } else if (type == 1) {
+                stats_.sliceCount++;
+                currentAuHasVcl_ = true;
+            }
             currentAccessUnit_.insert(currentAccessUnit_.end(), kNalStartCode, kNalStartCode + 4);
-            currentAccessUnit_.insert(currentAccessUnit_.end(), payload + i, payload + i + unitSize);
-            i += unitSize;
+            currentAccessUnit_.insert(currentAccessUnit_.end(), unitData, unitData + unitLen);
+        };
+
+        // 1. Single NAL unit (types 1..23)
+        if (nalType >= 1 && nalType <= 23) {
+            inFuA_ = false;
+            recordNalUnit(payload, payloadLen);
         }
-    }
-    // 3. Paquetes fragmentados FU-A (tipo 28): reensamblar fragmentos
-    else if (nalType == 28 && payloadLen > 2) {
-        uint8_t fuHeader = payload[1];
-        bool startBit = (fuHeader & 0x80) != 0;
-        uint8_t origNalType = fuHeader & 0x1F;
-        if (startBit) {
-            uint8_t reconstructedNal = (nalHeader & 0xE0) | origNalType;
-            currentAccessUnit_.insert(currentAccessUnit_.end(), kNalStartCode, kNalStartCode + 4);
-            currentAccessUnit_.push_back(reconstructedNal);
+        // 2. STAP-A aggregation packet (type 24)
+        else if (nalType == 24) {
+            inFuA_ = false;
+            size_t i = 1;
+            while (i + 2 <= payloadLen) {
+                uint16_t unitSize = (static_cast<uint16_t>(payload[i]) << 8) | payload[i + 1];
+                i += 2;
+                if (unitSize == 0 || i + unitSize > payloadLen) break;
+                recordNalUnit(payload + i, unitSize);
+                i += unitSize;
+            }
         }
-        currentAccessUnit_.insert(currentAccessUnit_.end(), payload + 2, payload + payloadLen);
+        // 3. FU-A fragmentation unit (type 28)
+        else if (nalType == 28 && payloadLen > 2) {
+            uint8_t fuHeader = payload[1];
+            bool startBit = (fuHeader & 0x80) != 0;
+            bool endBit = (fuHeader & 0x40) != 0;
+            uint8_t origNalType = fuHeader & 0x1F;
+            if (startBit) {
+                inFuA_ = true;
+                uint8_t reconstructedNal = (nalHeader & 0xE0) | origNalType;
+                if (origNalType == 5) {
+                    stats_.idrCount++;
+                    currentAuHasVcl_ = true;
+                    currentAuIsIdr_ = true;
+                } else if (origNalType == 1) {
+                    stats_.sliceCount++;
+                    currentAuHasVcl_ = true;
+                }
+                currentAccessUnit_.insert(currentAccessUnit_.end(), kNalStartCode, kNalStartCode + 4);
+                currentAccessUnit_.push_back(reconstructedNal);
+                currentAccessUnit_.insert(currentAccessUnit_.end(), payload + 2, payload + payloadLen);
+            } else if (inFuA_) {
+                currentAccessUnit_.insert(currentAccessUnit_.end(), payload + 2, payload + payloadLen);
+                if (endBit) {
+                    inFuA_ = false;
+                }
+            } else {
+                // Missing FU-A start fragment
+                currentAuCorrupted_ = true;
+                pliRequested_.store(true);
+            }
+        }
+
+        // Only emit access unit when marker=1 AND we have an actual VCL slice (not just standalone SPS/PPS!)
+        if (marker && !currentAccessUnit_.empty() && currentAuHasVcl_) {
+            if (currentAuCorrupted_) {
+                stats_.droppedCorruptFrames++;
+                pliRequested_.store(true);
+            } else {
+                stats_.videoFramesAssembled++;
+                if (currentAuIsIdr_ && !cachedSps_.empty() && !cachedPps_.empty()) {
+                    // Always prepend cached SPS + PPS to IDR keyframes so Videodec2 never misses parameter sets
+                    completedFrame.reserve(cachedSps_.size() + cachedPps_.size() + currentAccessUnit_.size());
+                    completedFrame.insert(completedFrame.end(), cachedSps_.begin(), cachedSps_.end());
+                    completedFrame.insert(completedFrame.end(), cachedPps_.begin(), cachedPps_.end());
+                    completedFrame.insert(completedFrame.end(), currentAccessUnit_.begin(), currentAccessUnit_.end());
+                } else {
+                    completedFrame = std::move(currentAccessUnit_);
+                }
+                if (stats_.videoFramesAssembled <= 5 || stats_.videoFramesAssembled % 120 == 0) {
+                    luna::util::CrashLogger::log("[WebRTC] Frame H.264 #%llu ensamblado (%zu bytes, IDR=%d, SPS=%llu, PPS=%llu)",
+                                                 stats_.videoFramesAssembled, completedFrame.size(),
+                                                 currentAuIsIdr_ ? 1 : 0, stats_.spsCount, stats_.ppsCount);
+                }
+                cbToInvoke = videoCb_;
+            }
+            currentAccessUnit_.clear();
+            currentAuHasVcl_ = false;
+            currentAuIsIdr_ = false;
+            currentAuCorrupted_ = false;
+            inFuA_ = false;
+        }
     }
 
-    // Al llegar al marcador RTP de fin de frame (M=1), entregar el access unit a Videodec2
-    if (marker && !currentAccessUnit_.empty()) {
-        stats_.videoFramesAssembled++;
-        if (stats_.videoFramesAssembled == 1 || stats_.videoFramesAssembled % 120 == 0) {
-            luna::util::CrashLogger::log("[WebRTC] Frames H.264 ensamblados: %llu (tam: %zu bytes)",
-                                         stats_.videoFramesAssembled, currentAccessUnit_.size());
-        }
-        if (videoCb_) {
-            videoCb_(currentAccessUnit_.data(), currentAccessUnit_.size(), timestamp);
-        }
-        currentAccessUnit_.clear();
+    // Invoke callback OUTSIDE videoRtpMutex_ so network lock is never held during processing
+    if (cbToInvoke && !completedFrame.empty()) {
+        cbToInvoke(completedFrame.data(), completedFrame.size(), timestamp);
     }
 }
 

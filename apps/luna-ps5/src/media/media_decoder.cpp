@@ -121,27 +121,36 @@ VideoDecoder::~VideoDecoder() {
 }
 
 bool VideoDecoder::init(int maxWidth, int maxHeight) {
-    needsKeyframe_ = true;
+    resetStreamState();
 
     fallbackY_.resize(1920 * 1080, 0x10);
     fallbackU_.resize(960 * 540, 0x80);
     fallbackV_.resize(960 * 540, 0x80);
+    planeY_.resize(1920 * 1088, 0x10);
     planeU_.resize(960 * 544, 0x80);
     planeV_.resize(960 * 544, 0x80);
+    uvRowBuf_.resize(4096, 0x80);
 
 #if defined(LUNA_TARGET_PS5)
     int rc = sceSysmoduleLoadModule(kVideodecModule);
-    if (rc == 0) {
+    luna::util::CrashLogger::log("[VideoDecoder] sceSysmoduleLoadModule(%u) -> 0x%08X",
+                                 kVideodecModule, static_cast<unsigned>(rc));
+    if (rc == 0 || rc == static_cast<int>(0x805A1000)) {
         Vdec2ComputeMemory compute{};
         compute.size = sizeof(compute);
-        if (sceVideodec2QueryComputeMemoryInfo(&compute) == 0) {
+        int qRc = sceVideodec2QueryComputeMemoryInfo(&compute);
+        luna::util::CrashLogger::log("[VideoDecoder] QueryComputeMemoryInfo -> 0x%08X (cpuGpuSize=%llu)",
+                                     static_cast<unsigned>(qRc), static_cast<unsigned long long>(compute.cpuGpuSize));
+        if (qRc == 0) {
             size_t computeSize = align16k(compute.cpuGpuSize);
             compute.cpuGpu = allocDirectMemory(computeSize, kCpuGpuRw);
             compute.cpuGpuSize = computeSize;
 
             Vdec2ComputeConfig computeCfg{};
             computeCfg.size = sizeof(computeCfg);
-            if (compute.cpuGpu && sceVideodec2AllocateComputeQueue(&computeCfg, &compute, &computeQueue_) == 0) {
+            int aRc = compute.cpuGpu ? sceVideodec2AllocateComputeQueue(&computeCfg, &compute, &computeQueue_) : -1;
+            luna::util::CrashLogger::log("[VideoDecoder] AllocateComputeQueue -> 0x%08X", static_cast<unsigned>(aRc));
+            if (aRc == 0) {
                 Vdec2DecoderConfig cfg{};
                 cfg.size = sizeof(cfg);
                 cfg.resourceType = 1;
@@ -150,7 +159,7 @@ bool VideoDecoder::init(int maxWidth, int maxHeight) {
                 cfg.maxLevel = 51; // Level 5.1
                 cfg.maxWidth = maxWidth;
                 cfg.maxHeight = maxHeight;
-                cfg.maxDpbFrames = 4;
+                cfg.maxDpbFrames = 8;
                 cfg.pipelineDepth = 1;
                 cfg.computeQueue = reinterpret_cast<uint64_t>(computeQueue_);
                 cfg.cpuPriority = 700;
@@ -158,9 +167,22 @@ bool VideoDecoder::init(int maxWidth, int maxHeight) {
 
                 Vdec2DecoderMemory mem{};
                 mem.size = sizeof(mem);
-                if (sceVideodec2QueryDecoderMemoryInfo(&cfg, &mem) == 0) {
+                int mRc = sceVideodec2QueryDecoderMemoryInfo(&cfg, &mem);
+                if (mRc != 0) {
+                    cfg.maxDpbFrames = 4;
+                    mem = Vdec2DecoderMemory{};
+                    mem.size = sizeof(mem);
+                    mRc = sceVideodec2QueryDecoderMemoryInfo(&cfg, &mem);
+                }
+                luna::util::CrashLogger::log("[VideoDecoder] QueryDecoderMemoryInfo(dpb=%d) -> 0x%08X (cpu=%llu gpu=%llu cpuGpu=%llu frame=%llu)",
+                                             cfg.maxDpbFrames, static_cast<unsigned>(mRc),
+                                             static_cast<unsigned long long>(mem.cpuSize),
+                                             static_cast<unsigned long long>(mem.gpuSize),
+                                             static_cast<unsigned long long>(mem.cpuGpuSize),
+                                             static_cast<unsigned long long>(mem.maxFrameSize));
+                if (mRc == 0) {
                     size_t cpuSize = align16k(mem.cpuSize);
-                    sceKernelMapNamedFlexibleMemory(&mem.cpu, cpuSize, 0x03, 0, "LunaVdecCpu");
+                    int fRc = sceKernelMapNamedFlexibleMemory(&mem.cpu, cpuSize, 0x03, 0, "LunaVdecCpu");
                     mem.gpuSize = align16k(mem.gpuSize);
                     mem.gpu = allocDirectMemory(mem.gpuSize, kGpuRwCpuWrite);
                     if (mem.cpuGpuSize) {
@@ -170,18 +192,24 @@ bool VideoDecoder::init(int maxWidth, int maxHeight) {
                     frameBufferSize_ = align16k(mem.maxFrameSize);
                     frameBuffer_ = static_cast<uint8_t*>(allocDirectMemory(frameBufferSize_, kCpuGpuRw));
 
-                    if (mem.cpu && mem.gpu && frameBuffer_ &&
-                        sceVideodec2CreateDecoder(&cfg, &mem, &decoder_) == 0) {
-                        hwActive_ = true;
-                        std::printf("[VideoDecoder] Decodificador Hardware PS5 (libSceVideodec2) ACTIVO (%dx%d)\n",
-                                    maxWidth, maxHeight);
+                    if (fRc == 0 && mem.cpu && mem.gpu && frameBuffer_) {
+                        int cRc = sceVideodec2CreateDecoder(&cfg, &mem, &decoder_);
+                        luna::util::CrashLogger::log("[VideoDecoder] sceVideodec2CreateDecoder -> 0x%08X", static_cast<unsigned>(cRc));
+                        if (cRc == 0 && decoder_) {
+                            hwActive_ = true;
+                            luna::util::CrashLogger::log("[VideoDecoder] Decodificador Hardware PS5 (libSceVideodec2) ACTIVO (%dx%d, dpb=%d)",
+                                                         maxWidth, maxHeight, cfg.maxDpbFrames);
+                        }
+                    } else {
+                        luna::util::CrashLogger::log("[VideoDecoder] Error reservando memoria para Videodec2 (fRc=0x%08X)",
+                                                     static_cast<unsigned>(fRc));
                     }
                 }
             }
         }
     }
     if (!hwActive_) {
-        std::printf("[VideoDecoder] Advertencia: libSceVideodec2 no disponible, usando ruta de respaldo\n");
+        luna::util::CrashLogger::log("[VideoDecoder] Advertencia: libSceVideodec2 no disponible");
     }
 #else
     (void)maxWidth; (void)maxHeight;
@@ -190,6 +218,14 @@ bool VideoDecoder::init(int maxWidth, int maxHeight) {
 
     isReady_ = true;
     return true;
+}
+
+void VideoDecoder::resetStreamState() {
+    needsKeyframe_.store(true);
+    hasReceivedKeyframe_ = false;
+    lastDecodeRc_.store(0);
+    lastDecodeError_.store(0);
+    decodedFrames_.store(0);
 }
 
 void VideoDecoder::shutdown() {
@@ -213,14 +249,35 @@ void VideoDecoder::shutdown() {
 bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, DecodedVideoFrame& outFrame) {
     if (!isReady_ || !h264Data || size < 4) return false;
 
-    // Detectar keyframes en el bitstream NAL (SPS=7, IDR=5)
+    bool hasSps = false;
+    bool hasPps = false;
+    bool hasIdr = false;
+    bool hasSlice = false;
+
+    // Inspect NAL unit types in the Annex-B Access Unit
     for (size_t i = 0; i + 4 < size; ++i) {
         if (h264Data[i] == 0 && h264Data[i + 1] == 0 && h264Data[i + 2] == 1) {
             uint8_t nalType = h264Data[i + 3] & 0x1F;
-            if (nalType == 5 || nalType == 7) {
-                needsKeyframe_ = false;
-            }
+            if (nalType == 7) hasSps = true;
+            else if (nalType == 8) hasPps = true;
+            else if (nalType == 5) hasIdr = true;
+            else if (nalType == 1) hasSlice = true;
+            i += 3;
         }
+    }
+
+    if (hasIdr && hasSps && hasPps) {
+        hasReceivedKeyframe_ = true;
+        needsKeyframe_.store(false);
+    }
+
+    // Do not feed non-VCL packets or orphan P-frames before the first complete IDR keyframe
+    if (!hasIdr && !hasSlice) {
+        return false;
+    }
+    if (!hasReceivedKeyframe_) {
+        needsKeyframe_.store(true);
+        return false;
     }
 
 #if defined(LUNA_TARGET_PS5)
@@ -237,52 +294,95 @@ bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, De
             rc = sceVideodec2Flush(decoder_, &frame, &info);
         }
 
+        lastDecodeRc_.store(static_cast<uint32_t>(rc));
+        lastDecodeError_.store(info.error);
+
         static int s_vdecLogged = 0;
-        if (s_vdecLogged < 15 && (rc != 0 || info.valid)) {
+        if (s_vdecLogged < 25 || (rc != 0 && s_vdecLogged < 50)) {
             s_vdecLogged++;
-            luna::util::CrashLogger::log("[VideoDecoder] sceVideodec2 rc=0x%08X valid=%u err=%u pic=%u %ux%u pitch=%u fmt=%u auSize=%zu",
+            luna::util::CrashLogger::log("[VideoDecoder] Vdec2 rc=0x%08X valid=%u err=%u pic=%u %ux%u pitch=%u pitchB=%u fmt=%u bufSz=%llu auSz=%zu idr=%d",
                                          static_cast<unsigned>(rc), info.valid, info.error, info.pictureCount,
-                                         info.width, info.height, info.pitchBytes ? info.pitchBytes : info.pitch,
-                                         info.frameFormat, size);
+                                         info.width, info.height, info.pitch, info.pitchBytes,
+                                         info.frameFormat, static_cast<unsigned long long>(info.bufferSize),
+                                         size, hasIdr ? 1 : 0);
         }
 
-        if (rc == 0 && info.valid && info.buffer) {
-            const auto* rawBuf = static_cast<const uint8_t*>(info.buffer);
-            int w = static_cast<int>(info.width);
-            int h = static_cast<int>(info.height);
-            int pitch = static_cast<int>(info.pitchBytes ? info.pitchBytes : info.pitch);
-
-            // Desentrelazar plano UV (NV12) a planos U y V separados (YUV420P)
-            const uint8_t* uvBase = rawBuf + (static_cast<size_t>(pitch) * h);
-            int chromaW = w / 2;
-            int chromaH = h / 2;
-            if (planeU_.size() < static_cast<size_t>(chromaW * chromaH)) {
-                planeU_.resize(chromaW * chromaH);
-                planeV_.resize(chromaW * chromaH);
+        if (rc != 0 || !info.valid || info.error != 0 || !info.buffer || info.width == 0 || info.height == 0) {
+            if (rc != 0 || info.error != 0) {
+                needsKeyframe_.store(true);
             }
-
-            for (int r = 0; r < chromaH; ++r) {
-                const uint8_t* srcRow = uvBase + (r * pitch);
-                uint8_t* dstU = planeU_.data() + (r * chromaW);
-                uint8_t* dstV = planeV_.data() + (r * chromaW);
-                for (int c = 0; c < chromaW; ++c) {
-                    dstU[c] = srcRow[c * 2];
-                    dstV[c] = srcRow[c * 2 + 1];
-                }
-            }
-
-            outFrame.y = rawBuf;
-            outFrame.u = planeU_.data();
-            outFrame.v = planeV_.data();
-            outFrame.strideY = pitch;
-            outFrame.strideU = chromaW;
-            outFrame.strideV = chromaW;
-            outFrame.width = w;
-            outFrame.height = h;
-            outFrame.pts = pts;
-            return true;
+            return false;
         }
-        return false;
+
+        const auto* rawBuf = static_cast<const uint8_t*>(info.buffer);
+        int w = static_cast<int>(info.width);
+        int rawH = static_cast<int>(info.height);
+        int h = (rawH == 1088) ? 1080 : rawH;
+        int codedH = (rawH + 15) & ~15;
+        int pitch = static_cast<int>(info.pitchBytes ? info.pitchBytes : info.pitch);
+        if (pitch < w) pitch = w;
+
+        if (info.bufferSize > 0 && static_cast<size_t>(pitch) * (codedH + h / 2) > info.bufferSize) {
+            codedH = rawH;
+        }
+
+        if (planeY_.size() < static_cast<size_t>(w * h)) {
+            planeY_.resize(static_cast<size_t>(w * h));
+        }
+
+        // Fast sequential SIMD row-by-row copy from DirectMemory to cached CPU RAM
+        for (int r = 0; r < h; ++r) {
+            std::memcpy(planeY_.data() + static_cast<size_t>(r) * w,
+                        rawBuf + static_cast<size_t>(r) * pitch,
+                        static_cast<size_t>(w));
+        }
+
+        // Verify the decoded luma plane is not an uninitialized all-zero buffer
+        uint8_t maxLuma = 0;
+        const size_t yTotal = static_cast<size_t>(w) * h;
+        const size_t step = std::max<size_t>(1, yTotal / 32);
+        for (size_t idx = 0; idx < yTotal; idx += step) {
+            if (planeY_[idx] > maxLuma) {
+                maxLuma = planeY_[idx];
+            }
+        }
+        if (maxLuma == 0) {
+            needsKeyframe_.store(true);
+            return false;
+        }
+
+        const uint8_t* uvBase = rawBuf + (static_cast<size_t>(pitch) * codedH);
+        int chromaW = w / 2;
+        int chromaH = h / 2;
+        if (planeU_.size() < static_cast<size_t>(chromaW * chromaH)) {
+            planeU_.resize(static_cast<size_t>(chromaW * chromaH));
+            planeV_.resize(static_cast<size_t>(chromaW * chromaH));
+        }
+        if (uvRowBuf_.size() < static_cast<size_t>(w)) {
+            uvRowBuf_.resize(static_cast<size_t>(w));
+        }
+
+        for (int r = 0; r < chromaH; ++r) {
+            std::memcpy(uvRowBuf_.data(), uvBase + (static_cast<size_t>(r) * pitch), static_cast<size_t>(w));
+            uint8_t* dstU = planeU_.data() + (static_cast<size_t>(r) * chromaW);
+            uint8_t* dstV = planeV_.data() + (static_cast<size_t>(r) * chromaW);
+            for (int c = 0; c < chromaW; ++c) {
+                dstU[c] = uvRowBuf_[c * 2];
+                dstV[c] = uvRowBuf_[c * 2 + 1];
+            }
+        }
+
+        outFrame.y = planeY_.data();
+        outFrame.u = planeU_.data();
+        outFrame.v = planeV_.data();
+        outFrame.strideY = w;
+        outFrame.strideU = chromaW;
+        outFrame.strideV = chromaW;
+        outFrame.width = w;
+        outFrame.height = h;
+        outFrame.pts = pts;
+        decodedFrames_.fetch_add(1);
+        return true;
     }
     return false;
 #else

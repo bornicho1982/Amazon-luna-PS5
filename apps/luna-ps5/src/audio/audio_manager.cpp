@@ -45,12 +45,12 @@ bool AudioManager::init(int sampleRate, int channels) {
         s_audioInitialized = true;
     }
 
-    // Probar primero S16Stereo (1) y luego FloatStereo (4) con grano de 256 muestras a 48kHz
-    audioFormat_ = 1;
-    audioHandle_ = sceAudioOutOpen(0xFF, 0, 0, kGrainFrames, static_cast<uint32_t>(sampleRate_), 1);
+    // Usar FloatStereo (4) igual que PSBox (audio_out_ps5.cpp), con fallback a S16Stereo (1)
+    audioFormat_ = 4;
+    audioHandle_ = sceAudioOutOpen(0xFF, 0, 0, kGrainFrames, static_cast<uint32_t>(sampleRate_), 4);
     if (audioHandle_ < 0) {
-        audioFormat_ = 4;
-        audioHandle_ = sceAudioOutOpen(0xFF, 0, 0, kGrainFrames, static_cast<uint32_t>(sampleRate_), 4);
+        audioFormat_ = 1;
+        audioHandle_ = sceAudioOutOpen(0xFF, 0, 0, kGrainFrames, static_cast<uint32_t>(sampleRate_), 1);
     }
     if (audioHandle_ < 0) {
         luna::util::CrashLogger::log("[Audio] Error al abrir sceAudioOut: 0x%08X", static_cast<unsigned>(audioHandle_));

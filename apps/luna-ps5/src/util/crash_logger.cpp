@@ -20,6 +20,28 @@ bool g_initialized = false;
 void CrashLogger::init(const std::string& logPath) {
     std::lock_guard<std::mutex> lock(g_logMutex);
     g_logFile = logPath;
+
+    // Preserve previous session log before truncating
+    if (FILE* oldF = std::fopen(g_logFile.c_str(), "rb")) {
+        std::fseek(oldF, 0, SEEK_END);
+        long sz = std::ftell(oldF);
+        if (sz > 100) {
+            std::fseek(oldF, 0, SEEK_SET);
+            std::string prevPath = g_logFile + ".prev";
+            if (FILE* prevF = std::fopen(prevPath.c_str(), "wb")) {
+                char copyBuf[4096];
+                size_t n = 0;
+                while ((n = std::fread(copyBuf, 1, sizeof(copyBuf), oldF)) > 0) {
+                    std::fwrite(copyBuf, 1, n, prevF);
+                }
+                std::fflush(prevF);
+                fsync(fileno(prevF));
+                std::fclose(prevF);
+            }
+        }
+        std::fclose(oldF);
+    }
+
     FILE* f = std::fopen(g_logFile.c_str(), "w");
     if (!f) {
         g_logFile = "./luna_trace.log";

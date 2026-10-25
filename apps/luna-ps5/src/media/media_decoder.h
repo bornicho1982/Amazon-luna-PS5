@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <vector>
 #include <string>
+#include <atomic>
 
 namespace luna::media {
 
@@ -26,24 +27,34 @@ public:
 
     bool init(int maxWidth = 1920, int maxHeight = 1088);
     void shutdown();
+    void resetStreamState();
 
     bool decode(const uint8_t* h264Data, size_t size, uint64_t pts, DecodedVideoFrame& outFrame);
-    bool needsKeyframe() const { return needsKeyframe_; }
+    bool needsKeyframe() const { return needsKeyframe_.load(); }
     bool isHardwareAccelerated() const { return hwActive_; }
+    uint32_t getLastReturnCode() const { return lastDecodeRc_.load(); }
+    uint8_t getLastDecodeError() const { return lastDecodeError_.load(); }
+    uint64_t getDecodedFrameCount() const { return decodedFrames_.load(); }
 
 private:
     bool isReady_ = false;
     bool hwActive_ = false;
-    bool needsKeyframe_ = true;
+    std::atomic<bool> needsKeyframe_{true};
+    bool hasReceivedKeyframe_ = false;
+    std::atomic<uint32_t> lastDecodeRc_{0};
+    std::atomic<uint8_t> lastDecodeError_{0};
+    std::atomic<uint64_t> decodedFrames_{0};
 
     void* computeQueue_ = nullptr;
     void* decoder_ = nullptr;
     uint8_t* frameBuffer_ = nullptr;
     size_t frameBufferSize_ = 0;
 
-    // Planos desentrelazados para NV12 -> YUV420P
+    // Planos en RAM CPU cacheada para NV12 -> YUV420P
+    std::vector<uint8_t> planeY_;
     std::vector<uint8_t> planeU_;
     std::vector<uint8_t> planeV_;
+    std::vector<uint8_t> uvRowBuf_;
 
     // Buffers de respaldo para modo simulación / Desktop
     std::vector<uint8_t> fallbackY_;

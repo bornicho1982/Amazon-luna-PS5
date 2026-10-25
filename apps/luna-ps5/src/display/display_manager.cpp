@@ -1112,8 +1112,7 @@ void DisplayManager::drawStreamingStatusScreen(const GameTile& game,
     // 4. Barra inferior de control
     fillRect(0, 980, 1920, 100, 0xFF0D0A1C);
     fillRect(0, 980, 1920, 2, 0xFF241842);
-    drawText(100, 1018, 3, "[CIRCULO (O)] Cancelar conexion y volver al catalogo", 0xFFE2E8F0);
-    drawText(1150, 1018, 3, "[OPTIONS + TOUCHPAD] Salir del juego en cualquier momento", 0xFF94A3B8);
+    drawText(70, 1018, 2, "[CIRCULO (O)] Cancelar y volver al catalogo   |   [L1 + R1 + OPTIONS] o [OPTIONS + TOUCH] Salir del stream", 0xFFE2E8F0);
 
     present();
 }
@@ -1121,6 +1120,15 @@ void DisplayManager::drawStreamingStatusScreen(const GameTile& game,
 bool DisplayManager::presentYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v,
                                   int strideY, int strideU, int strideV,
                                   int width, int height) {
+    return presentYuv420WithHud(y, u, v, strideY, strideU, strideV, width, height, false, "", "");
+}
+
+bool DisplayManager::presentYuv420WithHud(const uint8_t* y, const uint8_t* u, const uint8_t* v,
+                                          int strideY, int strideU, int strideV,
+                                          int width, int height,
+                                          bool showHud,
+                                          const std::string& hudLine1,
+                                          const std::string& hudLine2) {
     if (!isReady_ || !mappedMemory_ || !y || !u || !v) return false;
 
     uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
@@ -1176,6 +1184,19 @@ bool DisplayManager::presentYuv420(const uint8_t* y, const uint8_t* u, const uin
         }
     }
 #endif
+
+    if (showHud && !hudLine1.empty()) {
+        int hudH = hudLine2.empty() ? 38 : 66;
+        fillRect(20, 16, 1880, hudH, 0xFF0B0F19);
+        fillRect(20, 16, 1880, 2, 0xFF8B5CF6);
+        drawText(34, 23, 2, hudLine1, 0xFF38BDF8);
+        if (!hudLine2.empty()) {
+            drawText(34, 51, 1, hudLine2, 0xFFFDE68A);
+        }
+    } else if (!hudLine2.empty()) {
+        fillRect(20, 16, 860, 38, 0xFF7F1D1D);
+        drawText(34, 23, 2, hudLine2, 0xFFFFFFFF);
+    }
 
     present();
     return true;

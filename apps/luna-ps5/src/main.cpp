@@ -3,6 +3,9 @@
 #include <thread>
 #include <atomic>
 #include <vector>
+#include <deque>
+#include <mutex>
+#include <condition_variable>
 #include <csignal>
 #include <cstring>
 #include <sys/stat.h>
@@ -93,24 +96,143 @@ int main(int argc, char* argv[]) {
     rtcClient.init(cfg);
 
     std::atomic<bool> videoStreaming{false};
+    std::atomic<bool> workersRunning{true};
 
-    rtcClient.onVideo([&videoDecoder, &display, &rtcClient, &videoStreaming](const uint8_t* h264, size_t size, uint64_t pts) {
-        luna::media::DecodedVideoFrame frame;
-        if (videoDecoder.decode(h264, size, pts, frame)) {
-            videoStreaming = true;
-            display.presentYuv420(frame.y, frame.u, frame.v,
-                                  frame.strideY, frame.strideU, frame.strideV,
-                                  frame.width, frame.height);
-        } else if (videoDecoder.needsKeyframe()) {
+    struct QueuedVideoPacket {
+        std::vector<uint8_t> data;
+        uint64_t pts = 0;
+    };
+    std::mutex videoQueueMutex;
+    std::condition_variable videoQueueCv;
+    std::deque<QueuedVideoPacket> videoPacketQueue;
+
+    std::mutex audioQueueMutex;
+    std::condition_variable audioQueueCv;
+    std::deque<std::vector<uint8_t>> audioPacketQueue;
+
+    std::mutex latestFrameMutex;
+    std::vector<uint8_t> latestFrameY(1920 * 1080, 0x10);
+    std::vector<uint8_t> latestFrameU(960 * 540, 0x80);
+    std::vector<uint8_t> latestFrameV(960 * 540, 0x80);
+    int latestWidth = 1920;
+    int latestHeight = 1080;
+    int latestStrideY = 1920;
+    int latestStrideU = 960;
+    int latestStrideV = 960;
+    bool hasValidFrame = false;
+
+    auto clearMediaQueues = [&]() {
+        {
+            std::lock_guard<std::mutex> lk(videoQueueMutex);
+            videoPacketQueue.clear();
+        }
+        {
+            std::lock_guard<std::mutex> lk(audioQueueMutex);
+            audioPacketQueue.clear();
+        }
+        {
+            std::lock_guard<std::mutex> lk(latestFrameMutex);
+            hasValidFrame = false;
+        }
+        videoDecoder.resetStreamState();
+        videoStreaming.store(false);
+    };
+
+    // Network thread callbacks ONLY enqueue packets into bounded queues (never block libdatachannel!)
+    rtcClient.onVideo([&](const uint8_t* h264, size_t size, uint64_t pts) {
+        if (!h264 || size == 0) return;
+        bool needKey = false;
+        {
+            std::lock_guard<std::mutex> lk(videoQueueMutex);
+            if (videoPacketQueue.size() >= 15) {
+                videoPacketQueue.pop_front();
+                needKey = true;
+            }
+            videoPacketQueue.push_back(QueuedVideoPacket{std::vector<uint8_t>(h264, h264 + size), pts});
+        }
+        videoQueueCv.notify_one();
+        if (needKey) {
             rtcClient.requestKeyframe();
         }
     });
 
-    rtcClient.onAudio([&audioDecoder, &audio](const uint8_t* opus, size_t size, uint64_t pts) {
+    rtcClient.onAudio([&](const uint8_t* opus, size_t size, uint64_t pts) {
         (void)pts;
+        if (!opus || size == 0) return;
+        {
+            std::lock_guard<std::mutex> lk(audioQueueMutex);
+            if (audioPacketQueue.size() >= 40) {
+                audioPacketQueue.pop_front();
+            }
+            audioPacketQueue.emplace_back(opus, opus + size);
+        }
+        audioQueueCv.notify_one();
+    });
+
+    // Dedicated video decode thread (joined cleanly on exit)
+    std::thread videoDecodeThread([&]() {
+        while (workersRunning.load()) {
+            QueuedVideoPacket pkt;
+            {
+                std::unique_lock<std::mutex> lk(videoQueueMutex);
+                videoQueueCv.wait_for(lk, std::chrono::milliseconds(20), [&]() {
+                    return !workersRunning.load() || !videoPacketQueue.empty();
+                });
+                if (!workersRunning.load()) break;
+                if (videoPacketQueue.empty()) continue;
+                pkt = std::move(videoPacketQueue.front());
+                videoPacketQueue.pop_front();
+            }
+
+            luna::media::DecodedVideoFrame frame{};
+            if (videoDecoder.decode(pkt.data.data(), pkt.data.size(), pkt.pts, frame)) {
+                if (frame.width > 0 && frame.height > 0 && frame.y && frame.u && frame.v &&
+                    videoDecoder.getDecodedFrameCount() > 0) {
+                    const size_t yBytes = static_cast<size_t>(frame.strideY) * frame.height;
+                    const size_t uBytes = static_cast<size_t>(frame.strideU) * (frame.height / 2);
+                    const size_t vBytes = static_cast<size_t>(frame.strideV) * (frame.height / 2);
+                    {
+                        std::lock_guard<std::mutex> lk(latestFrameMutex);
+                        if (latestFrameY.size() < yBytes) latestFrameY.resize(yBytes);
+                        if (latestFrameU.size() < uBytes) latestFrameU.resize(uBytes);
+                        if (latestFrameV.size() < vBytes) latestFrameV.resize(vBytes);
+                        std::memcpy(latestFrameY.data(), frame.y, yBytes);
+                        std::memcpy(latestFrameU.data(), frame.u, uBytes);
+                        std::memcpy(latestFrameV.data(), frame.v, vBytes);
+                        latestWidth = frame.width;
+                        latestHeight = frame.height;
+                        latestStrideY = frame.strideY;
+                        latestStrideU = frame.strideU;
+                        latestStrideV = frame.strideV;
+                        hasValidFrame = true;
+                    }
+                    videoStreaming.store(true);
+                }
+            } else if (videoDecoder.needsKeyframe()) {
+                rtcClient.requestKeyframe();
+            }
+        }
+    });
+
+    // Dedicated audio decode thread (joined cleanly on exit)
+    std::thread audioDecodeThread([&]() {
         std::vector<int16_t> pcmSamples;
-        if (audioDecoder.decode(opus, size, pcmSamples)) {
-            audio.outputPcm(pcmSamples.data(), pcmSamples.size() / 2);
+        while (workersRunning.load()) {
+            std::vector<uint8_t> opusPkt;
+            {
+                std::unique_lock<std::mutex> lk(audioQueueMutex);
+                audioQueueCv.wait_for(lk, std::chrono::milliseconds(20), [&]() {
+                    return !workersRunning.load() || !audioPacketQueue.empty();
+                });
+                if (!workersRunning.load()) break;
+                if (audioPacketQueue.empty()) continue;
+                opusPkt = std::move(audioPacketQueue.front());
+                audioPacketQueue.pop_front();
+            }
+
+            if (audioDecoder.decode(opusPkt.data(), opusPkt.size(), pcmSamples)) {
+                audio.outputPcm(pcmSamples.data(), pcmSamples.size() / 2);
+            }
         }
     });
 
@@ -271,6 +393,8 @@ int main(int argc, char* argv[]) {
     uint64_t frameCount = 0;
     uint8_t reportBuf[64];
     size_t reportLen = 0;
+    int circleHoldFrames = 0;
+    bool showMiniHud = true;
 
     std::printf("[Main] Bucle principal activo a 60 FPS\n");
 
@@ -509,9 +633,10 @@ int main(int argc, char* argv[]) {
                     if (!info.iceUfrag.empty() && !info.icePwd.empty()) {
                         rtcClient.setRemoteIceCredentials(info.iceUfrag, info.icePwd);
                     }
+                    clearMediaQueues();
+                    circleHoldFrames = 0;
                     rtcClient.start();
                     luna::util::CrashLogger::logStep(7, "Hardware video & audio decoders ready, streaming active.");
-                    videoStreaming = false;
                     g_lastStatusText.clear();
                     appState = AppState::Streaming;
                 } else if (sessionClient.getState() == luna::session::SessionState::Failed) {
@@ -557,51 +682,100 @@ int main(int argc, char* argv[]) {
                 int actualRealIdx = filteredIndices.empty() ? selectedGameIndex : filteredIndices[selectedGameIndex];
                 const auto& curGame = games[actualRealIdx];
 
+                // Regla 1: El mando SIEMPRE debe responder para salir al catalogo (nunca bloqueado)
+                if (padState.buttons & luna::input::PAD_CIRCLE) {
+                    circleHoldFrames++;
+                } else {
+                    circleHoldFrames = 0;
+                }
+
+                bool comboL1R1Opt = (padState.buttons & luna::input::PAD_L1) &&
+                                    (padState.buttons & luna::input::PAD_R1) &&
+                                    (padState.buttons & luna::input::PAD_OPTIONS);
+                bool comboOptTouch = (padState.buttons & luna::input::PAD_OPTIONS) &&
+                                     (padState.buttons & luna::input::PAD_TOUCH);
+                bool circleExit = (!videoStreaming.load() && (pressedNow & luna::input::PAD_CIRCLE)) ||
+                                  (circleHoldFrames >= 35);
+
+                if (comboL1R1Opt || comboOptTouch || circleExit) {
+                    luna::util::CrashLogger::log("[Main] Saliendo del stream y regresando al catalogo por mando");
+                    rtcClient.stop();
+                    sessionClient.terminateSession(cbl.getAccessToken());
+                    clearMediaQueues();
+                    circleHoldFrames = 0;
+                    g_lastStatusText = "Sesion de juego finalizada.";
+                    appState = AppState::Catalog;
+                    break;
+                }
+
+                // Alternar Mini-HUD con L3
+                if (pressedNow & luna::input::PAD_L3) {
+                    showMiniHud = !showMiniHud;
+                }
+
                 // Serializar y enviar entrada de mando al juego en formato Protobuf oficial de Luna a 60 Hz
                 padMgr.serializeLunaProtobufReport(reportBuf, sizeof(reportBuf), reportLen, seq++);
                 if (rtcClient.isConnected() && reportLen > 0) {
                     rtcClient.sendInputPacket(reportBuf, reportLen);
                 }
 
-                // Si se presiona [CIRCULO (O)] mientras no hay video streaming -> Cancelar conexion y volver al catalogo
-                if (!videoStreaming.load() && (pressedNow & luna::input::PAD_CIRCLE)) {
-                    luna::util::CrashLogger::log("[Main] Cancelando conexion WebRTC por usuario");
-                    sessionClient.terminateSession(cbl.getAccessToken());
-                    rtcClient.stop();
-                    g_lastStatusText = "Conexion cancelada";
-                    appState = AppState::Catalog;
-                    break;
-                }
+                const auto& info = sessionClient.getSessionInfo();
+                const auto& stats = rtcClient.getStats();
+                uint64_t decFrames = videoDecoder.getDecodedFrameCount();
+                uint32_t vdecRc = videoDecoder.getLastReturnCode();
+                uint8_t vdecErr = videoDecoder.getLastDecodeError();
 
-                // Si se presiona Options + Touchpad -> Terminar stream y volver al catalogo
-                if ((padState.buttons & luna::input::PAD_OPTIONS) && (padState.buttons & luna::input::PAD_TOUCH)) {
-                    std::printf("[Main] Deteniendo stream WebRTC y regresando al catalogo...\n");
-                    sessionClient.terminateSession(cbl.getAccessToken());
-                    rtcClient.stop();
-                    videoStreaming = false;
-                    appState = AppState::Catalog;
-                    break;
-                }
+                char vdecHex[64];
+                std::snprintf(vdecHex, sizeof(vdecHex), "0x%08X (err:%u)", vdecRc, static_cast<unsigned>(vdecErr));
 
-                // Mientras no haya frames de video descodificados, mostrar pantalla de transmision en directo
-                if (!videoStreaming.load()) {
-                    const auto& info = sessionClient.getSessionInfo();
-                    const auto& stats = rtcClient.getStats();
-                    std::string statsStr = "Servidor Luna: " + info.publicIp + ":" + std::to_string(info.port) +
-                                           "   |   RTP Video: " + std::to_string(stats.rtpPacketsReceived) +
-                                           "   |   Audio: " + std::to_string(stats.audioFramesReceived) +
-                                           "   |   Frames: " + std::to_string(stats.videoFramesAssembled);
+                // Regla 2: NO ocultar drawStreamingStatusScreen hasta tener >= 1 frame real valido decodificado
+                if (!videoStreaming.load() || decFrames == 0) {
+                    std::string statsStr = "RTP Video: " + std::to_string(stats.rtpPacketsReceived) +
+                                           " (SPS:" + std::to_string(stats.spsCount) +
+                                           " PPS:" + std::to_string(stats.ppsCount) +
+                                           " IDR:" + std::to_string(stats.idrCount) +
+                                           " P:" + std::to_string(stats.sliceCount) +
+                                           ") | Audio: " + std::to_string(stats.audioFramesReceived) +
+                                           " | Ensamblados: " + std::to_string(stats.videoFramesAssembled);
                     std::string iceStatsStr = "ICE: " + rtcClient.getIceStateStr() +
-                                              "   |   PC: " + rtcClient.getPeerStateStr() +
-                                              "   |   Candidatos Locales: " + std::to_string(rtcClient.getLocalCandidateCount()) +
-                                              "   |   Remotos: " + std::to_string(rtcClient.getRemoteCandidateCount());
+                                              " | PC: " + rtcClient.getPeerStateStr() +
+                                              " | Decoded: " + std::to_string(decFrames) +
+                                              " | Videodec2 RC: " + std::string(vdecHex);
                     display.drawStreamingStatusScreen(
                         curGame,
-                        sessionClient.getStatusMessage().empty() ? "Conectando WebRTC a Amazon Luna Cloud..." : sessionClient.getStatusMessage(),
+                        sessionClient.getStatusMessage().empty()
+                            ? ("Servidor: " + info.publicIp + ":" + std::to_string(info.port) + " | Esperando primer frame H.264...")
+                            : sessionClient.getStatusMessage(),
                         statsStr,
                         iceStatsStr,
                         frameCount
                     );
+                } else {
+                    // Regla 3: Renderizar frame YUV420 validado + Mini-HUD de diagnostico en esquina superior izquierda
+                    std::string hudLine1 = "FPS: 60 | RTP Video: " + std::to_string(stats.rtpPacketsReceived) +
+                                           " (SPS:" + std::to_string(stats.spsCount) +
+                                           " PPS:" + std::to_string(stats.ppsCount) +
+                                           " IDR:" + std::to_string(stats.idrCount) +
+                                           ") | Frames Decodificados: " + std::to_string(decFrames) +
+                                           " | Last Dec Ret: " + std::string(vdecHex) +
+                                           " | Audio Pkts: " + std::to_string(stats.audioFramesReceived);
+                    std::string hudLine2;
+                    if (circleHoldFrames > 5) {
+                        hudLine2 = "Saliendo al catalogo... Manten pulsado [CIRCULO (O)] (" +
+                                   std::to_string((circleHoldFrames * 100) / 35) + "%)";
+                    } else if (showMiniHud) {
+                        hudLine2 = "[L3] Ocultar HUD   |   [Mantener (O)] o [L1 + R1 + OPTIONS]: Salir al menu";
+                    }
+
+                    std::lock_guard<std::mutex> lk(latestFrameMutex);
+                    if (hasValidFrame) {
+                        display.presentYuv420WithHud(
+                            latestFrameY.data(), latestFrameU.data(), latestFrameV.data(),
+                            latestStrideY, latestStrideU, latestStrideV,
+                            latestWidth, latestHeight,
+                            showMiniHud, hudLine1, hudLine2
+                        );
+                    }
                 }
                 break;
             }
@@ -616,6 +790,15 @@ int main(int argc, char* argv[]) {
     }
 
     rtcClient.stop();
+    workersRunning.store(false);
+    videoQueueCv.notify_all();
+    audioQueueCv.notify_all();
+    if (videoDecodeThread.joinable()) {
+        videoDecodeThread.join();
+    }
+    if (audioDecodeThread.joinable()) {
+        audioDecodeThread.join();
+    }
     audioDecoder.shutdown();
     videoDecoder.shutdown();
     padMgr.shutdown();
