@@ -203,15 +203,22 @@ void PadManager::poll() {
     if (b & 0x0080)   mapped |= PAD_LEFT;
     if (b & 0x0020)   mapped |= PAD_RIGHT;
     if (b & 0x0008)   mapped |= PAD_OPTIONS;
-    if (b & 0x100000) mapped |= PAD_TOUCH;
+    if ((b & 0x100000) || (b & 0x0001)) mapped |= PAD_TOUCH;
     if ((b & 0x0100) || raw.l2 > 30) mapped |= PAD_L2;
     if ((b & 0x0200) || raw.r2 > 30) mapped |= PAD_R2;
 
+    auto applyDeadzone = [](int val) -> int16_t {
+        if (val > -1800 && val < 1800) return 0;
+        if (val < -32768) return -32768;
+        if (val > 32767) return 32767;
+        return static_cast<int16_t>(val);
+    };
+
     state_.buttons = mapped;
-    state_.leftX = static_cast<int16_t>((static_cast<int>(raw.leftStick.x) - 128) * 256);
-    state_.leftY = static_cast<int16_t>((static_cast<int>(raw.leftStick.y) - 128) * 256);
-    state_.rightX = static_cast<int16_t>((static_cast<int>(raw.rightStick.x) - 128) * 256);
-    state_.rightY = static_cast<int16_t>((static_cast<int>(raw.rightStick.y) - 128) * 256);
+    state_.leftX = applyDeadzone((static_cast<int>(raw.leftStick.x) - 128) * 256);
+    state_.leftY = applyDeadzone((static_cast<int>(raw.leftStick.y) - 128) * 256);
+    state_.rightX = applyDeadzone((static_cast<int>(raw.rightStick.x) - 128) * 256);
+    state_.rightY = applyDeadzone((static_cast<int>(raw.rightStick.y) - 128) * 256);
     state_.leftTrigger = raw.l2;
     state_.rightTrigger = raw.r2;
 #endif
@@ -298,13 +305,15 @@ void PadManager::serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, siz
     }
 
     // 1. Mapear botones a la máscara oficial de Amazon Luna
+    bool overlayCombo = ((state_.buttons & PAD_OPTIONS) && (state_.buttons & PAD_TOUCH)) ||
+                        ((state_.buttons & PAD_L1) && (state_.buttons & PAD_R1) && (state_.buttons & PAD_OPTIONS));
     uint32_t lunaButtons = 0;
     if (state_.buttons & PAD_UP)       lunaButtons |= 0x0001;
     if (state_.buttons & PAD_DOWN)     lunaButtons |= 0x0002;
     if (state_.buttons & PAD_LEFT)     lunaButtons |= 0x0004;
     if (state_.buttons & PAD_RIGHT)    lunaButtons |= 0x0008;
-    if (state_.buttons & PAD_OPTIONS)  lunaButtons |= 0x0010;
-    if (state_.buttons & PAD_TOUCH)    lunaButtons |= 0x0020;
+    if ((state_.buttons & PAD_OPTIONS) && !overlayCombo) lunaButtons |= 0x0010; // Start / Menu
+    if ((state_.buttons & PAD_TOUCH) && !overlayCombo)   lunaButtons |= 0x0020; // View / Select / Back (Mapa / Inventario)
     if (state_.buttons & PAD_L3)       lunaButtons |= 0x0040;
     if (state_.buttons & PAD_R3)       lunaButtons |= 0x0080;
     if (state_.buttons & PAD_L1)       lunaButtons |= 0x0100;

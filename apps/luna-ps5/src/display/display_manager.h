@@ -13,16 +13,40 @@ struct GameTile {
     std::string id;
     std::string title;
     std::string publisher;
-    uint32_t badgeColor = 0xFF3B82F6;
+    std::string developer;
+    std::string releaseYear;
+    std::string genres;
+    std::string inputMethods = "Mando DualSense";
+    std::string playerCount = "1 jugador";
+    std::string metacritic;
+    std::string channelSubtext = "Incluido con Prime con Luna Estándar";
+    uint32_t badgeColor = 0xFF9146FF;
     std::string category = "LUNA+";
     std::string synopsis = "Disponible para jugar al instante en Amazon Luna Cloud.";
-    uint32_t heroColor = 0xFF7C3AED;
+    uint32_t heroColor = 0xFF9146FF;
     std::string coverUrl;
+    std::string backdropUrl;
     std::vector<uint8_t> coverRgba;
     int coverWidth = 0;
     int coverHeight = 0;
-    std::string pegiRating = "PEGI 3";
+    std::string pegiRating = "PEGI 12";
     bool detailsLoaded = false;
+    std::vector<GameTile> similarGames;
+};
+
+struct LunaCollection {
+    std::string id;
+    std::string title;
+    std::string subtitle;
+    bool isHeroRotator = false;
+    bool isRankings = false;
+    std::vector<GameTile> items;
+};
+
+struct PlayerProfileInfo {
+    std::string displayName = "Bornicho";
+    std::string discriminator = "#8663";
+    std::string planStatus = "Incluido con Prime";
 };
 
 class DisplayManager {
@@ -53,10 +77,25 @@ public:
                            uint64_t frameCount,
                            const std::string& currentCategory = "TODOS LOS JUEGOS");
 
+    void drawLunaHomeScreen(const std::vector<LunaCollection>& collections,
+                            const std::vector<std::string>& navTabs,
+                            int activeTabIdx,
+                            int focusZone,
+                            int selectedRowIdx,
+                            const std::vector<int>& rowSelectedCol,
+                            int heroBtnIdx,
+                            const PlayerProfileInfo& profile,
+                            bool padConnected,
+                            const std::string& statusText,
+                            uint64_t frameCount);
+
     void drawGameDetailScreen(const GameTile& game,
-                              const std::string& customerId,
+                              const PlayerProfileInfo& profile,
                               const std::string& statusText,
                               bool isConnecting,
+                              int detailZone,
+                              int detailBtnIdx,
+                              int similarSelectedIdx,
                               uint64_t frameCount);
 
     void drawStreamingStatusScreen(const GameTile& game,
@@ -83,7 +122,11 @@ public:
                               int width, int height,
                               bool showHud,
                               const std::string& hudLine1,
-                              const std::string& hudLine2 = "");
+                              const std::string& hudLine2 = "",
+                              bool overlayOpen = false,
+                              int overlaySelectedIdx = 0,
+                              bool hudPinned = false,
+                              const std::string& gameTitle = "");
     void present();
 
     bool isReady() const { return isReady_; }

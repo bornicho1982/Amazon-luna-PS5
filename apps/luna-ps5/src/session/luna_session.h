@@ -38,6 +38,11 @@ public:
                                                       const std::string& customerId = "",
                                                       const std::string& deviceSerial = "");
 
+    const std::vector<luna::display::LunaCollection>& getHomeCollections() const { return m_homeCollections; }
+    const std::vector<luna::display::LunaCollection>& getGameNightCollections() const { return m_gameNightCollections; }
+    const std::vector<luna::display::LunaCollection>& getLibraryCollections() const { return m_libraryCollections; }
+    const luna::display::PlayerProfileInfo& getPlayerProfile() const { return m_playerProfile; }
+
     bool preloadGameDetails(luna::display::GameTile& tile,
                             const std::string& accessToken,
                             const std::string& deviceSerial = "");
@@ -58,12 +63,19 @@ public:
 private:
     bool pollJob();
     bool fetchAppConfig(const std::string& accessToken);
+    void fetchNavigationAndProfile(const std::string& accessToken, const std::string& deviceSerial);
+    std::vector<luna::display::LunaCollection> fetchPageCollections(const std::string& pageType,
+                                                                    const std::string& pageId,
+                                                                    const std::string& accessToken,
+                                                                    const std::string& deviceSerial,
+                                                                    std::vector<luna::display::GameTile>& masterCatalog);
     bool resolveGameDetails(const std::string& gameId,
                             const std::string& accessToken,
                             const std::string& deviceSerial,
                             std::string& outPlayToken,
                             std::string& outBuildId,
-                            std::string& outProfileId);
+                            std::string& outProfileId,
+                            luna::display::GameTile* inoutTile = nullptr);
     bool loginPlayer(const std::string& profileId,
                      const std::string& accessToken,
                      const std::string& deviceSerial);
@@ -76,6 +88,11 @@ private:
     std::string m_tdi;
     std::string m_proxyHost = "https://proxy-prod.eu-west-1.tempo.digital.a2z.com";
     std::string m_statusMessage;
+
+    std::vector<luna::display::LunaCollection> m_homeCollections;
+    std::vector<luna::display::LunaCollection> m_gameNightCollections;
+    std::vector<luna::display::LunaCollection> m_libraryCollections;
+    luna::display::PlayerProfileInfo m_playerProfile;
 
     int m_pollAttempts = 0;
     static constexpr int kMaxPollAttempts = 40;

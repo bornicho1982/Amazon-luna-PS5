@@ -98,6 +98,176 @@ static inline std::string base64UrlDecode(const std::string& input) {
     return out;
 }
 
+static const uint32_t kCardColors[] = {
+    0xFF9146FF, // Luna Purple
+    0xFF0284C7, // Prime Sky Blue
+    0xFF10B981, // Emerald
+    0xFFF59E0B, // Amber
+    0xFF06B6D4, // Cyan
+    0xFFEC4899, // Pink
+    0xFF6366F1, // Indigo
+    0xFF14B8A6, // Teal
+    0xFFF97316, // Orange
+    0xFF8B5CF6, // Violet
+    0xFF3B82F6, // Blue
+    0xFFEF4444  // Red
+};
+
+std::string extractProductIdFromString(const std::string& str) {
+    size_t lunaPos = str.find("amzn1.luna.product.");
+    size_t adgPos = str.find("amzn1.adg.product.");
+    size_t prodPos = (lunaPos != std::string::npos) ? lunaPos : adgPos;
+    if (prodPos == std::string::npos) return "";
+
+    size_t endPos = prodPos;
+    while (endPos < str.size()) {
+        char c = str[endPos];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_') {
+            endPos++;
+        } else {
+            break;
+        }
+    }
+    return str.substr(prodPos, endPos - prodPos);
+}
+
+bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
+                             const std::string& colId,
+                             size_t colorIdx,
+                             luna::display::GameTile& outTile) {
+    using namespace luna::util;
+    std::string swId = sw["id"].asString();
+    std::string swType = sw["type"].asString();
+    std::string pdataStr = sw["presentationData"].asString();
+    JsonValue pdata = JsonValue::parse(pdataStr);
+
+    std::string cleanGid = pdata["gameId"].asString();
+    if (cleanGid.empty()) {
+        cleanGid = extractProductIdFromString(swId);
+    }
+    if (cleanGid.empty()) {
+        const auto& acts = sw["actions"];
+        if (acts.isArray()) {
+            for (size_t a = 0; a < acts.size(); ++a) {
+                cleanGid = extractProductIdFromString(acts[a]["target"].asString());
+                if (!cleanGid.empty()) break;
+                std::string actPayload = acts[a]["payload"].asString();
+                if (!actPayload.empty()) {
+                    JsonValue ap = JsonValue::parse(actPayload);
+                    cleanGid = ap["productId"].asString();
+                    if (cleanGid.empty()) cleanGid = extractProductIdFromString(actPayload);
+                    if (!cleanGid.empty()) break;
+                }
+            }
+        }
+    }
+    if (cleanGid.empty()) return false;
+
+    std::string title = pdata["title"].asString();
+    if (title.empty()) title = pdata["gameTitle"].asString();
+    if (title.empty()) title = pdata["productTitle"].asString();
+    if (title.empty()) title = pdata["name"].asString();
+    if (title.empty()) title = pdata["heading"].asString();
+    if (title.empty()) return false;
+
+    const auto& hover = pdata["hoverDetails"];
+
+    std::string publisher = hover["publishersText"].asString();
+    if (publisher.empty()) publisher = pdata["publishersText"].asString();
+    if (publisher.empty()) publisher = pdata["publisher"].asString();
+    if (publisher.empty()) publisher = pdata["publisherName"].asString();
+    if (publisher.empty()) publisher = pdata["developersText"].asString();
+
+    std::string developer = pdata["developersText"].asString();
+    if (developer.empty()) developer = pdata["developer"].asString();
+    if (developer.empty()) developer = publisher;
+
+    std::string releaseYear = pdata["releaseYear"].asString();
+
+    std::string pegi = hover["ageRating"]["categoryText"].asString();
+    if (pegi.empty()) pegi = pdata["ageRating"]["categoryText"].asString();
+    if (pegi.empty()) pegi = pdata["pegiRating"].asString();
+
+    std::string genres;
+    const auto& genreArr = pdata["genreTags"];
+    if (genreArr.isArray()) {
+        for (size_t g = 0; g < genreArr.size() && g < 3; ++g) {
+            std::string gt = genreArr[g].asString();
+            if (!gt.empty()) {
+                if (!genres.empty()) genres += " • ";
+                genres += gt;
+            }
+        }
+    }
+
+    std::string inputMethods = hover["gameInputsString"].asString();
+    if (inputMethods.empty()) inputMethods = "Mando DualSense";
+
+    std::string playerCount = hover["numberOfPlayers"].asString();
+    if (playerCount.empty()) playerCount = "1 jugador";
+
+    std::string metacritic = hover["metacritic"]["metacriticText"].asString();
+
+    std::string coverUrl = pdata["imagePortrait"].asString();
+    if (coverUrl.empty()) coverUrl = pdata["tileImagePortrait"].asString();
+    if (coverUrl.empty()) coverUrl = pdata["focusedImagePortrait"].asString();
+    if (coverUrl.empty()) coverUrl = pdata["boxArtUrl"].asString();
+    if (coverUrl.empty()) coverUrl = pdata["tileImageLandscape"].asString();
+    if (coverUrl.empty()) coverUrl = pdata["imageLandscape"].asString();
+
+    std::string backdropUrl = pdata["imageLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["focusedImageLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["tileImageLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImage"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImageLandscape"].asString();
+
+    std::string synopsis = pdata["primaryText"].asString();
+    if (synopsis.empty()) synopsis = pdata["description"].asString();
+    if (synopsis.empty()) synopsis = pdata["synopsis"].asString();
+    if (synopsis.empty()) synopsis = pdata["shortDescription"].asString();
+    if (synopsis.empty()) {
+        std::string lastPlayed = pdata["lastPlayedDate"].asString();
+        if (!lastPlayed.empty()) {
+            synopsis = "Jugado recientemente (" + lastPlayed + ") en tu cuenta de Amazon Luna.";
+        } else {
+            synopsis = "Disfruta de " + title + " al instante en streaming 1080p 60 FPS con Amazon Luna.";
+        }
+    }
+
+    std::string category = "INCLUIDO CON PRIME";
+    if (colId.find("recently_played") != std::string::npos || swType == "RECENTLY_PLAYED_TILE") {
+        category = "SEGUIR JUGANDO";
+    } else if (colId.find("game_night") != std::string::npos || colId.find("home_2") != std::string::npos) {
+        category = "GAMENIGHT";
+    } else if (colId.find("popular") != std::string::npos) {
+        category = "TOP LUNA";
+    } else if (colId.find("editors_pick") != std::string::npos || colId.find("adventure") != std::string::npos) {
+        category = "LUNA+";
+    }
+
+    outTile = luna::display::GameTile{};
+    outTile.id = cleanGid;
+    outTile.title = title;
+    outTile.publisher = publisher.empty() ? "Amazon Luna" : publisher;
+    outTile.developer = developer.empty() ? outTile.publisher : developer;
+    outTile.releaseYear = releaseYear.empty() ? "2025" : releaseYear;
+    outTile.pegiRating = pegi.empty() ? "PEGI 12" : pegi;
+    outTile.genres = genres.empty() ? "Acción • Aventura" : genres;
+    outTile.inputMethods = inputMethods;
+    outTile.playerCount = playerCount;
+    outTile.metacritic = metacritic;
+    outTile.synopsis = synopsis;
+    outTile.category = category;
+    outTile.coverUrl = coverUrl;
+    outTile.backdropUrl = backdropUrl;
+
+    uint32_t colColor = kCardColors[colorIdx % 12];
+    outTile.badgeColor = colColor;
+    outTile.heroColor = colColor;
+    return true;
+}
+
 } // namespace
 
 LunaSessionClient::LunaSessionClient() = default;
@@ -109,8 +279,8 @@ bool LunaSessionClient::fetchAppConfig(const std::string& accessToken) {
     std::string url = m_proxyHost + "/getAppConfig";
     std::vector<std::pair<std::string, std::string>> headers = {
         {"Content-Type", "application/json"},
-        {"x-amz-platform", "smart_tv_web"},
-        {"x-amz-device-type", "A2U9WJDSJD7QG9"},
+        {"x-amz-platform", "windows"},
+        {"x-amz-device-type", "A1PY8QQU9P0WJV"},
         {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
         {"x-amz-locale", "es_ES"},
         {"x-amz-access-token", accessToken}
@@ -136,27 +306,13 @@ bool LunaSessionClient::fetchAppConfig(const std::string& accessToken) {
     return false;
 }
 
-std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::string& accessToken,
-                                                                    const std::string& customerId,
-                                                                    const std::string& deviceSerial) {
-    std::vector<luna::display::GameTile> result;
-    if (accessToken.empty()) {
-        m_statusMessage = "Error: Token de acceso vacio";
-        luna::util::CrashLogger::log("[LunaCatalog ERROR] Token de acceso vacio");
-        return result;
-    }
-
-    luna::util::CrashLogger::log("[LunaCatalog] Solicitando catalogo dinamico a Amazon Luna...");
-
-    // Paso 1: Obtener AppConfig para inicializar TDI y Proxy
-    fetchAppConfig(accessToken);
-
-    // Paso 2: Encabezados validados contra backend Coral Amazon Luna
+void LunaSessionClient::fetchNavigationAndProfile(const std::string& accessToken,
+                                                  const std::string& deviceSerial) {
     std::vector<std::pair<std::string, std::string>> headers = {
         {"Content-Type", "application/json"},
         {"Accept", "application/json"},
-        {"x-amz-platform", "smart_tv_web"},
-        {"x-amz-device-type", "A2U9WJDSJD7QG9"},
+        {"x-amz-platform", "windows"},
+        {"x-amz-device-type", "A1PY8QQU9P0WJV"},
         {"x-amz-react-version", "1.0.37063.0"},
         {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
         {"x-amz-country-of-residence", "ES"},
@@ -164,7 +320,6 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
         {"Accept-Language", "es-ES,es;q=0.9,en;q=0.8"},
         {"x-amz-access-token", accessToken}
     };
-
     if (!deviceSerial.empty()) {
         headers.push_back({"x-amz-device-serial-number", deviceSerial});
     }
@@ -172,166 +327,257 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
         headers.push_back({"x-amz-tdi", m_tdi});
     }
 
-    // Paso 3: Solicitar landing_home con featureScheme vacio ("")
     std::string pageUrl = m_proxyHost + "/getPage";
-    std::string homePayload = "{\"featureScheme\":\"\",\"serviceToken\":\"eyJlbmNyeXB0UGFnZUlkIjpmYWxzZSwicGFnZUlkIjoiZGVmYXVsdCIsInBhZ2VUeXBlIjoibGFuZGluZ19ob21lIn0=\"}";
+    std::string navPayload = "{\"featureScheme\":\"\",\"pageContext\":{\"encryptPageId\":false,\"pageId\":\"navigation_bar\",\"pageType\":\"multistate_navigation\"}}";
+    auto resp = luna::net::HttpClient::post(pageUrl, navPayload, headers);
+    if (!resp.ok() || resp.body.empty()) return;
 
-    auto resp = luna::net::HttpClient::post(pageUrl, homePayload, headers);
-    luna::util::CrashLogger::log("[LunaCatalog] getPage (landing_home) -> HTTP %d (tam: %zu)",
-                                 resp.statusCode, resp.body.size());
+    using namespace luna::util;
+    JsonValue root = JsonValue::parse(resp.body);
+    const auto& secNav = root["pageMemberGroups"]["desktopSecondaryNavControllerConnected"]["widgets"];
+    if (secNav.isArray()) {
+        for (size_t i = 0; i < secNav.size(); ++i) {
+            const auto& w = secNav[i];
+            if (w["type"].asString() == "PLAYER_NAV_ITEM" || w["id"].asString().find("player") != std::string::npos) {
+                JsonValue pdata = JsonValue::parse(w["presentationData"].asString());
+                std::string dispName = pdata["displayName"].asString();
+                std::string disc = pdata["discriminator"].asString();
+                std::string primeText = pdata["includedWithPrime"].asString();
+                std::string planText = pdata["customerPlanStatus"].asString();
 
-    static const uint32_t kCardColors[] = {
-        0xFF0284C7, // Sky Blue
-        0xFFF59E0B, // Amber
-        0xFF10B981, // Emerald
-        0xFF06B6D4, // Cyan
-        0xFFEF4444, // Red
-        0xFF8B5CF6, // Purple
-        0xFFEC4899, // Pink
-        0xFF14B8A6, // Teal
-        0xFFF97316, // Orange
-        0xFF6366F1, // Indigo
-        0xFF84CC16, // Lime
-        0xFF3B82F6  // Blue
-    };
-
-    if (resp.ok() && !resp.body.empty()) {
-        using namespace luna::util;
-        JsonValue root = JsonValue::parse(resp.body);
-        const auto& widgets = root["pageMemberGroups"]["mainContent"]["widgets"];
-
-        if (widgets.isArray()) {
-            for (size_t i = 0; i < widgets.size(); ++i) {
-                const auto& col = widgets[i];
-                std::string colId = col["id"].asString();
-                const auto& subWidgets = col["widgets"];
-                if (!subWidgets.isArray()) continue;
-
-                for (size_t j = 0; j < subWidgets.size(); ++j) {
-                    const auto& sw = subWidgets[j];
-                    std::string swId = sw["id"].asString();
-
-                    std::string cleanGid;
-                    size_t lunaPos = swId.find("amzn1.luna.product.");
-                    size_t adgPos = swId.find("amzn1.adg.product.");
-                    size_t prodPos = (lunaPos != std::string::npos) ? lunaPos : adgPos;
-                    if (prodPos != std::string::npos) {
-                        size_t ampPos = swId.find_first_of("& \t\r\n\\", prodPos);
-                        cleanGid = (ampPos != std::string::npos) ? swId.substr(prodPos, ampPos - prodPos) : swId.substr(prodPos);
-                    } else {
-                        const auto& acts = sw["actions"];
-                        if (acts.isArray()) {
-                            for (size_t a = 0; a < acts.size(); ++a) {
-                                std::string target = acts[a]["target"].asString();
-                                size_t tLuna = target.find("amzn1.luna.product.");
-                                size_t tAdg = target.find("amzn1.adg.product.");
-                                size_t tPos = (tLuna != std::string::npos) ? tLuna : tAdg;
-                                if (tPos != std::string::npos) {
-                                    size_t idLen = (tLuna != std::string::npos) ? 55 : 54;
-                                    cleanGid = target.substr(tPos, idLen);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if (cleanGid.empty()) continue;
-
-                    // Filtrar duplicados
-                    bool dup = false;
-                    for (const auto& item : result) {
-                        if (item.id == cleanGid) { dup = true; break; }
-                    }
-                    if (dup) continue;
-
-                    std::string pdataStr = sw["presentationData"].asString();
-                    JsonValue pdata = JsonValue::parse(pdataStr);
-
-                    std::string title = pdata["title"].asString();
-                    if (title.empty()) title = pdata["name"].asString();
-                    if (title.empty()) title = pdata["heading"].asString();
-                    if (title.empty()) continue;
-
-                    std::string coverUrl = pdata["boxArtUrl"].asString();
-                    if (coverUrl.empty()) coverUrl = pdata["imagePortrait"].asString();
-                    if (coverUrl.empty()) coverUrl = pdata["imageLandscape"].asString();
-                    if (coverUrl.empty()) coverUrl = pdata["thumbnailUrl"].asString();
-
-                    std::string publisher = pdata["publisher"].asString();
-                    if (publisher.empty()) publisher = pdata["developer"].asString();
-                    if (publisher.empty()) publisher = pdata["publisherName"].asString();
-
-                    std::string synopsis = pdata["synopsis"].asString();
-                    if (synopsis.empty()) synopsis = pdata["shortDescription"].asString();
-                    if (synopsis.empty()) synopsis = pdata["description"].asString();
-
-                    std::string category = pdata["category"].asString();
-                    if (category.empty()) category = pdata["badgeText"].asString();
-                    if (category.empty()) {
-                        if (colId.find("recently_played") != std::string::npos) category = "MI BIBLIOTECA";
-                        else if (colId.find("popular") != std::string::npos) category = "DESTACADOS";
-                        else if (colId.find("luna_standard") != std::string::npos) category = "LUNA+";
-                        else if (colId.find("editors_pick") != std::string::npos) category = "SELECCION";
-                        else if (colId.find("adventure") != std::string::npos) category = "AVENTURA";
-                        else if (colId.find("highlight") != std::string::npos) category = "PRIME GAMING";
-                        else category = "LUNA+";
-                    }
-
-                    std::string pegi = pdata["pegiRating"].asString();
-
-                    luna::display::GameTile tile;
-                    tile.id = cleanGid;
-                    tile.title = title;
-                    tile.publisher = publisher.empty() ? "Amazon Luna" : publisher;
-                    tile.synopsis = synopsis.empty() ? "Disponible para jugar al instante en Amazon Luna Cloud." : synopsis;
-                    tile.category = category.empty() ? "LUNA+" : category;
-                    tile.pegiRating = pegi.empty() ? "PEGI 3" : pegi;
-                    tile.coverUrl = coverUrl;
-
-                    uint32_t colColor = kCardColors[result.size() % 12];
-                    tile.badgeColor = colColor;
-                    tile.heroColor = colColor;
-
-                    // Descargar y decodificar portada en memoria para las primeras 6 tarjetas visibles
-                    if (result.size() < 6 && !tile.coverUrl.empty() && tile.coverUrl.rfind("http", 0) == 0) {
-                        auto imgResp = luna::net::HttpClient::get(tile.coverUrl);
-                        if (imgResp.ok() && !imgResp.body.empty()) {
-                            int w = 0, h = 0;
-                            if (luna::util::decodeImageRgba(reinterpret_cast<const uint8_t*>(imgResp.body.data()),
-                                                            imgResp.body.size(), tile.coverRgba, w, h)) {
-                                tile.coverWidth = w;
-                                tile.coverHeight = h;
-                            }
-                        }
-                    }
-
-                    result.push_back(std::move(tile));
-                    luna::util::CrashLogger::log("[LunaCatalog] Juego detectado: %s (%s)", title.c_str(), cleanGid.c_str());
+                if (!dispName.empty()) m_playerProfile.displayName = dispName;
+                if (!disc.empty()) m_playerProfile.discriminator = disc;
+                if (!primeText.empty()) {
+                    m_playerProfile.planStatus = primeText;
+                } else if (!planText.empty()) {
+                    m_playerProfile.planStatus = planText;
                 }
+                luna::util::CrashLogger::log("[LunaSession] Perfil de jugador activo: %s %s (%s)",
+                                             m_playerProfile.displayName.c_str(),
+                                             m_playerProfile.discriminator.c_str(),
+                                             m_playerProfile.planStatus.c_str());
+                break;
             }
         }
     }
+}
 
-    if (!result.empty()) {
-        m_statusMessage = "Catalogo cargado: " + std::to_string(result.size()) + " juegos de Amazon Luna";
-    } else if (resp.statusCode > 0) {
-        m_statusMessage = "Error Amazon /getPage (HTTP " + std::to_string(resp.statusCode) + ")";
-        if (resp.statusCode == 403) {
-            m_statusMessage += " [Sesion caducada o token no renovado]";
-        } else if (resp.statusCode == 500) {
-            m_statusMessage += " [Error interno Amazon/Token invalido]";
-        }
-        if (!resp.body.empty()) {
-            std::string sub = resp.body.substr(0, 80);
-            for (char& c : sub) { if (c == '\r' || c == '\n') c = ' '; }
-            m_statusMessage += " " + sub;
-        }
-    } else {
-        m_statusMessage = "Error de red al conectar con Amazon Luna: " + resp.error;
+std::vector<luna::display::LunaCollection> LunaSessionClient::fetchPageCollections(
+    const std::string& pageType,
+    const std::string& pageId,
+    const std::string& accessToken,
+    const std::string& deviceSerial,
+    std::vector<luna::display::GameTile>& masterCatalog) {
+
+    std::vector<luna::display::LunaCollection> collections;
+    std::vector<std::pair<std::string, std::string>> headers = {
+        {"Content-Type", "application/json"},
+        {"Accept", "application/json"},
+        {"x-amz-platform", "windows"},
+        {"x-amz-device-type", "A1PY8QQU9P0WJV"},
+        {"x-amz-react-version", "1.0.37063.0"},
+        {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
+        {"x-amz-country-of-residence", "ES"},
+        {"x-amz-locale", "es_ES"},
+        {"Accept-Language", "es-ES,es;q=0.9,en;q=0.8"},
+        {"x-amz-access-token", accessToken}
+    };
+    if (!deviceSerial.empty()) {
+        headers.push_back({"x-amz-device-serial-number", deviceSerial});
+    }
+    if (!m_tdi.empty()) {
+        headers.push_back({"x-amz-tdi", m_tdi});
     }
 
-    luna::util::CrashLogger::log("[LunaCatalog] Total de juegos dinamicos cargados: %zu - %s",
-                                 result.size(), m_statusMessage.c_str());
+    std::string pageUrl = m_proxyHost + "/getPage";
+    std::string payload;
+    if (pageType == "landing_home" && pageId == "default") {
+        payload = "{\"featureScheme\":\"\",\"serviceToken\":\"eyJlbmNyeXB0UGFnZUlkIjpmYWxzZSwicGFnZUlkIjoiZGVmYXVsdCIsInBhZ2VUeXBlIjoibGFuZGluZ19ob21lIn0=\"}";
+    } else {
+        payload = "{\"featureScheme\":\"\",\"pageContext\":{\"encryptPageId\":false,\"pageId\":\"" +
+                  pageId + "\",\"pageType\":\"" + pageType + "\"}}";
+    }
+
+    auto resp = luna::net::HttpClient::post(pageUrl, payload, headers);
+    luna::util::CrashLogger::log("[LunaCatalog] getPage (%s/%s) -> HTTP %d (tam: %zu)",
+                                 pageType.c_str(), pageId.c_str(), resp.statusCode, resp.body.size());
+
+    if (!resp.ok() || resp.body.empty()) {
+        return collections;
+    }
+
+    using namespace luna::util;
+    JsonValue root = JsonValue::parse(resp.body);
+    const auto& widgets = root["pageMemberGroups"]["mainContent"]["widgets"];
+    if (!widgets.isArray()) return collections;
+
+    luna::display::LunaCollection heroCollection;
+    heroCollection.id = "collection_featured_rotator";
+    heroCollection.title = "Destacados en Amazon Luna";
+    heroCollection.isHeroRotator = true;
+
+    for (size_t i = 0; i < widgets.size(); ++i) {
+        const auto& col = widgets[i];
+        std::string colId = col["id"].asString();
+        std::string colType = col["type"].asString();
+        JsonValue colPdata = JsonValue::parse(col["presentationData"].asString());
+
+        std::string colTitle = colPdata["title"].asString();
+        if (colTitle.empty()) colTitle = colPdata["partnerTitle"].asString();
+        if (colTitle.empty()) colTitle = colPdata["headerText"].asString();
+        if (colTitle.empty()) colTitle = colPdata["heading"].asString();
+
+        std::string colSubtitle = colPdata["partnerDescription"].asString();
+        if (colSubtitle.empty()) colSubtitle = colPdata["subtitle"].asString();
+
+        const auto& subWidgets = col["widgets"];
+        if (!subWidgets.isArray() || subWidgets.size() == 0) continue;
+
+        if (colType == "FEATURED_ROTATOR_V3" || colId.find("featured_rotator") != std::string::npos) {
+            for (size_t j = 0; j < subWidgets.size(); ++j) {
+                luna::display::GameTile tile;
+                if (parseGameTileFromWidget(subWidgets[j], colId, heroCollection.items.size(), tile)) {
+                    heroCollection.items.push_back(tile);
+                    bool exists = false;
+                    for (const auto& m : masterCatalog) {
+                        if (m.id == tile.id) { exists = true; break; }
+                    }
+                    if (!exists) masterCatalog.push_back(tile);
+                }
+            }
+            continue;
+        }
+
+        luna::display::LunaCollection row;
+        row.id = colId;
+        row.title = colTitle;
+        row.subtitle = colSubtitle;
+        row.isRankings = (colType == "RANKINGS_ROW" || colId.find("popular") != std::string::npos);
+
+        if (row.title.empty() || row.title == "FEATURED") {
+            if (colId.find("recently_played") != std::string::npos) row.title = "Seguir jugando";
+            else if (colId.find("popular") != std::string::npos) row.title = "Las mejores novedades en juegos";
+            else if (colId.find("recently_added") != std::string::npos) row.title = "Añadidos recientemente";
+            else if (colId.find("editors_pick") != std::string::npos) row.title = "Selecciones del editor";
+            else if (colId.find("adventure") != std::string::npos) row.title = "Aventuras en mundos inmersivos";
+            else if (colId.find("game_night") != std::string::npos) row.title = "Juegos en grupo con GameNight";
+            else row.title = "Recomendados en Amazon Luna";
+        }
+
+        for (size_t j = 0; j < subWidgets.size(); ++j) {
+            luna::display::GameTile tile;
+            if (parseGameTileFromWidget(subWidgets[j], colId, masterCatalog.size() + j, tile)) {
+                row.items.push_back(tile);
+
+                bool exists = false;
+                for (auto& m : masterCatalog) {
+                    if (m.id == tile.id) {
+                        exists = true;
+                        if (m.publisher == "Amazon Luna" && tile.publisher != "Amazon Luna") m.publisher = tile.publisher;
+                        if (m.synopsis.find("Disfruta de ") == 0 && tile.synopsis.find("Disfruta de ") != 0) m.synopsis = tile.synopsis;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    masterCatalog.push_back(tile);
+                }
+            }
+        }
+
+        if (!row.items.empty()) {
+            collections.push_back(std::move(row));
+        }
+    }
+
+    // Ensure Hero Rotator has rich slides (combine rotator items + top featured / recently played games)
+    for (const auto& col : collections) {
+        for (const auto& item : col.items) {
+            if (heroCollection.items.size() >= 6) break;
+            bool inHero = false;
+            for (auto& h : heroCollection.items) {
+                if (h.id == item.id) {
+                    inHero = true;
+                    if (h.publisher == "Amazon Luna" && item.publisher != "Amazon Luna") h.publisher = item.publisher;
+                    if (h.genres == "Acción • Aventura" && item.genres != "Acción • Aventura") h.genres = item.genres;
+                    break;
+                }
+            }
+            if (!inHero) {
+                heroCollection.items.push_back(item);
+            }
+        }
+        if (heroCollection.items.size() >= 6) break;
+    }
+
+    if (!heroCollection.items.empty()) {
+        collections.insert(collections.begin(), std::move(heroCollection));
+    }
+
+    return collections;
+}
+
+std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::string& accessToken,
+                                                                    const std::string& customerId,
+                                                                    const std::string& deviceSerial) {
+    (void)customerId;
+    std::vector<luna::display::GameTile> result;
+    if (accessToken.empty()) {
+        m_statusMessage = "Error: Token de acceso vacio";
+        luna::util::CrashLogger::log("[LunaCatalog ERROR] Token de acceso vacio");
+        return result;
+    }
+
+    luna::util::CrashLogger::log("[LunaCatalog] Solicitando estructura completa 1:1 a Amazon Luna...");
+
+    // Paso 1: Obtener AppConfig para inicializar TDI y Proxy
+    fetchAppConfig(accessToken);
+
+    // Paso 2: Obtener barra de navegacion y perfil real del jugador (Bornicho #8663 | Incluido con Prime)
+    fetchNavigationAndProfile(accessToken, deviceSerial);
+
+    // Paso 3: Obtener colecciones de Inicio (landing_home), Biblioteca (landing_library) y GameNight
+    m_homeCollections = fetchPageCollections("landing_home", "default", accessToken, deviceSerial, result);
+    m_libraryCollections = fetchPageCollections("landing_library", "default", accessToken, deviceSerial, result);
+    m_gameNightCollections = fetchPageCollections("multistate_game_night", "default", accessToken, deviceSerial, result);
+
+    // Pre-descargar las primeras 6 portadas del Hero y la primera fila para arranque visual instantáneo
+    int downloadedCount = 0;
+    for (auto& col : m_homeCollections) {
+        for (auto& tile : col.items) {
+            if (downloadedCount >= 6) break;
+            if (tile.coverRgba.empty() && !tile.coverUrl.empty() && tile.coverUrl.rfind("http", 0) == 0) {
+                auto imgResp = luna::net::HttpClient::get(tile.coverUrl);
+                if (imgResp.ok() && !imgResp.body.empty()) {
+                    int w = 0, h = 0;
+                    if (luna::util::decodeImageRgba(reinterpret_cast<const uint8_t*>(imgResp.body.data()),
+                                                    imgResp.body.size(), tile.coverRgba, w, h)) {
+                        tile.coverWidth = w;
+                        tile.coverHeight = h;
+                        downloadedCount++;
+                        for (auto& m : result) {
+                            if (m.id == tile.id && m.coverRgba.empty()) {
+                                m.coverRgba = tile.coverRgba;
+                                m.coverWidth = w;
+                                m.coverHeight = h;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (downloadedCount >= 6) break;
+    }
+
+    if (!result.empty()) {
+        m_statusMessage = "Amazon Luna conectado: " + std::to_string(m_homeCollections.size()) +
+                          " filas y " + std::to_string(result.size()) + " juegos listos";
+    } else {
+        m_statusMessage = "Error al cargar el catalogo de Amazon Luna";
+    }
+
+    luna::util::CrashLogger::log("[LunaCatalog] Filas Inicio=%zu, Biblioteca=%zu, GameNight=%zu, Juegos=%zu",
+                                 m_homeCollections.size(), m_libraryCollections.size(),
+                                 m_gameNightCollections.size(), result.size());
     return result;
 }
 
@@ -340,10 +586,11 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
                                           const std::string& deviceSerial,
                                           std::string& outPlayToken,
                                           std::string& outBuildId,
-                                          std::string& outProfileId) {
+                                          std::string& outProfileId,
+                                          luna::display::GameTile* inoutTile) {
     fetchAppConfig(accessToken);
 
-    // Consulta de game_detail bajo perfil Windows para obtener playToken y buildId sin restricciones de OS
+    // Consulta de game_detail bajo perfil Windows para obtener playToken, buildId, descripcion completa y juegos similares
     std::vector<std::pair<std::string, std::string>> headers = {
         {"Content-Type", "application/json"},
         {"x-amz-platform", "windows"},
@@ -374,11 +621,121 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
         using namespace luna::util;
         JsonValue root = JsonValue::parse(resp.body);
 
-        // Buscar action GAME_SESSION_ASYNC en los widgets de la respuesta
         const auto& widgets = root["pageMemberGroups"]["mainContent"]["widgets"];
         if (widgets.isArray()) {
             for (size_t w = 0; w < widgets.size(); ++w) {
                 const auto& widget = widgets[w];
+                std::string wId = widget["id"].asString();
+                std::string wType = widget["type"].asString();
+
+                // 1. Extraer metadatos y descripcion completa de PRODUCT_DETAIL (item_game_details)
+                if (inoutTile && (wId == "item_game_details" || wType == "PRODUCT_DETAIL")) {
+                    JsonValue pdata = JsonValue::parse(widget["presentationData"].asString());
+                    std::string desc = pdata["description"].asString();
+                    if (!desc.empty()) inoutTile->synopsis = desc;
+
+                    std::string dev = pdata["developersText"].asString();
+                    if (!dev.empty()) inoutTile->developer = dev;
+
+                    std::string pub = pdata["publishersText"].asString();
+                    if (!pub.empty()) inoutTile->publisher = pub;
+
+                    std::string yr = pdata["releaseYear"].asString();
+                    if (!yr.empty()) inoutTile->releaseYear = yr;
+
+                    std::string pegi = pdata["ageRating"]["categoryText"].asString();
+                    if (!pegi.empty()) inoutTile->pegiRating = pegi;
+
+                    std::string portUrl = pdata["tileImagePortrait"].asString();
+                    if (!portUrl.empty() && inoutTile->coverUrl.empty()) inoutTile->coverUrl = portUrl;
+
+                    std::string landUrl = pdata["tileImageLandscape"].asString();
+                    if (landUrl.empty()) landUrl = pdata["backgroundImageLandscape"].asString();
+                    if (!landUrl.empty()) inoutTile->backdropUrl = landUrl;
+                }
+
+                // 2. Extraer generos reales desde collection_game_metadata_v2
+                if (inoutTile && wId == "collection_game_metadata_v2") {
+                    const auto& swList = widget["widgets"];
+                    if (swList.isArray()) {
+                        std::string genreStr;
+                        for (size_t s = 0; s < swList.size() && s < 4; ++s) {
+                            JsonValue sp = JsonValue::parse(swList[s]["presentationData"].asString());
+                            std::string tag = sp["primaryText"].asString();
+                            if (!tag.empty()) {
+                                if (!genreStr.empty()) genreStr += " • ";
+                                genreStr += tag;
+                            }
+                        }
+                        if (!genreStr.empty()) inoutTile->genres = genreStr;
+                    }
+                }
+
+                // 3. Extraer texto de suscripcion (Incluido con Prime con Luna Estándar)
+                if (inoutTile && wId.find("subtext") != std::string::npos) {
+                    const auto& swList = widget["widgets"];
+                    if (swList.isArray()) {
+                        for (size_t s = 0; s < swList.size(); ++s) {
+                            JsonValue sp = JsonValue::parse(swList[s]["presentationData"].asString());
+                            std::string subText = sp["primaryText"].asString();
+                            if (!subText.empty()) {
+                                inoutTile->channelSubtext = subText;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 4. Extraer especificaciones adicionales (collection_game_specifications)
+                if (inoutTile && wId == "collection_game_specifications") {
+                    const auto& swList = widget["widgets"];
+                    if (swList.isArray()) {
+                        for (size_t s = 0; s < swList.size(); ++s) {
+                            std::string swType = swList[s]["type"].asString();
+                            JsonValue sp = JsonValue::parse(swList[s]["presentationData"].asString());
+                            if (swType == "GAME_DESCRIPTION") {
+                                std::string gDesc = sp["gameDescription"].asString();
+                                if (!gDesc.empty() && inoutTile->synopsis.size() < gDesc.size()) {
+                                    inoutTile->synopsis = gDesc;
+                                }
+                            } else if (swType == "GAME_METADATA") {
+                                const auto& modes = sp["gameplayModes"];
+                                if (modes.isArray() && modes.size() > 0) {
+                                    std::string modeStr;
+                                    for (size_t m = 0; m < modes.size() && m < 2; ++m) {
+                                        if (!modeStr.empty()) modeStr += ", ";
+                                        modeStr += modes[m].asString();
+                                    }
+                                    if (!modeStr.empty()) inoutTile->playerCount = modeStr;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 5. Extraer juegos similares ("También te puede interesar" y "Más juegos de este editor")
+                if (inoutTile && (wId == "collection_similar_products" || wId == "collection_games_by_publisher")) {
+                    const auto& swList = widget["widgets"];
+                    if (swList.isArray()) {
+                        for (size_t s = 0; s < swList.size(); ++s) {
+                            if (inoutTile->similarGames.size() >= 10) break;
+                            luna::display::GameTile simTile;
+                            if (parseGameTileFromWidget(swList[s], wId, inoutTile->similarGames.size(), simTile)) {
+                                if (simTile.id != inoutTile->id) {
+                                    bool dup = false;
+                                    for (const auto& ex : inoutTile->similarGames) {
+                                        if (ex.id == simTile.id) { dup = true; break; }
+                                    }
+                                    if (!dup) {
+                                        inoutTile->similarGames.push_back(std::move(simTile));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 6. Buscar action GAME_SESSION_ASYNC (playToken y buildId)
                 const auto& swList = widget["widgets"];
                 if (swList.isArray()) {
                     for (size_t s = 0; s < swList.size(); ++s) {
@@ -394,10 +751,8 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
                                 }
                             }
                         }
-                        if (!outPlayToken.empty()) break;
                     }
                 }
-                if (!outPlayToken.empty()) break;
             }
         }
 
@@ -436,11 +791,9 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
 bool LunaSessionClient::preloadGameDetails(luna::display::GameTile& tile,
                                           const std::string& accessToken,
                                           const std::string& deviceSerial) {
-    if (tile.detailsLoaded) return true;
-
-    std::string playToken, buildId, profileId;
-    bool ok = resolveGameDetails(tile.id, accessToken, deviceSerial, playToken, buildId, profileId);
-    if (ok) {
+    if (!tile.detailsLoaded) {
+        std::string playToken, buildId, profileId;
+        resolveGameDetails(tile.id, accessToken, deviceSerial, playToken, buildId, profileId, &tile);
         tile.detailsLoaded = true;
     }
 
@@ -456,7 +809,7 @@ bool LunaSessionClient::preloadGameDetails(luna::display::GameTile& tile,
             }
         }
     }
-    return ok;
+    return tile.detailsLoaded;
 }
 
 bool LunaSessionClient::loginPlayer(const std::string& profileId,
@@ -511,6 +864,7 @@ bool LunaSessionClient::startSession(const std::string& gameId,
                                     const std::string& sdpOffer,
                                     const std::string& deviceSerial,
                                     const std::string& customerId) {
+    (void)customerId;
     m_info = GameSessionInfo{};
     m_info.gameId = gameId;
     m_accessToken = accessToken;
