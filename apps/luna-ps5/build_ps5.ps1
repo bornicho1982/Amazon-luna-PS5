@@ -58,7 +58,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Error compilando qrcodegen.c" }
 
     & clang -target x86_64-sie-ps5 -isysroot "$sdkDir" -isystem "$sdkDir\target\include" `
-        -std=c11 -O2 -fPIC -ffunction-sections -fdata-sections `
+        -std=c11 -O2 -fPIC -fno-plt -ffunction-sections -fdata-sections `
         -I"src" -c "src\platform\libc_compat.c" -o "ps5\obj\libc_compat.o"
     if ($LASTEXITCODE -ne 0) { throw "Error compilando libc_compat.c" }
 
@@ -83,7 +83,7 @@ try {
     }
 
     Write-Host "[3/5] Enlazando imagen intermedia PIE y convirtiendo a modulo PS5 (0xFE10 + NIDs + ORBI)..." -ForegroundColor Cyan
-    $sdkStubs = Get-ChildItem "$sdkDir\target\lib\*.so" | Where-Object { $_.Name -notmatch "WebKit|mono|VSH" } | ForEach-Object { $_.FullName }
+    $sdkStubs = Get-ChildItem "$sdkDir\target\lib\*.so" | Where-Object { $_.Name -notmatch "WebKit|mono|VSH|libkernel_web|libkernel_sys|libkernel_stub_weak" } | ForEach-Object { $_.FullName }
 
     $webrtcLibs = @(
         "$here\ps5\lib\libdatachannel-static.a",

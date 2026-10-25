@@ -77,7 +77,7 @@ def main():
     allowed_stubs = [
         'libSceAudioOut.so', 'libSceHttp.so', 'libSceNet.so', 'libScePad.so',
         'libSceSsl.so', 'libSceSysmodule.so', 'libSceSystemService.so', 'libSceUserService.so',
-        'libkernel.so', 'libkernel_web.so', 'libSceLibcInternal.so'
+        'libkernel.so', 'libSceLibcInternal.so'
     ]
     custom_stubs = [
         os.path.join(root, 'apps', 'luna-ps5', 'ps5', 'stubs', 'libSceVideodec2.so'),
@@ -98,7 +98,7 @@ def main():
     und_symbols = get_elf_symbols(pie_path, undefined_only=True)
     print(f'Auditing {len(und_symbols)} dynamic undefined symbols in llvm-pie.elf...')
 
-    prohibited = {'_ioctl', 'ioctl', 'kernel_mprotect'}
+    prohibited = {'_ioctl', 'ioctl', 'kernel_mprotect', 'sceNetGetsockname'}
     found_prohibited = [s for s in und_symbols if s in prohibited]
     if found_prohibited:
         print(f'CRITICAL ERROR: Prohibited symbol(s) detected: {found_prohibited}')
@@ -120,7 +120,19 @@ def main():
         sys.exit(1)
 
     print('OK: All dynamic symbols resolved successfully through imports.txt, libc.prx or official SDK stubs.')
-    print('OK: Zero forbidden symbols (_ioctl, ioctl, kernel_mprotect) present.')
+    print('OK: Zero forbidden symbols (_ioctl, ioctl, kernel_mprotect, sceNetGetsockname) present.')
+
+    # 3b. Verify eboot.elf module table (no libkernel_web or libkernel_sys)
+    eboot_elf = os.path.join(root, 'apps', 'luna-ps5', 'ps5', 'obj', 'eboot.elf')
+    with open(eboot_elf, 'rb') as f:
+        edata = f.read()
+    if b'libkernel_web' in edata or b'libkernel_sys' in edata:
+        print('CRITICAL ERROR: Forbidden module libkernel_web or libkernel_sys found in eboot.elf!')
+        sys.exit(1)
+    if b'libkernel.prx' not in edata:
+        print('CRITICAL ERROR: Standard libkernel.prx missing from eboot.elf!')
+        sys.exit(1)
+    print('OK: eboot.elf links exclusively against standard libkernel.prx (0 references to libkernel_web).')
 
     # 4. Check signed outputs
     eboot_bin = os.path.join(root, 'PPSA99825', 'eboot.bin')

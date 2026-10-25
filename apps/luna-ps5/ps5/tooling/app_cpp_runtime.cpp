@@ -120,6 +120,46 @@ extern "C" [[noreturn]] void __assert(const char *, const char *, int) noexcept
     __builtin_trap();
 }
 
+extern "C" int __cxa_guard_acquire(std::uint64_t *guard_object) noexcept
+{
+    auto *initialized = reinterpret_cast<std::uint8_t *>(guard_object);
+    auto *in_progress = initialized + 1;
+    if (__atomic_load_n(initialized, __ATOMIC_ACQUIRE) != 0)
+        return 0;
+    for (;;)
+    {
+        std::uint8_t expected = 0;
+        if (__atomic_compare_exchange_n(in_progress, &expected, 1, false,
+                                        __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+        {
+            if (__atomic_load_n(initialized, __ATOMIC_ACQUIRE) != 0)
+            {
+                __atomic_store_n(in_progress, 0, __ATOMIC_RELEASE);
+                return 0;
+            }
+            return 1;
+        }
+        if (__atomic_load_n(initialized, __ATOMIC_ACQUIRE) != 0)
+            return 0;
+        __asm__ volatile("pause" ::: "memory");
+    }
+}
+
+extern "C" void __cxa_guard_release(std::uint64_t *guard_object) noexcept
+{
+    auto *initialized = reinterpret_cast<std::uint8_t *>(guard_object);
+    auto *in_progress = initialized + 1;
+    __atomic_store_n(initialized, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(in_progress, 0, __ATOMIC_RELEASE);
+}
+
+extern "C" void __cxa_guard_abort(std::uint64_t *guard_object) noexcept
+{
+    auto *initialized = reinterpret_cast<std::uint8_t *>(guard_object);
+    auto *in_progress = initialized + 1;
+    __atomic_store_n(in_progress, 0, __ATOMIC_RELEASE);
+}
+
 void *operator new(std::size_t size)
 {
     if (void *address = allocate(size))

@@ -54,17 +54,48 @@ int ioctl(int fd, unsigned long request, ...) {
 }
 
 /* Local network interface discovery for libjuice / libdatachannel on PS5.
- * Returns a static interface entry configured directly with the console's LAN IP
- * (192.168.18.21) without invoking unmapped syscalls (socket/connect/getsockname).
+ * Probes the active outbound network interface via UDP socket + connect + getsockname
+ * (linked to standard libkernel.so) and falls back to 192.168.18.21 on failure.
  * Uses FreeBSD sockaddr_in layout (sin_len = 16, sin_family = AF_INET). */
 int getifaddrs(struct ifaddrs **ifap) {
     if (!ifap) return -1;
     *ifap = NULL;
 
+    struct in_addr local_in;
+    memset(&local_in, 0, sizeof(local_in));
+
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s >= 0) {
+        struct sockaddr_in dst;
+        memset(&dst, 0, sizeof(dst));
+        dst.sin_len = sizeof(struct sockaddr_in);
+        dst.sin_family = AF_INET;
+        dst.sin_port = htons(80);
+        inet_pton(AF_INET, "8.8.8.8", &dst.sin_addr);
+        if (connect(s, (struct sockaddr *)&dst, sizeof(dst)) == 0) {
+            struct sockaddr_in local;
+            memset(&local, 0, sizeof(local));
+            socklen_t len = sizeof(local);
+            if (getsockname(s, (struct sockaddr *)&local, &len) == 0) {
+                local_in = local.sin_addr;
+            }
+        }
+        close(s);
+    }
+
+    if (local_in.s_addr == 0 || local_in.s_addr == htonl(INADDR_LOOPBACK)) {
+        inet_pton(AF_INET, "192.168.18.21", &local_in);
+    }
+
     struct ifaddrs *ifa = (struct ifaddrs *)calloc(1, sizeof(struct ifaddrs));
     if (!ifa) return -1;
 
-    ifa->ifa_name = strdup("eth0");
+    ifa->ifa_name = (char *)calloc(1, 5);
+    if (!ifa->ifa_name) {
+        free(ifa);
+        return -1;
+    }
+    memcpy(ifa->ifa_name, "eth0", 5);
     ifa->ifa_flags = IFF_UP | IFF_BROADCAST | IFF_RUNNING;
 
     struct sockaddr_in *sa_addr = (struct sockaddr_in *)calloc(1, sizeof(struct sockaddr_in));
@@ -76,7 +107,7 @@ int getifaddrs(struct ifaddrs **ifap) {
     sa_addr->sin_len = sizeof(struct sockaddr_in);
     sa_addr->sin_family = AF_INET;
     sa_addr->sin_port = 0;
-    inet_pton(AF_INET, "192.168.18.21", &sa_addr->sin_addr);
+    sa_addr->sin_addr = local_in;
     ifa->ifa_addr = (struct sockaddr *)sa_addr;
 
     struct sockaddr_in *sa_mask = (struct sockaddr_in *)calloc(1, sizeof(struct sockaddr_in));
@@ -121,14 +152,6 @@ void freeifaddrs(struct ifaddrs *ifa) {
         free(ifa);
         ifa = next;
     }
-}
-
-int sceNetGetsockname(int s, struct sockaddr *name, socklen_t *namelen);
-
-/* Route getsockname to official Sony libSceNet sceNetGetsockname
- * to avoid unmapped BSD socket imports in libkernel. */
-int getsockname(int fd, struct sockaddr *addr, socklen_t *len) {
-    return sceNetGetsockname(fd, addr, len);
 }
 
 /* Hardware entropy & random number generation for PS5 (Zen 2 RDRAND + RDTSC fallback) */
