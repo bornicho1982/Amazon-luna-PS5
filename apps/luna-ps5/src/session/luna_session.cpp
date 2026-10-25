@@ -541,9 +541,11 @@ bool LunaSessionClient::startSession(const std::string& gameId,
     }
 
     // Paso 4: Construir oferta WebRTC interna y payload para createGameSessionJob
-    std::string signalingInner = "{\"type\":\"offer\",\"sdp\":\"" + escapeJson(sdpOffer) + "\","
-        "\"extras\":{\"features\":{},\"requestedChannels\":[\"display\",\"audio\",\"input\",\"participant\"],"
-        "\"clientContext\":{\"browserClientRole\":\"browser\",\"browserType\":\"Chrome\",\"browserVersion\":\"120.0.0.0\"}}}";
+    std::string signalingInner = "{\"sdp\":\"" + escapeJson(sdpOffer) + "\",\"type\":\"offer\","
+        "\"extras\":{\"features\":[],"
+        "\"clientContext\":{\"browserType\":\"Chrome\",\"browserVersion\":\"131.0.0.0\","
+        "\"deviceModel\":\"Windows\",\"deviceType\":\"unknown\",\"osName\":\"Windows\",\"osVersion\":\"10\"},"
+        "\"requestedChannels\":[\"display\",\"audio\",\"input\",\"participant\"]}}";
 
     std::string payload = "{\n"
         "  \"gameId\": \"" + gameId + "\",\n"

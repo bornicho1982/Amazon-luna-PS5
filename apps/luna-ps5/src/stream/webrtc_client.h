@@ -72,9 +72,16 @@ public:
 
     void processVideoRtp(const uint8_t* pkt, size_t len);
     void processAudioRtp(const uint8_t* pkt, size_t len);
+    void sendRtcpFeedback(bool includePli);
+    void sendPingAndKeepalive();
+
+    uint32_t getVideoSsrc() const { return videoSsrc_.load(); }
+    void setVideoSsrc(uint32_t ssrc) { videoSsrc_.store(ssrc); }
+    bool consumePliRequest() { return pliRequested_.exchange(false); }
 
 private:
     void setupPeerConnection();
+    void sendLunaChannelHandshake();
 
     StreamConfig config_;
     StreamStats stats_{};
@@ -97,7 +104,18 @@ private:
     std::vector<std::string> localCandidatesList_;
     std::mutex candidateMutex_;
 
+    std::atomic<uint32_t> videoSsrc_{0};
+    std::atomic<uint32_t> audioSsrc_{0};
+    std::atomic<bool> pliRequested_{true};
+    std::atomic<uint8_t> firSeqNo_{1};
+    std::atomic<uint64_t> lastRtcpTimeMs_{0};
+    std::atomic<uint64_t> channelOpenTimeMs_{0};
+    std::atomic<uint64_t> lastPingTimeMs_{0};
+    std::atomic<uint64_t> lastIdleResetTimeMs_{0};
+    std::atomic<uint32_t> pingsSentCount_{0};
+
     std::mutex txMutex_;
+    std::mutex videoRtpMutex_;
     std::vector<uint8_t> currentAccessUnit_;
     uint32_t currentVideoTs_ = 0;
 

@@ -66,6 +66,7 @@ private:
     int sampleRate_ = 48000;
     int channels_ = 2;
     uint32_t frameCounter_ = 0;
+    void* opusDec_ = nullptr;
 };
 
 } // namespace luna::media

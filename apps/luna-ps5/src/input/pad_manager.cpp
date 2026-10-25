@@ -320,53 +320,72 @@ void PadManager::serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, siz
     uint32_t thumbRX = static_cast<uint32_t>(state_.rightX + 32768);
     uint32_t thumbRY = static_cast<uint32_t>(32767 - state_.rightY);
 
-    // 2. Serializar sub-mensaje GamePadEvent
+    // 2. Serializar sub-mensaje proto.dcv.input.GamePadEvent
     uint8_t evtBuf[64];
     size_t e = 0;
 
-    // tag 1: deviceId (varint)
-    evtBuf[e++] = (1 << 3) | 0;
-    e += writeVarint(evtBuf + e, padIndex);
+    // tag 1: deviceid (uint32, omit if 0 per proto3)
+    if (padIndex != 0) {
+        evtBuf[e++] = (1 << 3) | 0;
+        e += writeVarint(evtBuf + e, static_cast<uint64_t>(padIndex));
+    }
 
-    // tag 2: dwPacketNumber (varint)
-    evtBuf[e++] = (2 << 3) | 0;
-    e += writeVarint(evtBuf + e, packetNum);
+    // tag 2: dwpacketnumber (uint32)
+    if (packetNum != 0) {
+        evtBuf[e++] = (2 << 3) | 0;
+        e += writeVarint(evtBuf + e, packetNum);
+    }
 
-    // tag 3: deviceType (0 = DS4/DualSense)
-    evtBuf[e++] = (3 << 3) | 0;
-    e += writeVarint(evtBuf + e, 0);
+    // tag 3: wbuttons (uint32)
+    if (lunaButtons != 0) {
+        evtBuf[e++] = (3 << 3) | 0;
+        e += writeVarint(evtBuf + e, lunaButtons);
+    }
 
-    // tag 4: wButtons (varint)
-    evtBuf[e++] = (4 << 3) | 0;
-    e += writeVarint(evtBuf + e, lunaButtons);
+    // tag 4: blefttrigger (uint32)
+    if (state_.leftTrigger != 0) {
+        evtBuf[e++] = (4 << 3) | 0;
+        e += writeVarint(evtBuf + e, state_.leftTrigger);
+    }
 
-    // tag 5: bLeftTrigger (varint)
-    evtBuf[e++] = (5 << 3) | 0;
-    e += writeVarint(evtBuf + e, state_.leftTrigger);
+    // tag 5: brighttrigger (uint32)
+    if (state_.rightTrigger != 0) {
+        evtBuf[e++] = (5 << 3) | 0;
+        e += writeVarint(evtBuf + e, state_.rightTrigger);
+    }
 
-    // tag 6: bRightTrigger (varint)
-    evtBuf[e++] = (6 << 3) | 0;
-    e += writeVarint(evtBuf + e, state_.rightTrigger);
+    // tag 6: sthumblx (uint32)
+    if (thumbLX != 0) {
+        evtBuf[e++] = (6 << 3) | 0;
+        e += writeVarint(evtBuf + e, thumbLX);
+    }
 
-    // tag 7: sThumbLX (varint)
-    evtBuf[e++] = (7 << 3) | 0;
-    e += writeVarint(evtBuf + e, thumbLX);
+    // tag 7: sthumbly (uint32)
+    if (thumbLY != 0) {
+        evtBuf[e++] = (7 << 3) | 0;
+        e += writeVarint(evtBuf + e, thumbLY);
+    }
 
-    // tag 8: sThumbLY (varint)
-    evtBuf[e++] = (8 << 3) | 0;
-    e += writeVarint(evtBuf + e, thumbLY);
+    // tag 8: sthumbrx (uint32)
+    if (thumbRX != 0) {
+        evtBuf[e++] = (8 << 3) | 0;
+        e += writeVarint(evtBuf + e, thumbRX);
+    }
 
-    // tag 9: sThumbRX (varint)
-    evtBuf[e++] = (9 << 3) | 0;
-    e += writeVarint(evtBuf + e, thumbRX);
+    // tag 9: sthumbry (uint32)
+    if (thumbRY != 0) {
+        evtBuf[e++] = (9 << 3) | 0;
+        e += writeVarint(evtBuf + e, thumbRY);
+    }
 
-    // tag 10: sThumbRY (varint)
-    evtBuf[e++] = (10 << 3) | 0;
-    e += writeVarint(evtBuf + e, thumbRY);
+    // tag 11: devicetype (enum GamePadType: X360 = 0, DS4 = 1)
+    evtBuf[e++] = (11 << 3) | 0;
+    e += writeVarint(evtBuf + e, 1);
 
-    // 3. Envolver en ClientMessage (tag 1: length-delimited, wire type 2 = 0x0A)
+    // 3. Envolver en proto.dcv.input.ClientMessage (field 104 = gamePadEvent, wire tag (104 << 3) | 2 = 834 = 0xC2 0x06)
     size_t outIdx = 0;
-    buffer[outIdx++] = 0x0A;
+    buffer[outIdx++] = 0xC2;
+    buffer[outIdx++] = 0x06;
     outIdx += writeVarint(buffer + outIdx, e);
     std::memcpy(buffer + outIdx, evtBuf, e);
     outIdx += e;

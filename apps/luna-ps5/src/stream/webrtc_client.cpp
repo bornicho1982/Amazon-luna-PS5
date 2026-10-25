@@ -16,6 +16,98 @@ constexpr uint8_t kNalStartCode[4] = {0x00, 0x00, 0x00, 0x01};
 constexpr uint8_t kVideoPayloadType = 108; // Amazon Luna H.264
 constexpr uint8_t kAudioPayloadType = 111; // Opus 48kHz stereo
 
+uint64_t nowSteadyMs() {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+uint64_t nowEpochMs() {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+void appendVarint(std::vector<uint8_t>& buf, uint64_t val) {
+    while (val >= 0x80) {
+        buf.push_back(static_cast<uint8_t>((val & 0x7F) | 0x80));
+        val >>= 7;
+    }
+    buf.push_back(static_cast<uint8_t>(val & 0x7F));
+}
+
+void appendTagAndBytes(std::vector<uint8_t>& out, uint32_t fieldNum, const uint8_t* data, size_t len) {
+    appendVarint(out, (static_cast<uint64_t>(fieldNum) << 3) | 2u);
+    appendVarint(out, len);
+    out.insert(out.end(), data, data + len);
+}
+
+void appendTagAndString(std::vector<uint8_t>& out, uint32_t fieldNum, const char* str) {
+    appendTagAndBytes(out, fieldNum, reinterpret_cast<const uint8_t*>(str), std::strlen(str));
+}
+
+void appendTagAndVarint(std::vector<uint8_t>& out, uint32_t fieldNum, uint64_t val) {
+    appendVarint(out, (static_cast<uint64_t>(fieldNum) << 3) | 0u);
+    appendVarint(out, val);
+}
+
+void writeBe32(uint8_t* dst, uint32_t val) {
+    dst[0] = static_cast<uint8_t>((val >> 24) & 0xFF);
+    dst[1] = static_cast<uint8_t>((val >> 16) & 0xFF);
+    dst[2] = static_cast<uint8_t>((val >> 8) & 0xFF);
+    dst[3] = static_cast<uint8_t>(val & 0xFF);
+}
+
+uint32_t readBe32(const uint8_t* src) {
+    return (static_cast<uint32_t>(src[0]) << 24) |
+           (static_cast<uint32_t>(src[1]) << 16) |
+           (static_cast<uint32_t>(src[2]) << 8)  |
+           static_cast<uint32_t>(src[3]);
+}
+
+class GlobalMediaRouter final : public rtc::MediaHandler {
+public:
+    explicit GlobalMediaRouter(WebRtcClient* client) : client_(client) {}
+
+    void incoming(rtc::message_vector& messages, [[maybe_unused]] const rtc::message_callback& send) override {
+        if (!client_) return;
+
+        for (auto& m : messages) {
+            if (!m || m->size() < 12) continue;
+
+            if (m->type == rtc::Message::Binary) {
+                const uint8_t* pkt = reinterpret_cast<const uint8_t*>(m->data());
+                size_t len = m->size();
+                if ((pkt[0] >> 6) != 2) continue;
+
+                uint8_t pt = pkt[1] & 0x7F;
+                uint32_t ssrc = readBe32(pkt + 8);
+
+                if (pt == kAudioPayloadType) {
+                    client_->processAudioRtp(pkt, len);
+                } else if (pt >= 96 && pt <= 127) {
+                    if (client_->getVideoSsrc() != ssrc && ssrc != 0) {
+                        luna::util::CrashLogger::log("[WebRTC] SSRC de video detectado en flujo RTP: %u (PT=%u)", ssrc, pt);
+                        client_->setVideoSsrc(ssrc);
+                    }
+                    client_->processVideoRtp(pkt, len);
+                }
+            }
+        }
+
+        // Consumir mensajes para evitar que PeerConnection::dispatchMedia descarte SSRCs cambiados
+        messages.clear();
+
+        // Enviar feedback RTCP (RR + REMB + PLI si aplica) y Ping de sincronizacion
+        bool wantPli = client_->consumePliRequest();
+        client_->sendRtcpFeedback(wantPli);
+        client_->sendPingAndKeepalive();
+    }
+
+private:
+    WebRtcClient* client_;
+};
+
 void initRtcLogging() {
     static std::atomic<bool> s_inited{false};
     if (!s_inited.exchange(true)) {
@@ -58,6 +150,7 @@ void WebRtcClient::setupPeerConnection() {
     rtcConfig.disableAutoNegotiation = true;
 
     pc_ = std::make_shared<rtc::PeerConnection>(rtcConfig);
+    pc_->setMediaHandler(std::make_shared<GlobalMediaRouter>(this));
 
     pc_->onLocalCandidate([this](rtc::Candidate c) {
         std::string candStr = std::string(c);
@@ -135,16 +228,21 @@ void WebRtcClient::setupPeerConnection() {
         }
     });
 
-    // 2. Configurar Track de Vídeo H.264 (mid: 1, perfil Luna Constrained Baseline 42e01f)
+    // 2. Configurar Track de Vídeo H.264 (mid: 1, perfil Luna Constrained Baseline 42e01f + SDPParser.modifyVideoOffer)
     rtc::Description::Video v("1", rtc::Description::Direction::RecvOnly);
-    v.addH264Codec(kVideoPayloadType, "level-asymmetry-allowed=0;packetization-mode=1;profile-level-id=42e01f");
-    v.addH264Codec(100, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640033");
-    v.addH264Codec(102, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d0033");
+    v.setBitrate(24000); // b=AS:24000 (24 Mbps)
+    v.addH264Codec(kVideoPayloadType,
+                   "level-asymmetry-allowed=0;packetization-mode=1;profile-level-id=42e01f;sps-pps-idr-in-keyframe=1;x-google-start-bitrate=15000");
+    v.addH264Codec(100,
+                   "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640033;sps-pps-idr-in-keyframe=1;x-google-start-bitrate=15000");
+    v.addH264Codec(102,
+                   "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d0033;sps-pps-idr-in-keyframe=1;x-google-start-bitrate=15000");
     videoTrack_ = pc_->addTrack(v);
 
     videoTrack_->onOpen([this]() {
-        luna::util::CrashLogger::log("[WebRTC] Track de Vídeo H.264 abierto. Solicitando IDR Keyframe inicial...");
+        luna::util::CrashLogger::log("[WebRTC] Track de Vídeo H.264 abierto. Solicitando IDR Keyframe + REMB inicial...");
         requestKeyframe();
+        sendRtcpFeedback(true);
     });
 
     videoTrack_->onMessage([this](rtc::message_variant msg) {
@@ -155,24 +253,278 @@ void WebRtcClient::setupPeerConnection() {
         }
     });
 
-    // 3. Configurar DataChannels requeridos por Amazon Luna
-    messageChannel_ = pc_->createDataChannel("clientMessageChannel");
-    messageChannel_->onOpen([]() {
-        luna::util::CrashLogger::log("[WebRTC] DataChannel clientMessageChannel abierto.");
-    });
-    messageChannel_->onMessage([](rtc::message_variant msg) {
-        if (auto text = std::get_if<std::string>(&msg)) {
-            luna::util::CrashLogger::log("[WebRTC MessageChannel] %s", text->c_str());
-        }
-    });
-
+    // 3. Configurar DataChannels en el orden oficial de RTCPeerConnectionManager:
+    //    Stream 0 -> inputChannel (unordered=true, maxRetransmits=0)
+    //    Stream 1 -> clientMessageChannel (ordered=true)
     rtc::DataChannelInit inputInit;
     inputInit.reliability.unordered = true;
     inputInit.reliability.maxRetransmits = 0;
     inputChannel_ = pc_->createDataChannel("inputChannel", inputInit);
-    inputChannel_->onOpen([]() {
-        luna::util::CrashLogger::log("[WebRTC] DataChannel inputChannel (DualSense) abierto y listo para streaming.");
+    inputChannel_->onOpen([this]() {
+        luna::util::CrashLogger::log("[WebRTC] DataChannel inputChannel (DualSense) abierto. Enviando GamePadConnectionEvent (DS4)...");
+        // proto.dcv.input.ClientMessage { field 105: GamePadConnectionEvent { devicetype = DS4(1) } }
+        static constexpr uint8_t kGamepadConnectMsg[5] = {0xCA, 0x06, 0x02, 0x50, 0x01};
+        std::lock_guard<std::mutex> lock(txMutex_);
+        if (inputChannel_ && inputChannel_->isOpen()) {
+            inputChannel_->send(reinterpret_cast<const std::byte*>(kGamepadConnectMsg), sizeof(kGamepadConnectMsg));
+        }
     });
+    inputChannel_->onMessage([](rtc::message_variant msg) {
+        if (auto b = std::get_if<rtc::binary>(&msg)) {
+            if (b->size() > 16) {
+                const uint8_t* p = reinterpret_cast<const uint8_t*>(b->data()) + 16;
+                luna::util::CrashLogger::log("[WebRTC inputChannel RX] %zu bytes (proto tag=0x%02X)", b->size(), p[0]);
+            }
+        }
+    });
+
+    messageChannel_ = pc_->createDataChannel("clientMessageChannel");
+    messageChannel_->onOpen([this]() {
+        luna::util::CrashLogger::log("[WebRTC] DataChannel clientMessageChannel abierto. Enviando handshake Protobuf de Amazon Luna...");
+        sendLunaChannelHandshake();
+        requestKeyframe();
+    });
+    messageChannel_->onMessage([this](rtc::message_variant msg) {
+        if (auto text = std::get_if<std::string>(&msg)) {
+            luna::util::CrashLogger::log("[WebRTC clientMessageChannel RX TEXT] %s", text->c_str());
+        } else if (auto b = std::get_if<rtc::binary>(&msg)) {
+            const uint8_t* raw = reinterpret_cast<const uint8_t*>(b->data());
+            size_t len = b->size();
+            if (len > 16) {
+                uint32_t payloadLen = static_cast<uint32_t>(raw[8]) |
+                                      (static_cast<uint32_t>(raw[9]) << 8) |
+                                      (static_cast<uint32_t>(raw[10]) << 16) |
+                                      (static_cast<uint32_t>(raw[11]) << 24);
+                const uint8_t* proto = raw + 16;
+                size_t protoLen = len - 16;
+                luna::util::CrashLogger::log(
+                    "[WebRTC clientMessageChannel RX BIN] total=%zu hdrLen=%u proto[0..1]=0x%02X 0x%02X",
+                    len, payloadLen, proto[0], (protoLen > 1 ? proto[1] : 0));
+            } else {
+                luna::util::CrashLogger::log("[WebRTC clientMessageChannel RX BIN] %zu bytes", len);
+            }
+            // Solicitar keyframe tras mensajes de configuracion del servidor
+            if (stats_.videoFramesAssembled == 0) {
+                requestKeyframe();
+            }
+        }
+    });
+}
+
+void WebRtcClient::sendLunaChannelHandshake() {
+    std::lock_guard<std::mutex> lock(txMutex_);
+    if (!messageChannel_ || !messageChannel_->isOpen()) return;
+
+    try {
+        // 1. FeatureConfigurationRequest (BrowserClientMessage field 30)
+        {
+            std::vector<uint8_t> featInner;
+            appendTagAndString(featInner, 1, "server-reconfigure");
+            appendTagAndString(featInner, 1, "client-display-config-flag");
+
+            std::vector<uint8_t> msg1;
+            appendTagAndBytes(msg1, 30, featInner.data(), featInner.size());
+            messageChannel_->send(reinterpret_cast<const std::byte*>(msg1.data()), msg1.size());
+            luna::util::CrashLogger::log("[WebRTC Handshake 1/4] FeatureConfigurationRequest enviado (%zu bytes).", msg1.size());
+        }
+
+        // 2. DisplaySessionConfiguration (BrowserClientMessage field 40)
+        {
+            std::vector<uint8_t> resMsg;
+            appendTagAndVarint(resMsg, 1, static_cast<uint64_t>(config_.targetWidth));  // width = 1920
+            appendTagAndVarint(resMsg, 2, static_cast<uint64_t>(config_.targetHeight)); // height = 1080
+
+            std::vector<uint8_t> dispMsg;
+            appendTagAndBytes(dispMsg, 1, resMsg.data(), resMsg.size());                // resolution
+            appendTagAndVarint(dispMsg, 2, static_cast<uint64_t>(config_.targetFps));   // refreshRate = 60
+            appendTagAndBytes(dispMsg, 3, nullptr, 0);                                  // safeZones = {0,0,0,0}
+
+            // VideoCodec 1: AVC (0, default in proto3), Profile High (100), Level 4.2 (42), maxRefFrames = 4
+            std::vector<uint8_t> codecHigh;
+            appendTagAndVarint(codecHigh, 2, 100);
+            appendTagAndVarint(codecHigh, 3, 42);
+            appendTagAndVarint(codecHigh, 5, 4);
+
+            // VideoCodec 2: AVC (0), Profile Baseline (66), Level 3.1 (31), maxRefFrames = 4
+            std::vector<uint8_t> codecBase;
+            appendTagAndVarint(codecBase, 2, 66);
+            appendTagAndVarint(codecBase, 3, 31);
+            appendTagAndVarint(codecBase, 5, 4);
+
+            std::vector<uint8_t> dscInner;
+            appendTagAndVarint(dscInner, 1, 1); // negotiationId = 1
+            appendTagAndBytes(dscInner, 3, dispMsg.data(), dispMsg.size());
+            appendTagAndBytes(dscInner, 4, codecHigh.data(), codecHigh.size());
+            appendTagAndBytes(dscInner, 4, codecBase.data(), codecBase.size());
+            appendTagAndString(dscInner, 5, "dynamic-downsampling");
+            appendTagAndVarint(dscInner, 6, 6000000);  // minBitsPerSecond = 6 Mbps
+            appendTagAndVarint(dscInner, 7, 24000000); // maxBitsPerSecond = 24 Mbps
+            appendTagAndVarint(dscInner, 8, 15000000); // startBitsPerSecond = 15 Mbps
+
+            std::vector<uint8_t> msg2;
+            appendTagAndBytes(msg2, 40, dscInner.data(), dscInner.size());
+            messageChannel_->send(reinterpret_cast<const std::byte*>(msg2.data()), msg2.size());
+            luna::util::CrashLogger::log("[WebRTC Handshake 2/4] DisplaySessionConfiguration 1080p60 H.264 enviado (%zu bytes).", msg2.size());
+        }
+
+        // 3. ClientContext (BrowserClientMessage field 42 -> BrowserMetadata field 1)
+        {
+            std::vector<uint8_t> bmInner;
+            appendTagAndString(bmInner, 1, "Chrome");
+            appendTagAndString(bmInner, 2, "131.0.0.0");
+            appendTagAndString(bmInner, 3, "Windows");
+            appendTagAndString(bmInner, 4, "unknown");
+            appendTagAndString(bmInner, 5, "Windows");
+            appendTagAndString(bmInner, 6, "10");
+
+            std::vector<uint8_t> ccInner;
+            appendTagAndBytes(ccInner, 1, bmInner.data(), bmInner.size());
+
+            std::vector<uint8_t> msg3;
+            appendTagAndBytes(msg3, 42, ccInner.data(), ccInner.size());
+            messageChannel_->send(reinterpret_cast<const std::byte*>(msg3.data()), msg3.size());
+            luna::util::CrashLogger::log("[WebRTC Handshake 3/4] ClientContext enviado (%zu bytes).", msg3.size());
+        }
+
+        // 4. Initial Ping (BrowserClientMessage field 20)
+        {
+            std::vector<uint8_t> pingInner;
+            appendTagAndVarint(pingInner, 1, nowEpochMs());
+
+            std::vector<uint8_t> msg4;
+            appendTagAndBytes(msg4, 20, pingInner.data(), pingInner.size());
+            messageChannel_->send(reinterpret_cast<const std::byte*>(msg4.data()), msg4.size());
+            luna::util::CrashLogger::log("[WebRTC Handshake 4/4] TimeSynchronizer Ping inicial enviado (%zu bytes).", msg4.size());
+        }
+
+        uint64_t now = nowSteadyMs();
+        channelOpenTimeMs_.store(now);
+        lastPingTimeMs_.store(now);
+        lastIdleResetTimeMs_.store(now);
+        pingsSentCount_.store(1);
+    } catch (const std::exception& e) {
+        luna::util::CrashLogger::log("[WebRTC WARN] Error en sendLunaChannelHandshake: %s", e.what());
+    }
+}
+
+void WebRtcClient::sendPingAndKeepalive() {
+    uint64_t openTime = channelOpenTimeMs_.load();
+    if (openTime == 0) return;
+
+    uint64_t now = nowSteadyMs();
+    uint32_t count = pingsSentCount_.load();
+    uint64_t pingInterval = (count < 8) ? 1000 : 15000;
+
+    bool doPing = (now - lastPingTimeMs_.load() >= pingInterval);
+    bool doIdleReset = (now - lastIdleResetTimeMs_.load() >= 30000);
+    if (!doPing && !doIdleReset) return;
+
+    std::lock_guard<std::mutex> lock(txMutex_);
+    if (!messageChannel_ || !messageChannel_->isOpen()) return;
+
+    try {
+        if (doPing) {
+            lastPingTimeMs_.store(now);
+            pingsSentCount_.fetch_add(1);
+
+            std::vector<uint8_t> pingInner;
+            appendTagAndVarint(pingInner, 1, nowEpochMs());
+
+            std::vector<uint8_t> msg;
+            appendTagAndBytes(msg, 20, pingInner.data(), pingInner.size());
+            messageChannel_->send(reinterpret_cast<const std::byte*>(msg.data()), msg.size());
+        }
+        if (doIdleReset) {
+            lastIdleResetTimeMs_.store(now);
+            // BrowserClientMessage field 12: ResetIdleTimeoutRequest (empty message -> 0x62, 0x00)
+            static constexpr uint8_t kResetIdleMsg[2] = {0x62, 0x00};
+            messageChannel_->send(reinterpret_cast<const std::byte*>(kResetIdleMsg), sizeof(kResetIdleMsg));
+        }
+    } catch (...) {
+    }
+}
+
+void WebRtcClient::sendRtcpFeedback(bool includePli) {
+    uint32_t vSsrc = videoSsrc_.load();
+    if (vSsrc == 0) return;
+
+    uint64_t now = nowSteadyMs();
+    bool noFramesYet = (stats_.videoFramesAssembled == 0);
+    uint64_t elapsed = now - lastRtcpTimeMs_.load();
+
+    if (!includePli && elapsed < 500) {
+        return;
+    }
+    if (noFramesYet && elapsed >= 500) {
+        includePli = true;
+    }
+    lastRtcpTimeMs_.store(now);
+
+    try {
+        // Paquete RTCP compuesto (RFC 3550):
+        // [0..7]   RTCP Receiver Report (PT=201, RC=0, len=1)
+        // [8..31]  RTCP PSFB REMB (PT=206, FMT=15, len=5, 24 Mbps = 0x011EDC6C)
+        // [32..43] RTCP PSFB PLI (PT=206, FMT=1, len=2) [opcional]
+        // [44..63] RTCP PSFB FIR (PT=206, FMT=4, len=4) [opcional]
+        uint8_t buf[64]{};
+        size_t totalLen = 32;
+
+        // 1. RTCP RR (8 bytes)
+        buf[0] = 0x80; // V=2, P=0, RC=0
+        buf[1] = 201;  // PT=201 (RR)
+        buf[2] = 0x00;
+        buf[3] = 0x01; // length = 1 word (4 bytes)
+        writeBe32(buf + 4, 1); // Sender SSRC = 1
+
+        // 2. RTCP REMB (24 bytes) -> 24,000,000 bps (exp=7, mantissa=187500=0x2DC6C, numSSRC=1 -> 0x011EDC6C)
+        buf[8]  = 0x8F; // V=2, P=0, FMT=15
+        buf[9]  = 206;  // PT=206 (PSFB)
+        buf[10] = 0x00;
+        buf[11] = 0x05; // length = 5 words (20 bytes)
+        writeBe32(buf + 12, 1);          // Sender SSRC = 1
+        writeBe32(buf + 16, 0);          // Media Source SSRC = 0 (spec requirement)
+        buf[20] = 'R';
+        buf[21] = 'E';
+        buf[22] = 'M';
+        buf[23] = 'B';
+        writeBe32(buf + 24, 0x011EDC6Cu); // numSSRC=1, brExp=7, brMantissa=187500 (24 Mbps)
+        writeBe32(buf + 28, vSsrc);       // SSRC feedback
+
+        if (includePli) {
+            // 3. RTCP PLI (12 bytes)
+            buf[32] = 0x81; // V=2, P=0, FMT=1 (PLI)
+            buf[33] = 206;  // PT=206 (PSFB)
+            buf[34] = 0x00;
+            buf[35] = 0x02; // length = 2 words (8 bytes)
+            writeBe32(buf + 36, 1);     // Sender SSRC = 1
+            writeBe32(buf + 40, vSsrc); // Media Source SSRC
+
+            // 4. RTCP FIR (20 bytes)
+            uint8_t seq = firSeqNo_.fetch_add(1);
+            buf[44] = 0x84; // V=2, P=0, FMT=4 (FIR)
+            buf[45] = 206;  // PT=206 (PSFB)
+            buf[46] = 0x00;
+            buf[47] = 0x04; // length = 4 words (16 bytes)
+            writeBe32(buf + 48, 1);     // Sender SSRC = 1
+            writeBe32(buf + 52, 0);     // Media Source SSRC = 0
+            writeBe32(buf + 56, vSsrc); // SSRC
+            buf[60] = seq;
+            buf[61] = 0;
+            buf[62] = 0;
+            buf[63] = 0;
+            totalLen = 64;
+        }
+
+        if (videoTrack_ && videoTrack_->isOpen()) {
+            videoTrack_->send(reinterpret_cast<const std::byte*>(buf), totalLen);
+            if (includePli && stats_.keyframeRequests <= 10) {
+                luna::util::CrashLogger::log("[WebRTC RTCP] Enviado RR + REMB(24Mbps) + PLI/FIR para SSRC=%u", vSsrc);
+            }
+        }
+    } catch (const std::exception& e) {
+        luna::util::CrashLogger::log("[WebRTC RTCP WARN] Error enviando feedback RTCP: %s", e.what());
+    } catch (...) {
+    }
 }
 
 std::string WebRtcClient::generateSdpOffer() {
@@ -221,6 +573,31 @@ bool WebRtcClient::applySdpAnswer(const std::string& sdpAnswer) {
         luna::util::CrashLogger::logStep(6, "Applying SDP Answer & ICE candidates...");
         luna::util::CrashLogger::log("[WebRTC] SDP Answer recibido (%zu bytes):", sdpAnswer.size());
         luna::util::CrashLogger::log("%s", sdpAnswer.c_str());
+
+        // Extraer SSRC de audio y video del SDP Answer para RTCP PLI / REMB
+        {
+            std::istringstream iss(sdpAnswer);
+            std::string line;
+            int currentMedia = 0; // 1 = audio, 2 = video
+            while (std::getline(iss, line)) {
+                if (line.rfind("m=audio", 0) == 0) {
+                    currentMedia = 1;
+                } else if (line.rfind("m=video", 0) == 0) {
+                    currentMedia = 2;
+                } else if (line.rfind("m=application", 0) == 0) {
+                    currentMedia = 3;
+                } else if (line.rfind("a=ssrc:", 0) == 0) {
+                    uint32_t ssrc = static_cast<uint32_t>(std::strtoul(line.c_str() + 7, nullptr, 10));
+                    if (currentMedia == 1 && audioSsrc_.load() == 0) {
+                        audioSsrc_.store(ssrc);
+                        luna::util::CrashLogger::log("[WebRTC] SSRC de Audio extraido del SDP Answer: %u", ssrc);
+                    } else if (currentMedia == 2 && videoSsrc_.load() == 0) {
+                        videoSsrc_.store(ssrc);
+                        luna::util::CrashLogger::log("[WebRTC] SSRC de Video extraido del SDP Answer: %u", ssrc);
+                    }
+                }
+            }
+        }
 
         rtc::Description answer(sdpAnswer, rtc::Description::Type::Answer);
         pc_->setRemoteDescription(answer);
@@ -286,6 +663,13 @@ void WebRtcClient::stop() {
     peerStateStr_ = "Closed";
     localCandidateCount_ = 0;
     remoteCandidateCount_ = 0;
+    videoSsrc_ = 0;
+    audioSsrc_ = 0;
+    pliRequested_ = true;
+    channelOpenTimeMs_ = 0;
+    lastPingTimeMs_ = 0;
+    lastIdleResetTimeMs_ = 0;
+    pingsSentCount_ = 0;
     {
         std::lock_guard<std::mutex> lock(candidateMutex_);
         localCandidatesList_.clear();
@@ -298,7 +682,10 @@ void WebRtcClient::stop() {
     audioTrack_.reset();
     inputChannel_.reset();
     messageChannel_.reset();
-    currentAccessUnit_.clear();
+    {
+        std::lock_guard<std::mutex> lock(videoRtpMutex_);
+        currentAccessUnit_.clear();
+    }
     std::printf("[WebRTC] Sesión WebRTC cerrada limpiamente.\n");
 }
 
@@ -346,7 +733,7 @@ void WebRtcClient::processVideoRtp(const uint8_t* pkt, size_t len) {
     bool marker = (pkt[1] & 0x80) != 0;
     uint8_t payloadType = pkt[1] & 0x7F;
 
-    if (payloadType != kVideoPayloadType && payloadType != 100 && payloadType != 102) {
+    if (payloadType == kAudioPayloadType || payloadType < 96) {
         return;
     }
 
@@ -373,9 +760,12 @@ void WebRtcClient::processVideoRtp(const uint8_t* pkt, size_t len) {
 
     const uint8_t* payload = pkt + offset;
     size_t payloadLen = end - offset;
+
+    std::lock_guard<std::mutex> lock(videoRtpMutex_);
     stats_.rtpPacketsReceived++;
     if (stats_.rtpPacketsReceived == 1 || stats_.rtpPacketsReceived % 300 == 0) {
-        luna::util::CrashLogger::log("[WebRTC] Paquetes de video RTP recibidos: %llu", stats_.rtpPacketsReceived);
+        luna::util::CrashLogger::log("[WebRTC] Paquetes de video RTP recibidos: %llu (PT=%u, len=%zu)",
+                                     stats_.rtpPacketsReceived, payloadType, payloadLen);
     }
 
     if (currentVideoTs_ != timestamp && !currentAccessUnit_.empty()) {
@@ -433,10 +823,13 @@ void WebRtcClient::processVideoRtp(const uint8_t* pkt, size_t len) {
 void WebRtcClient::sendInputPacket(const uint8_t* data, size_t size) {
     if (!data || size == 0) return;
 
-    std::lock_guard<std::mutex> lock(txMutex_);
-    if (inputChannel_ && inputChannel_->isOpen()) {
-        inputChannel_->send(reinterpret_cast<const std::byte*>(data), size);
+    {
+        std::lock_guard<std::mutex> lock(txMutex_);
+        if (inputChannel_ && inputChannel_->isOpen()) {
+            inputChannel_->send(reinterpret_cast<const std::byte*>(data), size);
+        }
     }
+    sendPingAndKeepalive();
 }
 
 void WebRtcClient::sendControlMessage(const std::string& jsonMsg) {
@@ -450,10 +843,7 @@ void WebRtcClient::sendControlMessage(const std::string& jsonMsg) {
 
 void WebRtcClient::requestKeyframe() {
     stats_.keyframeRequests++;
-    if (videoTrack_) {
-        videoTrack_->requestKeyframe();
-        std::printf("[WebRTC] Solicitud RTCP PLI enviada al servidor de Amazon Luna.\n");
-    }
+    pliRequested_.store(true);
 }
 
 } // namespace luna::stream

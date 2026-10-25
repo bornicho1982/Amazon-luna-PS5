@@ -75,6 +75,7 @@ try {
             -ffunction-sections -fdata-sections `
             -DLUNA_TARGET_PS5=1 `
             -I"src" `
+            -I"ps5\include" `
             -I"$here\..\..\tools\reference\xbox-cloud-gaming-ps5\deps\libdatachannel\include" `
             -I"$here\..\..\tools\reference\xbox-cloud-gaming-ps5\deps\mbedtls\include" `
             -c "src\$s.cpp" -o $objPath
@@ -92,7 +93,8 @@ try {
         "$here\ps5\lib\libusrsctp.a",
         "$here\ps5\lib\libmbedtls.a",
         "$here\ps5\lib\libmbedx509.a",
-        "$here\ps5\lib\libmbedcrypto.a"
+        "$here\ps5\lib\libmbedcrypto.a",
+        "$here\ps5\lib\libopus.a"
     )
 
     & ld.lld `

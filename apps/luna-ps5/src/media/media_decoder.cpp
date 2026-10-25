@@ -1,9 +1,11 @@
 #include "media/media_decoder.h"
+#include "util/crash_logger.h"
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
 
 #if defined(LUNA_TARGET_PS5)
+#include <opus/opus.h>
 extern "C" {
 int sceSysmoduleLoadModule(uint32_t id);
 size_t sceKernelGetDirectMemorySize();
@@ -235,6 +237,15 @@ bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, De
             rc = sceVideodec2Flush(decoder_, &frame, &info);
         }
 
+        static int s_vdecLogged = 0;
+        if (s_vdecLogged < 15 && (rc != 0 || info.valid)) {
+            s_vdecLogged++;
+            luna::util::CrashLogger::log("[VideoDecoder] sceVideodec2 rc=0x%08X valid=%u err=%u pic=%u %ux%u pitch=%u fmt=%u auSize=%zu",
+                                         static_cast<unsigned>(rc), info.valid, info.error, info.pictureCount,
+                                         info.width, info.height, info.pitchBytes ? info.pitchBytes : info.pitch,
+                                         info.frameFormat, size);
+        }
+
         if (rc == 0 && info.valid && info.buffer) {
             const auto* rawBuf = static_cast<const uint8_t*>(info.buffer);
             int w = static_cast<int>(info.width);
@@ -273,8 +284,8 @@ bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, De
         }
         return false;
     }
-#endif
-
+    return false;
+#else
     outFrame.y = fallbackY_.data();
     outFrame.u = fallbackU_.data();
     outFrame.v = fallbackV_.data();
@@ -285,6 +296,7 @@ bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, De
     outFrame.height = 1080;
     outFrame.pts = pts;
     return true;
+#endif
 }
 
 // --- Decodificador de Audio Opus ---------------------------------------------
@@ -296,9 +308,22 @@ AudioDecoder::~AudioDecoder() {
 }
 
 bool AudioDecoder::init(int sampleRate, int channels) {
+    shutdown();
     sampleRate_ = sampleRate;
     channels_ = channels;
     frameCounter_ = 0;
+
+#if defined(LUNA_TARGET_PS5)
+    int err = OPUS_OK;
+    OpusDecoder* dec = opus_decoder_create(sampleRate_, channels_, &err);
+    if (!dec || err != OPUS_OK) {
+        luna::util::CrashLogger::log("[AudioDecoder] Error en opus_decoder_create: %d", err);
+        return false;
+    }
+    opusDec_ = dec;
+    luna::util::CrashLogger::log("[AudioDecoder] libopus 1.6.1 inicializado (%d Hz, %d canales)", sampleRate_, channels_);
+#endif
+
     isReady_ = true;
     std::printf("[AudioDecoder] Decodificador de tramas de audio inicializado (%d Hz, %d canales)\n",
                 sampleRate_, channels_);
@@ -307,6 +332,12 @@ bool AudioDecoder::init(int sampleRate, int channels) {
 
 void AudioDecoder::shutdown() {
     if (isReady_) {
+#if defined(LUNA_TARGET_PS5)
+        if (opusDec_) {
+            opus_decoder_destroy(static_cast<OpusDecoder*>(opusDec_));
+            opusDec_ = nullptr;
+        }
+#endif
         isReady_ = false;
         std::printf("[AudioDecoder] Decodificador de audio cerrado\n");
     }
@@ -315,19 +346,35 @@ void AudioDecoder::shutdown() {
 bool AudioDecoder::decode(const uint8_t* opusData, size_t size, std::vector<int16_t>& pcmOut) {
     if (!isReady_ || !opusData || size == 0) return false;
 
-    constexpr size_t kSamplesPerChannel = 512;
-    pcmOut.resize(kSamplesPerChannel * channels_);
-
-    // Si el payload entrante contiene muestras PCM16 directas (L16) o trama Opus
-    if (size >= pcmOut.size() * sizeof(int16_t)) {
-        std::memcpy(pcmOut.data(), opusData, pcmOut.size() * sizeof(int16_t));
-    } else {
-        // Decodificacion de trama comprimida con atenuacion suave (PLC)
-        std::memset(pcmOut.data(), 0, pcmOut.size() * sizeof(int16_t));
+#if defined(LUNA_TARGET_PS5)
+    if (!opusDec_) return false;
+    constexpr int kMaxFrameSamples = 5760; // Up to 120ms at 48kHz
+    pcmOut.resize(static_cast<size_t>(kMaxFrameSamples * channels_));
+    int decodedSamples = opus_decode(
+        static_cast<OpusDecoder*>(opusDec_),
+        opusData,
+        static_cast<opus_int32>(size),
+        pcmOut.data(),
+        kMaxFrameSamples,
+        0
+    );
+    if (decodedSamples <= 0) {
+        pcmOut.clear();
+        return false;
     }
-
+    pcmOut.resize(static_cast<size_t>(decodedSamples * channels_));
+    frameCounter_++;
+    if (frameCounter_ == 1 || frameCounter_ % 500 == 0) {
+        luna::util::CrashLogger::log("[AudioDecoder] Tramas Opus decodificadas: %u (ultima: %zu B -> %d muestras/canal)",
+                                     frameCounter_, size, decodedSamples);
+    }
+    return true;
+#else
+    constexpr size_t kSamplesPerChannel = 960;
+    pcmOut.assign(kSamplesPerChannel * channels_, 0);
     frameCounter_++;
     return true;
+#endif
 }
 
 } // namespace luna::media
