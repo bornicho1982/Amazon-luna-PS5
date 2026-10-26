@@ -852,6 +852,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
 
     if (collections.empty()) {
         drawText(68, 500, 3, "Cargando catalogo de Amazon Luna...", 0xFF94A3B8);
+        present();
         return;
     }
 
@@ -1013,7 +1014,11 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         tabX += tw + 32;
     }
 
-    drawText(1750, 20, 2, "ð", 0xFFCBD5E1);
+    int magX = 1754, magY = 32, magR = 8;
+    drawRoundedBorder(magX - magR, magY - magR, magR * 2, magR * 2, magR, 2, 0xFFCBD5E1);
+    for (int d = 0; d < 6; ++d) {
+        fillRect(magX + magR - 3 + d, magY + magR - 3 + d, 2, 2, 0xFFCBD5E1);
+    }
     drawRoundedRect(1810, 16, 38, 38, 19, 0xFF14B8A6);
     drawText(1822, 24, 2, "B", 0xFFFFFFFF);
 
@@ -1023,6 +1028,8 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         drawText(44, 1054, 1, statusText, 0xFF94A3B8);
         drawText(1700, 1054, 1, "DualSense conectado", padConnected ? 0xFF10B981 : 0xFFEF4444);
     }
+
+    present();
 }
 
 void DisplayManager::drawGameDetailScreen(const GameTile& game,
@@ -1053,7 +1060,11 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
     // Barra superior: < Volver
     fillRect(0, 0, 1920, 68, 0x990E0B16);
     drawText(44, 22, 2, "<  Volver", 0xFFE2E8F0);
-    drawText(1750, 20, 2, "ð", 0xFFCBD5E1);
+    int magX = 1754, magY = 32, magR = 8;
+    drawRoundedBorder(magX - magR, magY - magR, magR * 2, magR * 2, magR, 2, 0xFFCBD5E1);
+    for (int d = 0; d < 6; ++d) {
+        fillRect(magX + magR - 3 + d, magY + magR - 3 + d, 2, 2, 0xFFCBD5E1);
+    }
     drawRoundedRect(1810, 16, 38, 38, 19, 0xFF14B8A6);
     drawText(1822, 24, 2, "B", 0xFFFFFFFF);
 
@@ -1190,6 +1201,8 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
         fillRect(0, 1046, 1920, 34, 0xEE0B0912);
         drawText(44, 1054, 1, statusText, 0xFF94A3B8);
     }
+
+    present();
 }
 void DisplayManager::drawStreamingStatusScreen(const GameTile& game,
                                                const std::string& statusText,

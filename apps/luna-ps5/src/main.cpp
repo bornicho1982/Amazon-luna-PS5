@@ -558,6 +558,14 @@ int main(int argc, char* argv[]) {
 
                 if (cbl.isAuthenticated()) {
                     luna::util::CrashLogger::log("[Main] Usuario autenticado con exito. Cargando catalogo...");
+                    display.drawLoginScreen(
+                        cbl.getPublicCode(),
+                        cbl.getVerificationUri(),
+                        cbl.getQrSize(),
+                        [&cbl](int x, int y) { return cbl.getQrModule(x, y); },
+                        "Conectado a Amazon. Cargando tu catalogo de Luna...",
+                        frameCount
+                    );
                     loadCatalogIfAuthenticated();
                     appState = AppState::Catalog;
                     break;

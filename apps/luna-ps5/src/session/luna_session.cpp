@@ -557,31 +557,19 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
     m_gameNightCollections = fetchPageCollections("multistate_game_night", "default", accessToken, deviceSerial, result);
 
     // Pre-descargar las primeras 6 portadas del Hero y la primera fila para arranque visual instantáneo
-    int downloadedCount = 0;
+    // Encolar pre-carga asincrona en ImageLoader para arranque visual instantaneo
     for (auto& col : m_homeCollections) {
         for (auto& tile : col.items) {
-            if (downloadedCount >= 6) break;
-            if (tile.coverRgba.empty() && !tile.coverUrl.empty() && tile.coverUrl.rfind("http", 0) == 0) {
-                auto imgResp = luna::net::HttpClient::get(tile.coverUrl);
-                if (imgResp.ok() && !imgResp.body.empty()) {
-                    int w = 0, h = 0;
-                    if (luna::util::decodeImageRgba(reinterpret_cast<const uint8_t*>(imgResp.body.data()),
-                                                    imgResp.body.size(), tile.coverRgba, w, h)) {
-                        tile.coverWidth = w;
-                        tile.coverHeight = h;
-                        downloadedCount++;
-                        for (auto& m : result) {
-                            if (m.id == tile.id && m.coverRgba.empty()) {
-                                m.coverRgba = tile.coverRgba;
-                                m.coverWidth = w;
-                                m.coverHeight = h;
-                            }
-                        }
-                    }
-                }
+            if (!tile.coverUrl.empty()) {
+                luna::util::ImageLoader::instance().requestImage(tile.coverUrl, luna::util::ImagePreset::VerticalPoster);
+            }
+            if (!tile.backdropUrl.empty()) {
+                luna::util::ImageLoader::instance().requestImage(tile.backdropUrl, luna::util::ImagePreset::PanoramicHero);
+            }
+            if (!tile.logoUrl.empty()) {
+                luna::util::ImageLoader::instance().requestImage(tile.logoUrl, luna::util::ImagePreset::ProductLogo);
             }
         }
-        if (downloadedCount >= 6) break;
     }
 
     if (!result.empty()) {
