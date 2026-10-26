@@ -49,6 +49,7 @@ try {
         "display/font_inter_bold",
         "display/font_renderer",
         "display/display_manager",
+        "display/hero_banner_asset",
         "audio/audio_manager",
         "media/media_decoder"
     )

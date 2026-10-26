@@ -1,6 +1,8 @@
 #include "auth/auth_server.h"
 #include "session/luna_session.h"
 #include "display/display_manager.h"
+#include "display/hero_banner_asset.h"
+#include "net/http_client.h"
 #include "util/crash_logger.h"
 #include <cstdio>
 #include <cstring>
@@ -274,7 +276,7 @@ std::string AuthServer::generateHtmlPage() const {
     html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
     html += "<title>Amazon Luna PS5 - Puente WebRTC</title>";
     html += "<style>";
-    html += "body{font-family:system-ui,-apple-system,sans-serif;background:#0e0720;color:#f8fafc;padding:20px;margin:0}";
+    html += "body{font-family:system-ui,-apple-system,sans-serif;background:#0a0714;color:#f8fafc;padding:20px;margin:0}";
     html += ".card{background:#180d35;border:2px solid #7c3aed;border-radius:12px;max-width:580px;margin:16px auto;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,0.5)}";
     html += "h2{color:#c4b5fd;margin-top:0;font-size:24px}.btn{background:#9146FF;color:#fff;border:none;padding:14px 20px;border-radius:8px;cursor:pointer;font-weight:800;width:100%;font-size:16px;transition:0.2s;text-decoration:none;display:inline-block;text-align:center;box-sizing:border-box}";
     html += ".btn:hover{background:#a768ff}.btn-green{background:#10b981;color:#052e16}.btn-green:hover{background:#34d399}";
@@ -332,24 +334,51 @@ std::string AuthServer::generateLunaWebPage() const {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Amazon Luna - PlayStation 5</title>
+<link rel="stylesheet" href="https://m.media-amazon.com/images/S/sash/TNReoYQfTL42uz7.css">
 <style>
+  @font-face {
+    font-family: "Amazon Ember";
+    font-weight: 300;
+    src: url("https://m.media-amazon.com/images/G/01/tempo/ember/AmazonEmber_Lt.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Amazon Ember";
+    font-weight: 400;
+    src: url("https://m.media-amazon.com/images/G/01/tempo/ember/AmazonEmber_Rg.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Amazon Ember";
+    font-weight: 700;
+    src: url("https://m.media-amazon.com/images/G/01/tempo/ember/AmazonEmber_Bd.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Amazon Ember";
+    font-weight: 800;
+    src: url("https://m.media-amazon.com/images/G/01/tempo/ember/AmazonEmber_He.woff2") format("woff2");
+  }
+
   :root {
-    --bg-main: #0E0B16;
+    --bg-main: #0A0714;
+    --bg-surface: #140F24;
     --card-bg: #1A1429;
     --card-hover: #261D3D;
     --accent-purple: #9146FF;
+    --accent-purple-light: #C4B5FD;
     --accent-cyan: #02FDDB;
     --text-primary: #FFFFFF;
     --text-secondary: #94A3B8;
+    --text-muted: #64748B;
+    --font-primary: "Amazon Ember", "Ember", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; outline: none; }
   body {
     background-color: var(--bg-main);
     color: var(--text-primary);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: var(--font-primary);
     overflow-x: hidden;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-font-smoothing: antialiased;
   }
   header {
     position: sticky;
@@ -358,52 +387,49 @@ std::string AuthServer::generateLunaWebPage() const {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 48px;
-    background: rgba(14, 11, 22, 0.96);
-    border-bottom: 1px solid #231B38;
-    backdrop-filter: blur(12px);
+    padding: 16px 54px;
+    background: rgba(10, 7, 20, 0.94);
+    border-bottom: 1px solid #1E1733;
+    backdrop-filter: blur(14px);
   }
-  .header-left { display: flex; align-items: center; gap: 32px; }
-  .logo-area { display: flex; align-items: center; gap: 12px; cursor: pointer; }
-  .logo-badge {
-    width: 24px; height: 24px;
-    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-    border-radius: 6px;
-    transform: rotate(45deg);
-  }
-  .logo-text { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
-  nav { display: flex; gap: 28px; font-size: 15px; font-weight: 600; color: var(--text-secondary); }
-  nav a { color: inherit; text-decoration: none; cursor: pointer; padding: 6px 12px; border-radius: 20px; transition: 0.2s; }
+  .header-left { display: flex; align-items: center; gap: 36px; }
+  .logo-area { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .luna-logo-icon { width: 28px; height: 28px; display: block; }
+  .logo-text { font-size: 26px; font-weight: 800; letter-spacing: -0.6px; color: #FFF; line-height: 1; }
+  nav { display: flex; gap: 26px; font-size: 15px; font-weight: 700; color: var(--text-secondary); }
+  nav a { color: inherit; text-decoration: none; cursor: pointer; padding: 7px 14px; border-radius: 20px; transition: 0.2s; }
   nav a.active, nav a:hover, nav a.focused { color: #FFF; background: rgba(255,255,255,0.08); }
   nav a.focused { box-shadow: 0 0 0 2px var(--accent-cyan); }
   .header-right { display: flex; align-items: center; gap: 20px; }
   .search-box {
     display: flex;
     align-items: center;
-    background: #1C152E;
-    border: 1px solid #2D2248;
+    background: #18112C;
+    border: 1px solid #2C204B;
     border-radius: 20px;
-    padding: 6px 16px;
-    gap: 8px;
+    padding: 7px 16px;
+    gap: 10px;
+    transition: 0.2s;
   }
   .search-box input {
     background: transparent;
     border: none;
     color: #FFF;
     font-size: 14px;
-    width: 180px;
+    font-family: inherit;
+    width: 190px;
   }
   .search-box.focused { border-color: var(--accent-cyan); box-shadow: 0 0 0 2px rgba(2,253,219,0.3); }
   .profile-badge {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 6px 14px;
-    background: #1C152E;
-    border: 1px solid #2D2248;
+    padding: 6px 16px;
+    background: #18112C;
+    border: 1px solid #2C204B;
     border-radius: 20px;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
   }
   .profile-badge .dot {
     width: 8px; height: 8px;
@@ -412,49 +438,53 @@ std::string AuthServer::generateLunaWebPage() const {
     box-shadow: 0 0 8px #10B981;
   }
 
-  /* HERO BANNER */
+  /* HERO BANNER 1:1 CLAVADO AL OFICIAL DE AMAZON LUNA */
   .hero-banner {
     position: relative;
     width: 100%;
-    height: 520px;
+    height: 540px;
     background-size: cover;
     background-position: center top;
+    background-repeat: no-repeat;
     display: flex;
     align-items: flex-end;
-    padding: 40px 60px;
-    background-color: #140F24;
+    padding: 44px 64px;
+    background-color: #0A0714;
+    background-image: url('/assets/luna_premium_hero.jpg');
     transition: background-image 0.4s ease-in-out;
   }
   .hero-gradient {
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, #0E0B16 0%, rgba(14,11,22,0.85) 45%, rgba(14,11,22,0.15) 100%),
-                linear-gradient(0deg, #0E0B16 0%, transparent 60%);
+    background: linear-gradient(90deg, #0A0714 0%, rgba(10,7,20,0.85) 42%, rgba(10,7,20,0.15) 100%),
+                linear-gradient(0deg, #0A0714 0%, transparent 60%);
+    pointer-events: none;
   }
   .hero-content {
     position: relative;
     z-index: 10;
-    max-width: 720px;
+    max-width: 740px;
   }
   .hero-badge {
     display: inline-block;
     background: var(--accent-purple);
     color: #FFF;
-    padding: 4px 12px;
-    border-radius: 4px;
+    padding: 5px 14px;
+    border-radius: 6px;
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 800;
     margin-bottom: 14px;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
   }
-  .hero-title { font-size: 44px; font-weight: 800; line-height: 1.15; margin-bottom: 12px; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
-  .hero-desc { font-size: 15px; color: #CBD5E1; line-height: 1.5; margin-bottom: 24px; max-width: 600px; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
+  .hero-title { font-size: 46px; font-weight: 800; line-height: 1.12; margin-bottom: 12px; text-shadow: 0 3px 12px rgba(0,0,0,0.7); }
+  .hero-desc { font-size: 16px; color: #CBD5E1; line-height: 1.5; margin-bottom: 26px; max-width: 620px; text-shadow: 0 2px 6px rgba(0,0,0,0.9); }
   .hero-actions { display: flex; gap: 16px; align-items: center; }
   .btn-play {
     background: #FFFFFF;
-    color: #0E0B16;
+    color: #0A0714;
     border: none;
-    padding: 14px 32px;
+    padding: 14px 34px;
     border-radius: 30px;
     font-size: 16px;
     font-weight: 800;
@@ -462,26 +492,28 @@ std::string AuthServer::generateLunaWebPage() const {
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    box-shadow: 0 4px 16px rgba(255,255,255,0.25);
+    box-shadow: 0 4px 18px rgba(255,255,255,0.25);
     transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
+    font-family: inherit;
   }
-  .btn-play::before { content: '▶'; font-size: 14px; color: var(--accent-purple); }
+  .btn-play svg { fill: var(--accent-purple); width: 16px; height: 16px; }
   .btn-play:hover, .btn-play.focused {
     background: #F1F5F9;
     transform: scale(1.05);
-    box-shadow: 0 0 0 3px #FFF, 0 8px 24px rgba(255,255,255,0.4);
+    box-shadow: 0 0 0 3px #FFF, 0 8px 26px rgba(255,255,255,0.4);
   }
   .btn-info {
     background: rgba(255,255,255,0.12);
     color: #FFF;
-    border: 1px solid rgba(255,255,255,0.25);
-    padding: 14px 26px;
+    border: 1px solid rgba(255,255,255,0.28);
+    padding: 14px 28px;
     border-radius: 30px;
     font-size: 15px;
     font-weight: 700;
     cursor: pointer;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(10px);
     transition: 0.15s;
+    font-family: inherit;
   }
   .btn-info:hover, .btn-info.focused {
     background: rgba(255,255,255,0.25);
@@ -490,29 +522,40 @@ std::string AuthServer::generateLunaWebPage() const {
   }
 
   /* SWIMLANES & HORIZONTAL ROWS */
-  .swimlane { padding: 24px 60px; }
-  .swimlane-title { font-size: 24px; font-weight: 800; margin-bottom: 18px; color: #FFFFFF; }
+  .swimlane { padding: 26px 64px; }
+  .swimlane-title { font-size: 24px; font-weight: 800; margin-bottom: 20px; color: #FFFFFF; }
   .swimlane-row {
     display: flex;
-    gap: 22px;
+    gap: 24px;
     overflow-x: auto;
-    padding: 10px 4px 24px 4px;
+    padding: 12px 6px 26px 6px;
     scroll-behavior: smooth;
     scrollbar-width: none;
   }
   .swimlane-row::-webkit-scrollbar { display: none; }
 
-  /* GAME CARD */
-  .game-card-wrapper { display: flex; align-items: flex-end; flex-shrink: 0; }
+  /* GAME CARD & OFFICIAL RANKING NUMBERS */
+  .game-card-wrapper {
+    display: flex;
+    align-items: flex-end;
+    flex-shrink: 0;
+    margin-right: 12px;
+  }
   .rank-number {
-    font-size: 96px;
+    font-size: 130px;
     font-weight: 900;
-    line-height: 0.8;
-    color: #332650;
-    margin-right: -24px;
+    line-height: 0.75;
+    color: rgba(255, 255, 255, 0.16);
+    -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.25);
+    text-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
+    margin-right: -32px;
     z-index: 1;
-    font-style: italic;
-    text-shadow: 2px 2px 0px #0E0B16, -1px -1px 0 #4B3A70;
+    font-family: var(--font-primary);
+    user-select: none;
+    pointer-events: none;
+    display: flex;
+    align-items: flex-end;
+    padding-bottom: 8px;
   }
   .game-card {
     width: 200px;
@@ -520,7 +563,7 @@ std::string AuthServer::generateLunaWebPage() const {
     border-radius: 12px;
     overflow: hidden;
     cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     border: 2px solid transparent;
     flex-shrink: 0;
     position: relative;
@@ -528,7 +571,7 @@ std::string AuthServer::generateLunaWebPage() const {
   }
   .game-card:hover, .game-card.focused {
     transform: translateY(-8px) scale(1.04);
-    box-shadow: 0 0 0 3px #FFFFFF, 0 14px 30px rgba(145, 70, 255, 0.6);
+    box-shadow: 0 0 0 3px #FFFFFF, 0 14px 32px rgba(145, 70, 255, 0.6);
     border-color: #FFFFFF;
     z-index: 10;
   }
@@ -536,8 +579,9 @@ std::string AuthServer::generateLunaWebPage() const {
     width: 100%;
     height: 275px;
     object-fit: cover;
-    background: #231B38;
+    background: #1F1735;
     display: block;
+    border-radius: 10px 10px 0 0;
   }
   .card-info { padding: 12px 14px; }
   .card-title { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #FFF; }
@@ -549,52 +593,53 @@ std::string AuthServer::generateLunaWebPage() const {
     position: fixed;
     inset: 0;
     z-index: 200;
-    background: rgba(14, 11, 22, 0.88);
-    backdrop-filter: blur(12px);
+    background: rgba(10, 7, 20, 0.88);
+    backdrop-filter: blur(14px);
     align-items: center;
     justify-content: center;
-    padding: 20px;
+    padding: 24px;
   }
   .modal {
-    background: #181226;
-    border: 1px solid #3B2A60;
-    border-radius: 20px;
-    max-width: 850px;
+    background: #161026;
+    border: 1px solid #38275C;
+    border-radius: 22px;
+    max-width: 860px;
     width: 100%;
     overflow: hidden;
-    box-shadow: 0 25px 60px rgba(0,0,0,0.9);
+    box-shadow: 0 25px 65px rgba(0,0,0,0.92);
     position: relative;
   }
   .modal-hero {
     position: relative;
     width: 100%;
-    height: 320px;
+    height: 330px;
     background-size: cover;
     background-position: center;
-    background-color: #231B38;
+    background-color: #1F1735;
   }
   .modal-hero-gradient {
     position: absolute;
     inset: 0;
-    background: linear-gradient(0deg, #181226 0%, rgba(24,18,38,0.7) 50%, rgba(24,18,38,0.2) 100%);
+    background: linear-gradient(0deg, #161026 0%, rgba(22,16,38,0.72) 50%, rgba(22,16,38,0.18) 100%);
   }
-  .modal-body { padding: 28px 36px; }
-  .modal-title { font-size: 34px; font-weight: 800; margin-bottom: 8px; color: #FFF; }
-  .modal-meta-row { display: flex; gap: 16px; align-items: center; font-size: 14px; color: var(--text-secondary); margin-bottom: 16px; flex-wrap: wrap; }
-  .modal-pegi { background: #3B2A60; color: #FFF; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 12px; }
+  .modal-body { padding: 30px 40px; }
+  .modal-title { font-size: 36px; font-weight: 800; margin-bottom: 10px; color: #FFF; }
+  .modal-meta-row { display: flex; gap: 16px; align-items: center; font-size: 14px; color: var(--text-secondary); margin-bottom: 18px; flex-wrap: wrap; }
+  .modal-pegi { background: #38275C; color: #FFF; padding: 3px 10px; border-radius: 6px; font-weight: 800; font-size: 12px; }
   .modal-synopsis { font-size: 15px; color: #CBD5E1; line-height: 1.6; margin-bottom: 28px; max-height: 140px; overflow-y: auto; }
   .modal-actions { display: flex; justify-content: space-between; align-items: center; }
   .btn-close {
     background: transparent;
     border: 1px solid #4B3A70;
     color: #CBD5E1;
-    padding: 12px 28px;
+    padding: 12px 30px;
     border-radius: 30px;
     font-weight: 700;
     cursor: pointer;
     transition: 0.15s;
+    font-family: inherit;
   }
-  .btn-close:hover, .btn-close.focused { background: rgba(255,255,255,0.1); border-color: #FFF; color: #FFF; }
+  .btn-close:hover, .btn-close.focused { background: rgba(255,255,255,0.12); border-color: #FFF; color: #FFF; }
 
   /* OVERLAY INICIANDO PARTIDA */
   .launch-overlay {
@@ -636,11 +681,11 @@ std::string AuthServer::generateLunaWebPage() const {
   .hud-hints {
     position: fixed;
     bottom: 20px;
-    right: 30px;
+    right: 32px;
     z-index: 90;
     display: flex;
     gap: 16px;
-    background: rgba(14, 11, 22, 0.85);
+    background: rgba(10, 7, 20, 0.88);
     border: 1px solid #231B38;
     padding: 8px 18px;
     border-radius: 20px;
@@ -653,7 +698,7 @@ std::string AuthServer::generateLunaWebPage() const {
     background: #2D2248;
     color: #FFF;
     border-radius: 4px;
-    padding: 2px 6px;
+    padding: 2px 7px;
     font-size: 11px;
     font-weight: 800;
   }
@@ -664,8 +709,17 @@ std::string AuthServer::generateLunaWebPage() const {
 <header>
   <div class="header-left">
     <div class="logo-area" onclick="scrollToTop()">
-      <div class="logo-badge"></div>
-      <div class="logo-text">luna</div>
+      <svg class="luna-logo-icon" viewBox="0 0 32 32" fill="none">
+        <defs>
+          <linearGradient id="lunaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#02FDDB"/>
+            <stop offset="100%" stop-color="#9146FF"/>
+          </linearGradient>
+        </defs>
+        <rect x="5" y="5" width="22" height="22" rx="7" transform="rotate(45 16 16)" fill="url(#lunaGrad)"/>
+        <circle cx="16" cy="16" r="4.5" fill="#0A0714"/>
+      </svg>
+      <span class="logo-text">luna</span>
     </div>
     <nav id="navTabs">
       <a class="active nav-item" data-tab="home">Inicio</a>
@@ -675,7 +729,7 @@ std::string AuthServer::generateLunaWebPage() const {
   </div>
   <div class="header-right">
     <div class="search-box" id="searchBox">
-      <span>🔍</span>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
       <input type="text" id="searchInput" placeholder="Buscar juegos..." oninput="onSearchInput(this.value)">
     </div>
     <div class="profile-badge">
@@ -688,11 +742,14 @@ std::string AuthServer::generateLunaWebPage() const {
 <div class="hero-banner" id="heroBanner">
   <div class="hero-gradient"></div>
   <div class="hero-content">
-    <div class="hero-badge" id="heroBadge">DESTACADO EN AMAZON LUNA</div>
-    <div class="hero-title" id="heroTitle">Cargando catálogo oficial...</div>
-    <div class="hero-desc" id="heroDesc">Conectando con el motor nativo de PS5 a 1080p 60 FPS...</div>
+    <div class="hero-badge" id="heroBadge">LUNA PREMIUM</div>
+    <div class="hero-title" id="heroTitle">Luna Premium</div>
+    <div class="hero-desc" id="heroDesc">Más de 100 juegos. Una suscripción. Descubre grandes novedades, clásicos y favoritos familiares para jugar al instante en la nube.</div>
     <div class="hero-actions">
-      <button class="btn-play focusable" id="heroPlayBtn" onclick="launchCurrentHero()">Jugar ahora en PS5</button>
+      <button class="btn-play focusable" id="heroPlayBtn" onclick="launchCurrentHero()">
+        <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        <span>Jugar ahora en PS5</span>
+      </button>
       <button class="btn-info focusable" id="heroInfoBtn" onclick="openCurrentHeroInfo()">Más información</button>
     </div>
   </div>
@@ -719,7 +776,10 @@ std::string AuthServer::generateLunaWebPage() const {
       <div class="modal-synopsis" id="mSynopsis"></div>
       <div class="modal-actions">
         <button class="btn-close focusable" id="mCloseBtn" onclick="closeModal()">Cerrar</button>
-        <button class="btn-play focusable" id="mPlayBtn">Jugar ahora en PS5</button>
+        <button class="btn-play focusable" id="mPlayBtn">
+          <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          <span>Jugar ahora en PS5</span>
+        </button>
       </div>
     </div>
   </div>
@@ -787,7 +847,6 @@ function launchGame(gameId, gameTitle) {
     .then(r => r.json())
     .then(res => {
       console.log('Juego lanzado:', res);
-      // Intenta cerrar la ventana web del navegador de PS5 automáticamente
       try { window.close(); } catch(e) {}
     })
     .catch(err => {
@@ -797,10 +856,12 @@ function launchGame(gameId, gameTitle) {
 
 function launchCurrentHero() {
   if (heroGame) launchGame(heroGame.id, heroGame.title);
+  else if (catalogGames.length > 0) launchGame(catalogGames[0].id, catalogGames[0].title);
 }
 
 function openCurrentHeroInfo() {
   if (heroGame) openModal(heroGame);
+  else if (catalogGames.length > 0) openModal(catalogGames[0]);
 }
 
 function openModal(game) {
@@ -822,7 +883,7 @@ function openModal(game) {
   const modal = document.getElementById('gameModal');
   modal.style.display = 'flex';
   setTimeout(() => {
-    setFocus(1); // Foco en botón Jugar del modal
+    setFocus(1);
   }, 50);
 }
 
@@ -840,25 +901,21 @@ function renderCatalog(games) {
   if (!games || games.length === 0) return;
 
   heroGame = games[0];
-  document.getElementById('heroTitle').innerText = heroGame.title;
-  document.getElementById('heroDesc').innerText = heroGame.synopsis || (heroGame.publisher + ' • ' + (heroGame.genres || 'Destacado'));
-  if (heroGame.backdropUrl || heroGame.coverUrl) {
-    document.getElementById('heroBanner').style.backgroundImage = 'url(' + (heroGame.backdropUrl || heroGame.coverUrl) + ')';
-  }
+  // Mantener el hero banner "Luna Premium" con la imagen oficial /assets/luna_premium_hero.jpg
+  document.getElementById('heroBanner').style.backgroundImage = 'url(/assets/luna_premium_hero.jpg)';
 
-  // Agrupar en colecciones (Rankings + Géneros / Colecciones)
   const container = document.getElementById('swimlanesContainer');
   container.innerHTML = '';
 
-  // 1. Fila de Rankings (Las mejores novedades en juegos)
+  // 1. Fila de Rankings Oficial: Las mejores novedades en juegos
   const rankLane = document.createElement('div');
   rankLane.className = 'swimlane';
   rankLane.innerHTML = '<div class="swimlane-title">Las mejores novedades en juegos</div>';
   const rankRow = document.createElement('div');
   rankRow.className = 'swimlane-row';
 
-  const top6 = games.slice(0, 10);
-  top6.forEach((g, idx) => {
+  const top10 = games.slice(0, 10);
+  top10.forEach((g, idx) => {
     const wrap = document.createElement('div');
     wrap.className = 'game-card-wrapper';
     wrap.innerHTML = '<div class="rank-number">' + (idx + 1) + '</div>';
@@ -881,7 +938,7 @@ function renderCatalog(games) {
   rankLane.appendChild(rankRow);
   container.appendChild(rankLane);
 
-  // 2. Fila Seguir Jugando / Destacados
+  // 2. Fila Seguir Jugando / Recomendados para ti
   const recLane = document.createElement('div');
   recLane.className = 'swimlane';
   recLane.innerHTML = '<div class="swimlane-title">Recomendados para ti</div>';
@@ -905,6 +962,33 @@ function renderCatalog(games) {
   });
   recLane.appendChild(recRow);
   container.appendChild(recLane);
+
+  // 3. Fila Acción y Aventura
+  if (games.length > 8) {
+    const actLane = document.createElement('div');
+    actLane.className = 'swimlane';
+    actLane.innerHTML = '<div class="swimlane-title">Populares en Luna</div>';
+    const actRow = document.createElement('div');
+    actRow.className = 'swimlane-row';
+
+    games.slice(2).forEach(g => {
+      const card = document.createElement('div');
+      card.className = 'game-card focusable';
+      card.tabIndex = 0;
+      card.onclick = () => openModal(g);
+
+      card.innerHTML = `
+        <img class="card-cover" loading="lazy" src="${g.coverUrl || g.backdropUrl || ''}" alt="${g.title}">
+        <div class="card-info">
+          <div class="card-title">${g.title}</div>
+          <div class="card-sub">${g.genres || g.publisher || 'Amazon Luna'}</div>
+        </div>
+      `;
+      actRow.appendChild(card);
+    });
+    actLane.appendChild(actRow);
+    container.appendChild(actLane);
+  }
 
   updateFocusables();
 }
@@ -946,18 +1030,14 @@ function pollGamepad() {
   const now = Date.now();
 
   if (gp && now - lastNavTime > 160) {
-    // D-Pad / Stick Izquierdo
     const up = gp.buttons[12]?.pressed || gp.axes[1] < -0.5;
     const down = gp.buttons[13]?.pressed || gp.axes[1] > 0.5;
     const left = gp.buttons[14]?.pressed || gp.axes[0] < -0.5;
     const right = gp.buttons[15]?.pressed || gp.axes[0] > 0.5;
 
-    // Botones
-    const btnCross = gp.buttons[0]?.pressed; // (X)
-    const btnCircle = gp.buttons[1]?.pressed; // (O)
-    const btnSquare = gp.buttons[2]?.pressed; // ([ ])
-    const btnL1 = gp.buttons[4]?.pressed;
-    const btnR1 = gp.buttons[5]?.pressed;
+    const btnCross = gp.buttons[0]?.pressed;
+    const btnCircle = gp.buttons[1]?.pressed;
+    const btnSquare = gp.buttons[2]?.pressed;
 
     if (right) {
       setFocus(focusIndex + 1);
@@ -995,7 +1075,6 @@ function pollGamepad() {
 }
 requestAnimationFrame(pollGamepad);
 
-// Navegación con teclado del navegador PS5
 window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight') { setFocus(focusIndex + 1); e.preventDefault(); }
   else if (e.key === 'ArrowLeft') { setFocus(focusIndex - 1); e.preventDefault(); }
@@ -1109,12 +1188,33 @@ void AuthServer::handleClient(int clientSocket) {
     std::string request(buffer.data(), bytesRead);
 
     auto sendAll = [&](const std::string& data) {
+        size_t sent = 0;
+        while (sent < data.size()) {
+            size_t chunk = std::min(data.size() - sent, size_t(16384));
 #if defined(LUNA_TARGET_PS5)
-        int r = sceNetSend(clientSocket, data.data(), data.size(), 0);
-        if (r < 0) ::send(clientSocket, data.data(), static_cast<int>(data.size()), 0);
+            int r = sceNetSend(clientSocket, data.data() + sent, chunk, 0);
+            if (r < 0) r = static_cast<int>(::send(clientSocket, data.data() + sent, static_cast<int>(chunk), 0));
 #else
-        ::send(clientSocket, data.data(), static_cast<int>(data.size()), 0);
+            int r = static_cast<int>(::send(clientSocket, data.data() + sent, static_cast<int>(chunk), 0));
 #endif
+            if (r <= 0) break;
+            sent += r;
+        }
+    };
+
+    auto sendBinary = [&](const uint8_t* data, size_t len) {
+        size_t sent = 0;
+        while (sent < len) {
+            size_t chunk = std::min(len - sent, size_t(16384));
+#if defined(LUNA_TARGET_PS5)
+            int r = sceNetSend(clientSocket, data + sent, chunk, 0);
+            if (r < 0) r = static_cast<int>(::send(clientSocket, reinterpret_cast<const char*>(data + sent), static_cast<int>(chunk), 0));
+#else
+            int r = static_cast<int>(::send(clientSocket, reinterpret_cast<const char*>(data + sent), static_cast<int>(chunk), 0));
+#endif
+            if (r <= 0) break;
+            sent += r;
+        }
     };
 
     // CORS preflight
@@ -1126,6 +1226,114 @@ void AuthServer::handleClient(int clientSocket) {
                                "Content-Length: 0\r\n"
                                "Connection: close\r\n\r\n";
         sendAll(corsResp);
+        return;
+    }
+
+    // Official Luna Hero panoramic image
+    if (request.rfind("GET /assets/luna_premium_hero.jpg", 0) == 0) {
+        std::string header = "HTTP/1.1 200 OK\r\n"
+                             "Content-Type: image/jpeg\r\n"
+                             "Access-Control-Allow-Origin: *\r\n"
+                             "Cache-Control: public, max-age=86400\r\n"
+                             "Content-Length: " + std::to_string(luna::assets::kLunaPremiumHeroJpgSize) + "\r\n"
+                             "Connection: close\r\n\r\n";
+        sendAll(header);
+        sendBinary(luna::assets::kLunaPremiumHeroJpg, luna::assets::kLunaPremiumHeroJpgSize);
+        return;
+    }
+
+    // Official Tempo /token auth endpoint
+    if (request.rfind("GET /token", 0) == 0) {
+        std::string token;
+        {
+            std::lock_guard<std::mutex> lk(dataMutex_);
+            token = accessToken_;
+        }
+        std::string json = "{\"valid\":true,\"token\":\"" + escapeJsonString(token) + "\"}";
+        std::string resp = "HTTP/1.1 200 OK\r\n"
+                           "Content-Type: application/json; charset=utf-8\r\n"
+                           "Access-Control-Allow-Origin: *\r\n"
+                           "Content-Length: " + std::to_string(json.size()) + "\r\n"
+                           "Connection: close\r\n\r\n" + json;
+        sendAll(resp);
+        return;
+    }
+
+    // Official Tempo /cookie endpoint
+    if (request.rfind("GET /cookie", 0) == 0) {
+        std::string json = "{\"interpretedStringState\":\"CONSENT_GIVEN\"}";
+        std::string resp = "HTTP/1.1 200 OK\r\n"
+                           "Content-Type: application/json; charset=utf-8\r\n"
+                           "Access-Control-Allow-Origin: *\r\n"
+                           "Content-Length: " + std::to_string(json.size()) + "\r\n"
+                           "Connection: close\r\n\r\n" + json;
+        sendAll(resp);
+        return;
+    }
+
+    // Web manifest
+    if (request.rfind("GET /manifest-branded.json", 0) == 0) {
+        std::string json = "{\"name\":\"Amazon Luna\",\"short_name\":\"Luna\",\"start_url\":\"/luna\",\"display\":\"standalone\",\"background_color\":\"#0a0714\",\"theme_color\":\"#9146FF\"}";
+        std::string resp = "HTTP/1.1 200 OK\r\n"
+                           "Content-Type: application/json; charset=utf-8\r\n"
+                           "Access-Control-Allow-Origin: *\r\n"
+                           "Content-Length: " + std::to_string(json.size()) + "\r\n"
+                           "Connection: close\r\n\r\n" + json;
+        sendAll(resp);
+        return;
+    }
+
+    // Proxy endpoint for Tempo backend (LG Smart TV mode)
+    if (request.rfind("POST /tempo/", 0) == 0 || request.rfind("GET /tempo/", 0) == 0) {
+        bool isPost = (request.rfind("POST /tempo/", 0) == 0);
+        size_t pathStart = request.find(' ');
+        if (pathStart != std::string::npos) pathStart++;
+        size_t pathEnd = request.find(' ', pathStart);
+        std::string reqPath = (pathEnd != std::string::npos) ? request.substr(pathStart, pathEnd - pathStart) : "/tempo/";
+        
+        std::string apiPath = reqPath;
+        if (apiPath.rfind("/tempo", 0) == 0) {
+            apiPath = apiPath.substr(6);
+        }
+        if (apiPath.empty() || apiPath[0] != '/') apiPath = "/" + apiPath;
+
+        std::string token;
+        {
+            std::lock_guard<std::mutex> lk(dataMutex_);
+            token = accessToken_;
+        }
+
+        std::vector<std::pair<std::string, std::string>> headers = {
+            {"Content-Type", "application/json"},
+            {"Accept", "application/json"},
+            {"x-amz-platform", "smart_tv_web"},
+            {"x-amz-device-type", "A2U9WJDSJD7QG9"},
+            {"x-amz-luna-app-version", "1.0"}
+        };
+        if (!token.empty()) {
+            headers.push_back({"x-amz-access-token", token});
+        }
+
+        std::string targetUrl = "https://proxy-prod.eu-west-1.tempo.digital.a2z.com" + apiPath;
+        luna::net::HttpResponse proxyResp;
+        if (isPost) {
+            std::string postBody;
+            size_t bodyPos = request.find("\r\n\r\n");
+            if (bodyPos != std::string::npos) {
+                postBody = request.substr(bodyPos + 4);
+            }
+            proxyResp = luna::net::HttpClient::post(targetUrl, postBody, headers);
+        } else {
+            proxyResp = luna::net::HttpClient::get(targetUrl, headers);
+        }
+
+        std::string statusLine = "HTTP/1.1 " + std::to_string(proxyResp.statusCode > 0 ? proxyResp.statusCode : 200) + " OK\r\n";
+        std::string resp = statusLine +
+                           "Content-Type: application/json; charset=utf-8\r\n"
+                           "Access-Control-Allow-Origin: *\r\n"
+                           "Content-Length: " + std::to_string(proxyResp.body.size()) + "\r\n"
+                           "Connection: close\r\n\r\n" + proxyResp.body;
+        sendAll(resp);
         return;
     }
 
@@ -1212,7 +1420,7 @@ void AuthServer::handleClient(int clientSocket) {
             }
         }
 
-        std::string okBody = "<!DOCTYPE html><html><body style='background:#0e0720;color:#34d399;font-family:sans-serif;text-align:center;padding:40px'><h2>Sesion Luna procesada con exito!</h2><p>Conectando WebRTC a " + currentSession_.publicIp + ":" + std::to_string(currentSession_.port) + "</p><p>Mira la pantalla de tu TV.</p></body></html>";
+        std::string okBody = "<!DOCTYPE html><html><body style='background:#0a0714;color:#34d399;font-family:sans-serif;text-align:center;padding:40px'><h2>Sesion Luna procesada con exito!</h2><p>Conectando WebRTC a " + currentSession_.publicIp + ":" + std::to_string(currentSession_.port) + "</p><p>Mira la pantalla de tu TV.</p></body></html>";
         std::string respStr = "HTTP/1.1 200 OK\r\n"
                               "Content-Type: text/html; charset=utf-8\r\n"
                               "Content-Length: " + std::to_string(okBody.size()) + "\r\n"

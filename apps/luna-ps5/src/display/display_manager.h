@@ -177,6 +177,11 @@ private:
     void* mappedMemory_ = nullptr;
     int currentBuffer_ = 0;
     int64_t flipMarker_ = 0;
+
+    std::vector<uint8_t> heroBannerRgba_;
+    int heroBannerWidth_ = 0;
+    int heroBannerHeight_ = 0;
+    void loadStaticHeroBanner();
 };
 
 } // namespace luna::display

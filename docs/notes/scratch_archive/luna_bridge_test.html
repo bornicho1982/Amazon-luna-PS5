@@ -1,0 +1,327 @@
+
+
+
+
+<!doctype html>
+<html>
+<head>
+<script>
+// Intercept fetch and XHR for tempo endpoints
+const origFetch = window.fetch;
+window.fetch = function(input, init) {
+    let url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+    if (url.includes('tempo.digital.a2z.com')) {
+        url = url.replace(/https:\/\/[^\/]+/, 'http://127.0.0.1:8899/tempo');
+        if (typeof input === 'string') input = url;
+        else input = new Request(url, init);
+    }
+    return origFetch.call(this, input, init);
+};
+</script>
+
+    
+        
+            <title data-react-helmet="true">Amazon Luna: Servicio de juegos</title>
+        
+        
+    
+
+    
+    <script>
+(function(b,a,c,d){if((b=b.AmazonUIPageJS||b.P)&&b.when&&b.register){c=[];for(a=a.currentScript;a;a=a.parentElement)a.id&&c.push(a.id);return b.log("A copy of P has already been loaded on this page.","FATAL",c.join(" "))}})(window,document,Date);(function(a,b,c,d){"use strict";a._pSetI=function(){return null}})(window,document,Date);(function(c,e,I,B){"use strict";c._pd=function(){var a,u;return function(C,f,h,k,b,D,v,E,F){function w(d){try{return d()}catch(J){return!1}}function l(){if(m){var d={w:c.innerWidth||b.clientWidth,h:c.innerHeight||b.clientHeight};5<Math.abs(d.w-q.w)||50<d.h-q.h?(q=d,n=4,(d=a.mobile||a.tablet?450<d.w&&d.w>d.h:1250<=d.w)?k(b,"a-ws"):b.className=v(b,"a-ws")):0<n&&(n--,x=setTimeout(l,16))}}function G(d){(m=d===B?!m:!!d)&&l()}function H(){return m}if(!u){u=!0;var r=function(){var d=["O","ms","Moz","Webkit"],
+c=e.createElement("div");return{testGradients:function(){return!0},test:function(a){var b=a.charAt(0).toUpperCase()+a.substr(1);a=(d.join(b+" ")+b+" "+a).split(" ");for(b=a.length;b--;)if(""===c.style[a[b]])return!0;return!1},testTransform3d:function(){return!0}}}(),y=b.className,z=/(^| )a-mobile( |$)/.test(y),A=/(^| )a-tablet( |$)/.test(y);a={audio:function(){return!!e.createElement("audio").canPlayType},video:function(){return!!e.createElement("video").canPlayType},canvas:function(){return!!e.createElement("canvas").getContext},
+svg:function(){return!!e.createElementNS&&!!e.createElementNS("http://www.w3.org/2000/svg","svg").createSVGRect},offline:function(){return navigator.hasOwnProperty&&navigator.hasOwnProperty("onLine")&&navigator.onLine},dragDrop:function(){return"draggable"in e.createElement("span")},geolocation:function(){return!!navigator.geolocation},history:function(){return!(!c.history||!c.history.pushState)},webworker:function(){return!!c.Worker},autofocus:function(){return"autofocus"in e.createElement("input")},
+inputPlaceholder:function(){return"placeholder"in e.createElement("input")},textareaPlaceholder:function(){return"placeholder"in e.createElement("textarea")},localStorage:function(){return"localStorage"in c&&null!==c.localStorage},orientation:function(){return"orientation"in c},touch:function(){return"ontouchend"in e},gradients:function(){return r.testGradients()},hires:function(){var a=c.devicePixelRatio&&1.5<=c.devicePixelRatio||c.matchMedia&&c.matchMedia("(min-resolution:144dpi)").matches;E("hiRes"+
+(z?"Mobile":A?"Tablet":"Desktop"),a?1:0);return a},transform3d:function(){return r.testTransform3d()},touchScrolling:function(){return f(/Windowshop|android|OS ([5-9]|[1-9][0-9]+)(_[0-9]{1,2})+ like Mac OS X|SOFTWARE=([5-9]|[1-9][0-9]+)(.[0-9]{1,2})+.*DEVICE=iPhone|Chrome|Silk|Firefox|Trident.+?; Touch/i)},ios:function(){return f(/OS [1-9][0-9]*(_[0-9]*)+ like Mac OS X/i)&&!f(/trident|Edge/i)},android:function(){return f(/android.([1-9]|[L-Z])/i)&&!f(/trident|Edge/i)},mobile:function(){return z},
+tablet:function(){return A},rtl:function(){return"rtl"===b.dir}};for(var g in a)a.hasOwnProperty(g)&&(a[g]=w(a[g]));for(var t="textShadow textStroke boxShadow borderRadius borderImage opacity transform transition".split(" "),p=0;p<t.length;p++)a[t[p]]=w(function(){return r.test(t[p])});var m=!0,x=0,q={w:0,h:0},n=4;l();h(c,"resize",function(){clearTimeout(x);n=4;l()});b.className=v(b,"a-no-js");k(b,"a-js");!f(/OS [1-8](_[0-9]*)+ like Mac OS X/i)||c.navigator.standalone||f(/safari/i)||k(b,"a-ember");
+h=[];for(g in a)a.hasOwnProperty(g)&&a[g]&&h.push("a-"+g.replace(/([A-Z])/g,function(a){return"-"+a.toLowerCase()}));k(b,h.join(" "));b.setAttribute("data-aui-build-date",F);C.register("p-detect",function(){return{capabilities:a,localStorage:a.localStorage&&D,toggleResponsiveGrid:G,responsiveGridEnabled:H}});return a||{}}}}()})(window,document,Date);(function(a,p,q,k){function m(e,b,c,g){a.P.when.apply(a.P,b).register("flow:"+e,function(){var a=g.apply(this,arguments);return c||a})}function l(e){a.P.log(e,"FATAL","AmazonUIPageJS@AUIDefineJS")}function f(a,b,c){Object.defineProperty(a,b,{value:c,writable:!1})}function n(e,b,c){"string"!==typeof e&&a.P.error("Anonymous modules are not supported.");var g=c!==k?c:"function"===typeof b?b:k;g||a.P.error("A callback must be provided");var f,h=[];if(c&&Array.isArray(b)&&(h=b.reduce(function(b,d){if("module"===
+d||"require"===d)a.P.error('"module" or "require" injection is not supported.');else if("exports"===d){d=f={};var c="flow:"+e+"-exports";a.P.declare(c,d);b.push(c)}else 0!==d.lastIndexOf("@amzn/",0)?l("Dependency "+d+" does not begin with '@amzn/'"):b.push("flow:"+d);return b},[]),b.length!==h.length))return;m(e,h,f,g)}"use strict";Object.prototype.hasOwnProperty.call(a,"aui")?l("AUIDefineJS is already present globally"):(f(a,"aui",{}),f(a.aui,"amd_define",n))})(window,document,Date);(function(g,h,C,D){function K(a){l&&l.tag&&l.tag(p(":","aui",a))}function q(a,b){l&&l.count&&l.count("aui:"+a,0===b?0:b||(l.count("aui:"+a)||0)+1)}function L(a){try{return a.test(navigator.userAgent)}catch(b){return!1}}function x(a,b,c){a.addEventListener?a.addEventListener(b,c,!1):a.attachEvent&&a.attachEvent("on"+b,c)}function p(a,b,c,f){b=b&&c?b+a+c:b||c;return f?p(a,b,f):b}function y(a,b,c){try{Object.defineProperty(a,b,{value:c,writable:!1})}catch(f){a[b]=c}return c}function M(a,b){a.className=
+N(a,b)+" "+b}function N(a,b){return(" "+a.className+" ").split(" "+b+" ").join(" ").replace(/^ | $/g,"")}function aa(a,b,c){var f=c=a.length,e=function(){f--||(E.push(b),F||(m?m.set(z):setTimeout(z,0),F=!0))};for(e();c--;)O[a[c]]?e():(u[a[c]]=u[a[c]]||[]).push(e)}function ba(a,b,c,f,e){var d=h.createElement(a?"script":"link");x(d,"error",f);e&&x(d,"load",e);a?(d.type="text/javascript",d.async=!0,c&&/AUIClients|images[/]I/.test(b)&&d.setAttribute("crossorigin","anonymous"),d.src=b):(d.rel="stylesheet",
+d.href=b);h.getElementsByTagName("head")[0].appendChild(d)}function P(a,b){return function(c,f){function e(){ba(b,c,d,function(b){G?q("resource_unload"):d?(d=!1,q("resource_retry"),e()):(q("resource_error"),a.log("Asset failed to load: "+c));b&&b.stopPropagation?b.stopPropagation():g.event&&(g.event.cancelBubble=!0)},f)}if(Q[c])return!1;Q[c]=!0;q("resource_count");var d=!0;return!e()}}function ca(a,b,c){for(var f={name:a,guard:function(c){return b.guardFatal(a,c)},guardTime:function(a){return b.guardTime(a)},
+logError:function(c,d,e){b.logError(c,d,e,a)}},e=[],d=0;d<c.length;d++)A.hasOwnProperty(c[d])&&(e[d]=H.hasOwnProperty(c[d])?H[c[d]](A[c[d]],f):A[c[d]]);return e}function v(a,b,c,f,e){return function(d,k){function n(){var a=null;f?a=k:"function"===typeof k&&(q.start=r(),a=k.apply(g,ca(d,h,l)),q.end=r());if(b){A[d]=a;a=d;for(O[a]=!0;(u[a]||[]).length;)u[a].shift()();delete u[a]}q.done=!0}var h=e||this;"function"===typeof d&&(k=d,d=D);b&&(d=d?d.replace(R,""):"__NONAME__",I.hasOwnProperty(d)&&h.error(p(", reregistered by ",
+p(" by ",d+" already registered",I[d]),h.attribution),d),I[d]=h.attribution);for(var l=[],m=0;m<a.length;m++)l[m]=a[m].replace(R,"");var q=w[d||"anon"+ ++da]={depend:l,registered:r(),namespace:h.namespace};d&&ea.hasOwnProperty(d);c?n():aa(l,h.guardFatal(d,n),d);return{decorate:function(a){H[d]=h.guardFatal(d,a)}}}}function S(a){return function(){var b=Array.prototype.slice.call(arguments);return{execute:v(b,!1,a,!1,this),register:v(b,!0,a,!1,this)}}}function J(a,b){return function(c,f){f||(f=c,c=
+D);var e=this.attribution;return function(){n.push(b||{attribution:e,name:c,logLevel:a});var d=f.apply(this,arguments);n.pop();return d}}}function B(a,b){this.load={js:P(this,!0),css:P(this)};y(this,"namespace",b);y(this,"attribution",a)}function T(){h.body?k.trigger("a-bodyBegin"):setTimeout(T,20)}"use strict";var t=C.now=C.now||function(){return+new C},r=function(a){return a&&a.now?a.now.bind(a):t}(g.performance),fa=r(),ea={},l=g.ue;K();K("aui_build_date:3.26.9-2026-10-22");var U={getItem:function(a){try{return g.localStorage.getItem(a)}catch(b){}},
+setItem:function(a,b){try{return g.localStorage.setItem(a,b)}catch(c){}}},m=g._pSetI(),E=[],ha=[],F=!1,ia=navigator.scheduling&&"function"===typeof navigator.scheduling.isInputPending;var z=function(){for(var a=m?m.set(z):setTimeout(z,0),b=t();ha.length||E.length;)if(E.shift()(),m&&ia){if(150<t()-b&&!navigator.scheduling.isInputPending()||50<t()-b&&navigator.scheduling.isInputPending())return}else if(50<t()-b)return;m?m.clear(a):clearTimeout(a);F=!1};var O={},u={},Q={},G=!1;x(g,"beforeunload",function(){G=
+!0;setTimeout(function(){G=!1},1E4)});var R=/^prv:/,I={},A={},H={},w={},da=0,ja=String.fromCharCode(92),n=[],V=!0,W=g.onerror;g.onerror=function(a,b,c,f,e){e&&"object"===typeof e||(e=Error(a,b,c),e.columnNumber=f,e.stack=b||c||f?p(ja,e.message,"at "+p(":",b,c,f)):D);var d=n.pop()||{};e.attribution=p(":",e.attribution||d.attribution,d.name);e.logLevel=d.logLevel;e.attribution&&console&&console.log&&console.log([e.logLevel||"ERROR",a,"thrown by",e.attribution].join(" "));n=[];W&&(d=[].slice.call(arguments),
+d[4]=e,W.apply(g,d))};B.prototype={logError:function(a,b,c,f){b={message:b,logLevel:c||"ERROR",attribution:p(":",this.attribution,f)};if(g.ueLogError)return g.ueLogError(a||b,a?b:null),!0;console&&console.error&&(console.log(b),console.error(a));return!1},error:function(a,b,c,f){a=Error(p(":",f,a,c));a.attribution=p(":",this.attribution,b);throw a;},guardError:J(),guardFatal:J("FATAL"),guardCurrent:function(a){var b=n[n.length-1];return b?J(b.logLevel,b).call(this,a):a},guardTime:function(a){var b=
+n[n.length-1],c=b&&b.name;return c&&c in w?function(){var b=r(),e=a.apply(this,arguments);w[c].async=(w[c].async||0)+r()-b;return e}:a},log:function(a,b,c){return this.logError(null,a,b,c)},declare:v([],!0,!0,!0),register:v([],!0),execute:v([]),AUI_BUILD_DATE:"3.26.9-2026-10-22",when:S(),now:S(!0),trigger:function(a,b,c){var f=t();this.declare(a,{data:b,pageElapsedTime:f-(g.aPageStart||NaN),triggerTime:f});c&&c.instrument&&X.when("prv:a-logTrigger").execute(function(b){b(a)})},handleTriggers:function(){this.log("handleTriggers deprecated")},
+attributeErrors:function(a){return new B(a)},_namespace:function(a,b){return new B(a,b)},setPriority:function(a){V?V=!1:this.log("setPriority only accept the first call.")}};var k=y(g,"AmazonUIPageJS",new B);var X=k._namespace("PageJS","AmazonUI");X.declare("prv:p-debug",w);k.declare("p-recorder-events",[]);k.declare("p-recorder-stop",function(){});y(g,"P",k);T();if(h.addEventListener){var Y;h.addEventListener("DOMContentLoaded",Y=function(){k.trigger("a-domready");h.removeEventListener("DOMContentLoaded",
+Y,!1)},!1)}var Z=h.documentElement,ka=g._pd(k,L,x,M,Z,U,N,q,"3.26.9-2026-10-22");L(/UCBrowser/i)||ka.localStorage&&M(Z,U.getItem("a-font-class"));k.declare("a-event-revised-handling",!1);k.declare("a-fix-event-off",!1);q("pagejs:pkgExecTime",r()-fa)})(window,document,Date);
+</script>
+
+
+    <!-- Hreflang Tags -->
+    
+        
+            <link rel="alternate" hreflang="es-ES" href="https://luna.amazon.es/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="nl-NL" href="https://luna.amazon.nl/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="de-DE" href="https://luna.amazon.de/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="it-IT" href="https://luna.amazon.it/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="pl-PL" href="https://luna.amazon.pl/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="en-US" href="https://luna.amazon.com/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="nl-NL" href="https://luna.amazon.com.be/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="fr-FR" href="https://luna.amazon.fr/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="en-GB" href="https://luna.amazon.co.uk/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="x-default" href="https://luna.amazon.com/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="en-CA" href="https://luna.amazon.ca/home" data-react-helmet="true">
+        
+            <link rel="alternate" hreflang="sv-SE" href="https://luna.amazon.se/home" data-react-helmet="true">
+        
+    
+
+    <!-- App Clip Banner -->
+    
+
+    <!-- Canonical url -->
+    <link rel="canonical" href="https://luna.amazon.es/home" data-react-helmet="true">
+
+    <!-- Viewport Meta Tag -->
+    
+
+    <!-- Primary Meta Tags -->
+    <meta name="title" content="Amazon Luna: Servicio de juegos" data-react-helmet="true">
+    <meta name="description" content="Amazon Luna es un servicio de juegos donde puedes jugar una biblioteca rotativa de juegos, además de juegos de fiesta con GameNight. Sin descargas, sin consola e incluido con Prime." data-react-helmet="true">
+
+    <!-- Structured Data -->
+    
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://luna.amazon.es/home" data-react-helmet="true">
+    <meta property="og:title" content="Amazon Luna: Servicio de juegos" data-react-helmet="true">
+    <meta property="og:description" content="Amazon Luna es un servicio de juegos donde puedes jugar una biblioteca rotativa de juegos, además de juegos de fiesta con GameNight. Sin descargas, sin consola e incluido con Prime." data-react-helmet="true">
+    <meta property="og:image" content="https://m.media-amazon.com/images/G/01/T/TC05316421/Evergreen/LunaClient/SEO/SEO_Thumbnail_1200x630.png" data-react-helmet="true">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://luna.amazon.es/web/" data-react-helmet="true">
+    <meta name="twitter:title" content="Amazon Luna: Servicio de juegos" data-react-helmet="true">
+    <meta name="twitter:description" content="Amazon Luna es un servicio de juegos donde puedes jugar una biblioteca rotativa de juegos, además de juegos de fiesta con GameNight. Sin descargas, sin consola e incluido con Prime." data-react-helmet="true">
+    <meta name="twitter:image" content="https://m.media-amazon.com/images/G/01/T/TC05316421/Evergreen/LunaClient/SEO/SEO_Thumbnail_1200x630.png" data-react-helmet="true">
+    <meta name="twitter:image:alt" content="https://m.media-amazon.com/images/G/01/T/TC05316421/Evergreen/LunaClient/SEO/SEO_Thumbnail_1200x630.png" data-react-helmet="true">
+    <meta name="twitter:site" content="@amazonluna">
+    <meta name="twitter:creator" content="@amazonluna">
+
+    <!-- Google site verification -->
+    
+        <meta name="google-site-verification" content="pT6y-o2pVb4OGIx36AiFCnHOx-J5WmBddtEcUF86tJc" />
+    
+
+    <!-- Prefetch -->
+    <meta http-equiv="x-dns-prefetch-control" content="on">
+    <link rel="dns-prefetch" href="https://m.media-amazon.com" crossorigin="">
+    <link rel="preconnect" href="https://m.media-amazon.com" crossorigin="">
+    <link rel="dns-prefetch" href="https://proxy-prod.tempo.digital.a2z.com" crossorigin="">
+    <link rel="preconnect" href="https://proxy-prod.tempo.digital.a2z.com" crossorigin="">
+    <link rel="dns-prefetch" href="https://proxy-prod.eu-west-1.tempo.digital.a2z.com" crossorigin="">
+    <link rel="preconnect" href="https://proxy-prod.eu-west-1.tempo.digital.a2z.com" crossorigin="">
+    <link rel="dns-prefetch" href="https://sentry.tempo.digital.a2z.com" crossorigin="">
+    <link rel="preconnect" href="https://sentry.tempo.digital.a2z.com" crossorigin="">
+
+    <!-- Brand icon -->
+    <link rel="shortcut icon" href="https://m.media-amazon.com/images/G/01/T/TC05316420/A07531864/brand/Round_Icon_128x128.png">
+    <link rel="stylesheet" type="text/css" href="https://m.media-amazon.com/images/S/sash/TNReoYQfTL42uz7.css" />
+
+    <script type="text/javascript">
+        window.P && window.P.register('sp.load.js');
+        function callNative(message){
+            nativeClient.message(message);
+        }
+    </script>
+    <style type="text/css">
+        html, body {
+            padding: 0;
+            margin: 0;
+            overflow: hidden;
+        }
+    </style>
+    <link rel="prefetch" href="https://m.media-amazon.com/images/G/01/T/TC05316420/A07531864/BackgroundDesktopScrimOverlay._SX1920_QL65_FMwebp_.png">
+<style>
+:root {
+
+        --bg-color: #1c172b;
+        --bg-image: unset;
+    
+}
+
+html, body {
+    background-color: var(--bg-color);
+    background-image: var(--bg-image);
+}
+</style>
+
+</head>
+<body>
+<div id="root">
+    <style type="text/css">
+    @keyframes spin {
+        from {
+            transform: rotate(0deg)
+        }
+        to {
+            transform: rotate(360deg)
+        }
+    }
+
+    .spinningDiv {
+        display: flex;
+        margin: 4px;
+        animation-name: spin;
+        animation-duration: 2s;
+        animation-iteration-count: infinite;
+        animation-timing-function: linear;
+    }
+
+    .loadingContainer {
+        display: none; /* The spinner starts out hidden, and only tv platforms will make it visible */
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        max-width: 160px;
+        max-height: 160px;
+        padding: 48px;
+    }
+</style>
+
+<div id="loading-container" class="loadingContainer">
+    <div class="spinningDiv">
+        <svg width='100%' height='100%' viewBox='0 0 500 500' fill='none'>
+            <g clipPath='url(#clip0_3323_104)'>
+                <ellipse cx='404.14' cy='153.161' rx='85.0163' ry='85.0163' transform='rotate(30.0108 404.14 153.161)' fill='white' />
+                <circle cx='239.631' cy='403.838' r='66' transform='rotate(30.0108 239.631 403.838)' fill='white' />
+                <circle cx='95.9154' cy='159.085' r='87.0481' transform='rotate(30.0108 95.9154 159.085)' fill='white' />
+            </g>
+            <defs>
+                <clipPath id='clip0_3323_104'>
+                <rect width='500' height='500' fill='white' transform='translate(0.00195312 500.002) rotate(-90.0005)' />
+                </clipPath>
+            </defs>
+        </svg>
+    </div>
+</div>
+
+<script type="text/javascript">
+    // local scope to not conflict with global
+    {
+        const ua = navigator.userAgent;
+
+        const isComcast = /ComcastAppPlatform/.test(ua) && /Firebolt/.test(ua);
+        const isSamsungTV = window.tizen;
+        const isLGTV = (new URLSearchParams(window.location.search).get('isLGTV')) === 'true';
+
+        if (isComcast || isSamsungTV || isLGTV) {
+            // Show the loading spinner
+            const spinner = document.getElementById('loading-container');
+            spinner.style.display = 'block';
+        }
+    }
+</script>
+
+
+</div>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/oSwkP7z0IuTn4wz.js?name=runtime"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/nCieNPoHK8MtdsA.js?name=vendor_amzn-e5a0d704"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/g6Kv31KlYEJ9v6u.js?name=vendor_amzn-42278a2c"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/qL$tiSButT3M0Bz.js?name=vendor_amzn-121132d2"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/arXdryGTK0UiDZj.js?name=vendor_amzn-e5fbaf3b"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/y5WqEaYX4AVVyIi.js?name=vendor_amzn-34b14772"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/qsibzoHkoZ$NC2x.js?name=vendor_amzn-fd88c28a"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/NmHWqNGPtlOwVpb.js?name=vendor_amzn-22da1f62"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/0GjocRtGIzdWLcB.js?name=vendor_amzn-ad53a8f1"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/njMlYmfSzfCTujo.js?name=vendor_amzn-3496a929"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/dfGES8WZYUiMMtD.js?name=vendor_framer_motion-66bb3aca"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/LrDJLjftu4$7-9X.js?name=vendor_framer_motion-8731da8d"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/hskOUZ$7fD754LL.js?name=vendor_framer_motion-55d013d5"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/EjXR5itdG1l3u1H.js?name=vendor_react-efdee510"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/YMwvnsIQdpRCLHD.js?name=vendor_react-c7b45eed"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/ylJwSRigX2V78EW.js?name=vendor_react-e5bca7e4"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/9LOcrOrMRWUcx09.js?name=vendor-cdd60c62"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/MRUuTl9LUMIuPp4.js?name=vendor-536eaa00"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/ew2F2E4imTQXqyJ.js?name=vendor-fcd58341"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/x5OHPbgpmgdquDv.js?name=vendor-f82e0cd2"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/iAKL7BwscbqDpJN.js?name=vendor-fbf35941"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/9KjRAWgzR8js6dL.js?name=vendor-0bc0478e"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/ZyZ3zRb$EBhzW1A.js?name=vendor-386b9151"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/U-JGnnBtBuHvbVL.js?name=vendor-29293d07"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/CCdVBXUEMxO0Y6K.js?name=vendor-229eafb5"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/hxhm77fLU6ie4-i.js?name=vendor-a5ce148e"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/tl0EyFpsofYOfyw.js?name=resources"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/ngudEtmZxSMz6Yp.js?name=initial_app-f41317b2"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/-2sxFyhPECNZeUN.js?name=initial_app-ad52a362"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/Tb9ukJgc7Moetk7.js?name=initial_app-c41feb9a"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/BCiIqgqg6jXREGx.js?name=initial_app-644d012f"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/ZGXwjNAhXbZgSTK.js?name=initial_app-a3083e9c"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/VYztdAOKRp6P15R.js?name=initial_app-ddf422b9"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/gPrmGSwiSV-V6-s.js?name=initial_app-a59c4147"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/X7XeZz3ieUl0zKg.js?name=initial_app-b559ca9f"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/SCLj2SHYVOMmH5H.js?name=initial_app-cf6c831b"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/YBA2ZeNlAB7xTgX.js?name=initial_app-7413f8ad"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/K7o59HyeEZBhnqS.js?name=initial_app-82d1cdcf"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/h8bwJT8IIICLCj9.js?name=initial_app-07d55492"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/k$1LX82wo-8mBxY.js?name=initial_app-a7008965"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/NjoiuHO7YGVMgN5.js?name=initial_app-85d7501d"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/HhKfu7DuooDgwXe.js?name=initial_app-ecbc9d4f"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/6ZaMqTPXflkJU-z.js?name=initial_app-c9acd2ab"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/Bmt1-OUe0pnVdsU.js?name=initial_app-20246b39"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/Uow$Iu$6YUB9pln.js?name=initial_app-dcab6fb1"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/xRhXMtp1HfpjTfx.js?name=initial_app-be2e8c93"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/Dioh$x30cobssWh.js?name=initial_app-730a55cb"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/RgyA4ap5TNEVmdp.js?name=initial_app-8261290d"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/WppazS8lUlW$GUC.js?name=initial_app-75a7023a"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/FQuX$TTc62h-YOj.js?name=initial_app-13f8a33a"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/KyInVVyObWHs6rX.js?name=initial_app-9783f090"></script>
+<script type="text/javascript" src="https://m.media-amazon.com/images/S/sash/rCR54FPuoJc35Oc.js?name=index"></script>
+
+<script>
+    const isIOS = ['iPad Simulator', 'iPhone Simulator', 'iPod Simulator','iPad', 'iPhone', 'iPod'].includes(navigator.platform)
+        || (navigator.userAgent && navigator.userAgent.includes("Mac") && "ontouchend" in document);
+    const isMac = window.webkit && !isIOS;
+    const isWindows = typeof CefSharp !== 'undefined';
+    const isSamsungTV = window.tizen;
+    const isLGTV = (new URLSearchParams(window.location.search).get('isLGTV')) === 'true';
+
+    if (!(isMac ? !isWindows : isWindows)) {
+        var configuration = {
+            basePath: "/",
+            clientId: "clientId",
+            cor: "",
+            customerId: "",
+            deviceContext: {
+                appName: "Amazon Luna Web Client",
+                appVersion: "-",
+                deviceModel: navigator.userAgent,
+                deviceSerial: "",
+                deviceType: "browser"
+            },
+            featureScheme: "WEB_V1",
+            ipAddress: "185.178.161.92",
+            isInternal: false,
+            isPerformantLoadingSpinnerEnabled: "",
+            locale: "es_ES",
+            marketplace: "A1RKKUPIHCS9HS",
+            platform: "web",
+            sessionId: "260-5698586-9488212",
+            stage: "Beta",
+            proxyDevEndpoint: "http://127.0.0.1:8899/tempo/",
+            vapidPublicKey: "BCZVI1kevXJ67jyzDHc3uNs6xPtXKXXLCjBXzRqgaGvhE7weshkx38CoNBHwXwobOWQBmwgOTaS8y2h-qAqXnUw"
+        };
+
+        if (isSamsungTV || isLGTV) {
+            configuration.platform = "smart_tv_web";
+        }
+        
+        window.tempo.initialize(configuration);
+    }
+</script>
+</body>
+</html>

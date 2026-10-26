@@ -1,4 +1,6 @@
 #include "display/display_manager.h"
+#include "display/hero_banner_asset.h"
+#include "util/image_loader.h"
 #include "util/image_loader.h"
 #include <cmath>
 #include "util/crash_logger.h"
@@ -176,6 +178,7 @@ bool DisplayManager::init(int width, int height) {
 
     isReady_ = true;
     fontRenderer_.init();
+    loadStaticHeroBanner();
     return true;
 }
 
@@ -194,6 +197,19 @@ void DisplayManager::shutdown() {
 #endif
         isReady_ = false;
         std::printf("[Display] Subsistema de pantalla cerrado\n");
+    }
+}
+
+void DisplayManager::loadStaticHeroBanner() {
+    if (!heroBannerRgba_.empty()) return;
+    int w = 0, h = 0;
+    if (luna::util::decodeImageRgba(luna::assets::kLunaPremiumHeroJpg,
+                                   luna::assets::kLunaPremiumHeroJpgSize,
+                                   heroBannerRgba_, w, h)) {
+        heroBannerWidth_ = w;
+        heroBannerHeight_ = h;
+        std::printf("[Display] Static Hero Banner decodificado con exito (%dx%d, %zu bytes RGBA)\n",
+                    w, h, heroBannerRgba_.size());
     }
 }
 
@@ -963,11 +979,13 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
             auto heroImg = luna::util::ImageLoader::instance().getImage(heroBackdrop, luna::util::ImagePreset::PanoramicHero);
             if (heroImg && heroImg->ready) {
                 drawPreScaledImage(0, heroY, heroImg->rgba.data(), 1920, 540, heroImg->width, heroImg->height);
+            } else if (!heroBannerRgba_.empty()) {
+                drawPreScaledImage(0, heroY, heroBannerRgba_.data(), 1920, 540, heroBannerWidth_, heroBannerHeight_);
             } else {
                 if (!heroBackdrop.empty()) {
                     luna::util::ImageLoader::instance().requestImage(heroBackdrop, luna::util::ImagePreset::PanoramicHero);
                 }
-                fillRect(0, std::max(0, heroY), 1920, 540, 0xFF140F24);
+                fillRect(0, std::max(0, heroY), 1920, 540, 0xFF0E0B16);
             }
 
             // Lado izquierdo del Hero (x = 68):
@@ -1029,11 +1047,11 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         // Titulo limpio de la fila en blanco
         drawText(68, rowY + 10, 3, row.title, 0xFFFFFFFF);
 
-        // Desplazamiento horizontal suave y margen para rankings
-        int curCardGap = row.isRankings ? 20 : 24;
-        int rankMargin = row.isRankings ? 55 : 0;
+        // Desplazamiento horizontal suave y margen amplio para rankings oficiales
+        int curCardGap = 28;
+        int rankMargin = row.isRankings ? 72 : 0;
         int slotWidth = cardW + curCardGap + rankMargin;
-        int scrollOffset = std::max(0, (selectedCol - (row.isRankings ? 4 : 3)) * slotWidth);
+        int scrollOffset = std::max(0, (selectedCol - (row.isRankings ? 3 : 3)) * slotWidth);
 
         for (size_t i = 0; i < row.items.size(); ++i) {
             int slotX = 68 + static_cast<int>(i) * slotWidth - scrollOffset;
@@ -1047,9 +1065,8 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
 
             if (row.isRankings) {
                 std::string rankStr = std::to_string(i + 1);
-                // Dibuja el número grande a la izquierda de la carátula sin taparlo
-                drawText(numberX + 6, cardY + cardH - 58, 8, rankStr, 0x88484064);
-                drawText(numberX + 4, cardY + cardH - 60, 8, rankStr, 0xFFE2E8F0);
+                // Dibuja el número gigante con tipografía estilizada y color 0x24FFFFFF
+                drawText(numberX, cardY + cardH - 28, 8, rankStr, 0x24FFFFFF);
             }
 
             auto coverImg = luna::util::ImageLoader::instance().getImage(item.coverUrl, luna::util::ImagePreset::VerticalPoster);
