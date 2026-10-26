@@ -47,6 +47,11 @@ public:
                             const std::string& accessToken,
                             const std::string& deviceSerial = "");
 
+    std::string fetchRawPage(const std::string& pageType,
+                             const std::string& pageId,
+                             const std::string& accessToken,
+                             const std::string& deviceSerial = "");
+
     bool startSession(const std::string& gameId,
                       const std::string& accessToken,
                       const std::string& sdpOffer,

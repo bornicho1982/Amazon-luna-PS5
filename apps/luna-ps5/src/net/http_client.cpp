@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <mutex>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -19,6 +20,8 @@
 namespace luna::net {
 
 namespace {
+
+static std::recursive_mutex g_httpMutex;
 
 #if !defined(_WIN32)
 int g_netPoolId = -1;
@@ -48,6 +51,7 @@ static std::string trimString(const std::string& str) {
 } // namespace
 
 bool HttpClient::init() {
+    std::lock_guard<std::recursive_mutex> lock(g_httpMutex);
 #if defined(_WIN32)
     return true;
 #else
@@ -59,19 +63,19 @@ bool HttpClient::init() {
 
     sceNetInit();
 
-    g_netPoolId = sceNetPoolCreate("luna_net", 32 * 1024, 0);
+    g_netPoolId = sceNetPoolCreate("luna_net", 256 * 1024, 0);
     if (g_netPoolId < 0) {
         char dynamicName[32];
         std::snprintf(dynamicName, sizeof(dynamicName), "luna_%u", static_cast<unsigned>(time(nullptr) & 0xFFFF));
-        g_netPoolId = sceNetPoolCreate(dynamicName, 32 * 1024, 0);
+        g_netPoolId = sceNetPoolCreate(dynamicName, 256 * 1024, 0);
     }
 
-    g_sslCtxId = sceSslInit(256 * 1024);
+    g_sslCtxId = sceSslInit(512 * 1024);
     if (g_sslCtxId < 0) {
-        g_sslCtxId = sceSslInit(128 * 1024);
+        g_sslCtxId = sceSslInit(256 * 1024);
     }
 
-    g_httpCtxId = sceHttpInit(g_netPoolId, g_sslCtxId, 256 * 1024);
+    g_httpCtxId = sceHttpInit(g_netPoolId, g_sslCtxId, 512 * 1024);
 
     if (g_httpCtxId >= 0) {
         g_tmplId = sceHttpCreateTemplate(g_httpCtxId, "Luna-Client/1.0", SCE_HTTP_VERSION_1_1, 1);
@@ -92,6 +96,7 @@ bool HttpClient::init() {
 }
 
 void HttpClient::shutdown() {
+    std::lock_guard<std::recursive_mutex> lock(g_httpMutex);
 #if defined(_WIN32)
     // No-op
 #else
@@ -123,6 +128,7 @@ void HttpClient::shutdown() {
 HttpResponse HttpClient::post(const std::string& url,
                              const std::string& jsonBody,
                              const std::vector<std::pair<std::string, std::string>>& headers) {
+    std::lock_guard<std::recursive_mutex> lock(g_httpMutex);
     HttpResponse resp;
 
 #if defined(_WIN32)
@@ -272,6 +278,7 @@ HttpResponse HttpClient::post(const std::string& url,
 
 HttpResponse HttpClient::get(const std::string& url,
                             const std::vector<std::pair<std::string, std::string>>& headers) {
+    std::lock_guard<std::recursive_mutex> lock(g_httpMutex);
     HttpResponse resp;
 
 #if defined(_WIN32)

@@ -333,24 +333,25 @@ void DisplayManager::drawImage(int rx, int ry, int rw, int rh, const uint8_t* rg
 }
 
 
-void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int imgW, int imgH, int strideW) {
-    if (!isReady_ || !mappedMemory_ || !rgba || imgW <= 0 || imgH <= 0) return;
-    if (strideW <= 0) strideW = imgW;
+void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int dstW, int dstH, int srcW, int srcH) {
+    if (!isReady_ || !mappedMemory_ || !rgba || dstW <= 0 || dstH <= 0) return;
+    if (srcW <= 0) srcW = dstW;
+    if (srcH <= 0) srcH = dstH;
     uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
 
     int x0 = std::max(0, rx);
     int y0 = std::max(0, ry);
-    int x1 = std::min(width_, rx + imgW);
-    int y1 = std::min(height_, ry + imgH);
+    int x1 = std::min(width_, rx + dstW);
+    int y1 = std::min(height_, ry + dstH);
 
-    bool directBlit = (strideW == imgW);
-    float scaleX = static_cast<float>(strideW) / static_cast<float>(imgW);
+    float scaleX = static_cast<float>(srcW) / static_cast<float>(dstW);
+    float scaleY = static_cast<float>(srcH) / static_cast<float>(dstH);
 
     for (int y = y0; y < y1; ++y) {
-        int srcY = y - ry;
-        const uint8_t* row = rgba + (static_cast<size_t>(srcY) * static_cast<size_t>(strideW) * 4);
+        int srcY = std::clamp(static_cast<int>((y - ry) * scaleY), 0, srcH - 1);
+        const uint8_t* row = rgba + (static_cast<size_t>(srcY) * static_cast<size_t>(srcW) * 4);
         for (int x = x0; x < x1; ++x) {
-            int srcX = directBlit ? (x - rx) : std::clamp(static_cast<int>((x - rx) * scaleX), 0, strideW - 1);
+            int srcX = std::clamp(static_cast<int>((x - rx) * scaleX), 0, srcW - 1);
             const uint8_t* p = row + (srcX * 4);
             uint8_t a = p[3];
             if (a == 255) {
@@ -949,7 +950,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
             // Fondo panoramico que ocupa todo el ancho superior con degradado suave a #0E0B16
             auto heroImg = luna::util::ImageLoader::instance().getImage(heroGame.backdropUrl, luna::util::ImagePreset::PanoramicHero);
             if (heroImg && heroImg->ready) {
-                drawPreScaledImage(0, heroY, heroImg->rgba.data(), 1920, 540, heroImg->width);
+                drawPreScaledImage(0, heroY, heroImg->rgba.data(), 1920, 540, heroImg->width, heroImg->height);
             } else {
                 if (!heroGame.backdropUrl.empty()) {
                     luna::util::ImageLoader::instance().requestImage(heroGame.backdropUrl, luna::util::ImagePreset::PanoramicHero);
@@ -963,7 +964,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
             if (!heroGame.logoUrl.empty()) {
                 auto logoImg = luna::util::ImageLoader::instance().getImage(heroGame.logoUrl, luna::util::ImagePreset::ProductLogo);
                 if (logoImg && logoImg->ready) {
-                    drawPreScaledImage(68, heroY + 115, logoImg->rgba.data(), logoImg->width, logoImg->height, logoImg->width);
+                    drawPreScaledImage(68, heroY + 115, logoImg->rgba.data(), logoImg->width, logoImg->height, logoImg->width, logoImg->height);
                     drawnLogo = true;
                 } else {
                     luna::util::ImageLoader::instance().requestImage(heroGame.logoUrl, luna::util::ImagePreset::ProductLogo);
@@ -1036,7 +1037,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
 
             auto coverImg = luna::util::ImageLoader::instance().getImage(item.coverUrl, luna::util::ImagePreset::VerticalPoster);
             if (coverImg && coverImg->ready) {
-                drawPreScaledImage(cardX, cardY, coverImg->rgba.data(), 200, 280, coverImg->width);
+                drawPreScaledImage(cardX, cardY, coverImg->rgba.data(), 200, 280, coverImg->width, coverImg->height);
             } else {
                 if (!item.coverUrl.empty()) {
                     luna::util::ImageLoader::instance().requestImage(item.coverUrl, luna::util::ImagePreset::VerticalPoster);
@@ -1175,7 +1176,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
             const auto& tile = filteredGames[g];
             auto cImg = luna::util::ImageLoader::instance().getImage(tile.coverUrl, luna::util::ImagePreset::VerticalPoster);
             if (cImg && cImg->ready) {
-                drawPreScaledImage(gx, gy, cImg->rgba.data(), gCardW, gCardH, cImg->width);
+                drawPreScaledImage(gx, gy, cImg->rgba.data(), gCardW, gCardH, cImg->width, cImg->height);
             } else {
                 drawRoundedRect(gx, gy, gCardW, gCardH, 12, 0xFF241B3B);
             }
@@ -1207,7 +1208,7 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
     // 2. Fondo panoramico 16:9 completo con degradado
     auto bgImg = luna::util::ImageLoader::instance().getImage(game.backdropUrl, luna::util::ImagePreset::PanoramicDetail);
     if (bgImg && bgImg->ready) {
-        drawPreScaledImage(0, 0, bgImg->rgba.data(), 1920, 720, bgImg->width);
+        drawPreScaledImage(0, 0, bgImg->rgba.data(), 1920, 1080, bgImg->width, bgImg->height);
     } else {
         if (!game.backdropUrl.empty()) {
             luna::util::ImageLoader::instance().requestImage(game.backdropUrl, luna::util::ImagePreset::PanoramicDetail);
@@ -1233,7 +1234,7 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
     if (!game.logoUrl.empty()) {
         auto logoImg = luna::util::ImageLoader::instance().getImage(game.logoUrl, luna::util::ImagePreset::ProductLogo);
         if (logoImg && logoImg->ready) {
-            drawPreScaledImage(68, 135, logoImg->rgba.data(), logoImg->width, logoImg->height, logoImg->width);
+            drawPreScaledImage(68, 135, logoImg->rgba.data(), logoImg->width, logoImg->height, logoImg->width, logoImg->height);
             drawnLogo = true;
         } else {
             luna::util::ImageLoader::instance().requestImage(game.logoUrl, luna::util::ImagePreset::ProductLogo);
@@ -1325,7 +1326,7 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
             std::string imgUrl = game.screenshotUrls[t];
             auto thImg = luna::util::ImageLoader::instance().getImage(imgUrl, luna::util::ImagePreset::ScreenshotThumbnail);
             if (thImg && thImg->ready) {
-                drawPreScaledImage(tx, thumbY, thImg->rgba.data(), thumbW, thumbH, thImg->width);
+                drawPreScaledImage(tx, thumbY, thImg->rgba.data(), thumbW, thumbH, thImg->width, thImg->height);
             } else {
                 luna::util::ImageLoader::instance().requestImage(imgUrl, luna::util::ImagePreset::ScreenshotThumbnail);
                 drawRoundedRect(tx, thumbY, thumbW, thumbH, 10, 0xFF241B3B);
@@ -1353,7 +1354,7 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
             const auto& simTile = game.similarGames[s];
             auto sImg = luna::util::ImageLoader::instance().getImage(simTile.coverUrl, luna::util::ImagePreset::VerticalPoster);
             if (sImg && sImg->ready) {
-                drawPreScaledImage(sx, simCardsY, sImg->rgba.data(), simCardW, simCardH, sImg->width);
+                drawPreScaledImage(sx, simCardsY, sImg->rgba.data(), simCardW, simCardH, sImg->width, sImg->height);
             } else {
                 if (!simTile.coverUrl.empty()) {
                     luna::util::ImageLoader::instance().requestImage(simTile.coverUrl, luna::util::ImagePreset::VerticalPoster);

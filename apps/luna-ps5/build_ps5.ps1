@@ -42,6 +42,7 @@ try {
         "util/image_loader",
         "net/http_client",
         "auth/cbl_client",
+        "auth/auth_server",
         "session/luna_session",
         "input/pad_manager",
         "stream/webrtc_client",

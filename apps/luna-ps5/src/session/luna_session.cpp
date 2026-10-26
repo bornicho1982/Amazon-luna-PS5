@@ -887,20 +887,47 @@ bool LunaSessionClient::preloadGameDetails(luna::display::GameTile& tile,
         resolveGameDetails(tile.id, accessToken, deviceSerial, playToken, buildId, profileId, &tile);
         tile.detailsLoaded = true;
     }
-
-    // Descargar carátula si aún no está en memoria
-    if (tile.coverRgba.empty() && !tile.coverUrl.empty() && tile.coverUrl.rfind("http", 0) == 0) {
-        auto imgResp = luna::net::HttpClient::get(tile.coverUrl);
-        if (imgResp.ok() && !imgResp.body.empty()) {
-            int w = 0, h = 0;
-            if (luna::util::decodeImageRgba(reinterpret_cast<const uint8_t*>(imgResp.body.data()),
-                                            imgResp.body.size(), tile.coverRgba, w, h)) {
-                tile.coverWidth = w;
-                tile.coverHeight = h;
-            }
-        }
-    }
     return tile.detailsLoaded;
+}
+
+std::string LunaSessionClient::fetchRawPage(const std::string& pageType,
+                                            const std::string& pageId,
+                                            const std::string& accessToken,
+                                            const std::string& deviceSerial) {
+    if (m_proxyHost.empty()) {
+        fetchAppConfig(accessToken);
+    }
+    if (m_proxyHost.empty()) {
+        m_proxyHost = "https://luna-api.amazon.com";
+    }
+
+    std::vector<std::pair<std::string, std::string>> headers = {
+        {"Content-Type", "application/json"},
+        {"x-amz-platform", "windows"},
+        {"x-amz-device-type", "A1PY8QQU9P0WJV"},
+        {"x-amz-react-version", "1.0.37063.0"},
+        {"x-amz-marketplace-id", "A1RKKUPIHCS9HS"},
+        {"x-amz-country-of-residence", "ES"},
+        {"x-amz-locale", "es_ES"},
+        {"Accept-Language", "es-ES,es;q=0.9,en;q=0.8"},
+        {"x-amz-access-token", accessToken}
+    };
+    if (!deviceSerial.empty()) {
+        headers.push_back({"x-amz-device-serial-number", deviceSerial});
+    }
+    if (!m_tdi.empty()) {
+        headers.push_back({"x-amz-tdi", m_tdi});
+    }
+
+    std::string pageUrl = m_proxyHost + "/getPage";
+    std::string payload = "{\"featureScheme\":\"\",\"pageContext\":{\"encryptPageId\":false,\"pageId\":\"" +
+                          pageId + "\",\"pageType\":\"" + pageType + "\",\"productStage\":\"Release\"}}";
+
+    auto resp = luna::net::HttpClient::post(pageUrl, payload, headers);
+    if (resp.ok()) {
+        return resp.body;
+    }
+    return "{}";
 }
 
 bool LunaSessionClient::loginPlayer(const std::string& profileId,

@@ -74,7 +74,7 @@ public:
     void drawText(int x, int y, int scale, const std::string& text, uint32_t colorArgb);
     void drawQrCode(int x, int y, int moduleScale, const std::string& text);
     void drawImage(int x, int y, int w, int h, const uint8_t* rgba, int imgW, int imgH);
-    void drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int imgW, int imgH, int strideW = 0);
+    void drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int dstW, int dstH, int srcW = 0, int srcH = 0);
     void drawRoundedRect(int x, int y, int w, int h, int r, uint32_t colorArgb);
     void drawRoundedBorder(int x, int y, int w, int h, int r, int thickness, uint32_t colorArgb);
     void drawPlayTriangleIcon(int cx, int cy, int size, uint32_t color);

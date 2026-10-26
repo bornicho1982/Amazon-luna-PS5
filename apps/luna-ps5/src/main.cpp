@@ -25,6 +25,7 @@
 #include "input/pad_manager.h"
 #include "stream/webrtc_client.h"
 #include "auth/cbl_client.h"
+#include "auth/auth_server.h"
 #include "session/luna_session.h"
 #include "net/http_client.h"
 #include "display/display_manager.h"
@@ -260,6 +261,18 @@ int main(int argc, char* argv[]) {
         appState = AppState::LoginCBL;
     }
 
+    // 8. Servidor HTTP local Web Bridge (http://127.0.0.1:8080/luna)
+    luna::auth::AuthServer authServer;
+    authServer.start(8080);
+
+    std::mutex webPlayMutex;
+    std::string webPlayAsin;
+    authServer.onPlayRequested([&](const std::string& asin) {
+        luna::util::CrashLogger::log("[Main] Web Bridge: Solicitud de juego para asin=%s", asin.c_str());
+        std::lock_guard<std::mutex> lk(webPlayMutex);
+        webPlayAsin = asin;
+    });
+
     // 9. Cliente de Sesion Amazon Tempo
     luna::session::LunaSessionClient sessionClient;
     std::string g_lastStatusText = "";
@@ -475,6 +488,8 @@ int main(int argc, char* argv[]) {
             selectedRowIdx = 0;
             rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
             catalogFetched = true;
+            authServer.setSessionClient(&sessionClient, cbl.getAccessToken());
+            authServer.setCatalog(&games);
         }
     };
 
@@ -485,46 +500,36 @@ int main(int argc, char* argv[]) {
         loadCatalogIfAuthenticated();
     }
 
-    auto openGameDetail = [&](const luna::display::GameTile& selectedTile) {
-        activeGameForDetailAndStream = selectedTile;
-        sessionClient.preloadGameDetails(activeGameForDetailAndStream, cbl.getAccessToken(), cbl.getDeviceSerial());
+    luna::display::GameTile currentDetailGame = games[0];
 
-        requestTileImages(activeGameForDetailAndStream);
-        if (!activeGameForDetailAndStream.backdropUrl.empty()) {
-            luna::util::ImageLoader::instance().requestImage(activeGameForDetailAndStream.backdropUrl, luna::util::ImagePreset::PanoramicDetail);
+    auto openGameDetail = [&](const luna::display::GameTile& selectedTile) {
+        currentDetailGame = selectedTile;
+        sessionClient.preloadGameDetails(currentDetailGame, cbl.getAccessToken(), cbl.getDeviceSerial());
+
+        requestTileImages(currentDetailGame);
+        if (!currentDetailGame.backdropUrl.empty()) {
+            luna::util::ImageLoader::instance().requestImage(currentDetailGame.backdropUrl, luna::util::ImagePreset::PanoramicDetail);
         }
-        if (!activeGameForDetailAndStream.logoUrl.empty()) {
-            luna::util::ImageLoader::instance().requestImage(activeGameForDetailAndStream.logoUrl, luna::util::ImagePreset::ProductLogo);
+        if (!currentDetailGame.logoUrl.empty()) {
+            luna::util::ImageLoader::instance().requestImage(currentDetailGame.logoUrl, luna::util::ImagePreset::ProductLogo);
         }
-        for (const auto& shot : activeGameForDetailAndStream.screenshotUrls) {
+        for (const auto& shot : currentDetailGame.screenshotUrls) {
             luna::util::ImageLoader::instance().requestImage(shot, luna::util::ImagePreset::ScreenshotThumbnail);
         }
 
-        if (activeGameForDetailAndStream.similarGames.empty()) {
+        if (currentDetailGame.similarGames.empty()) {
             for (const auto& g : games) {
-                if (g.id != activeGameForDetailAndStream.id) {
-                    activeGameForDetailAndStream.similarGames.push_back(g);
-                    if (activeGameForDetailAndStream.similarGames.size() >= 10) break;
+                if (g.id != currentDetailGame.id) {
+                    currentDetailGame.similarGames.push_back(g);
+                    if (currentDetailGame.similarGames.size() >= 10) break;
                 }
             }
         }
-        for (auto& sim : activeGameForDetailAndStream.similarGames) {
+        for (auto& sim : currentDetailGame.similarGames) {
             requestTileImages(sim);
         }
 
-        for (auto& g : games) {
-            if (g.id == activeGameForDetailAndStream.id) g = activeGameForDetailAndStream;
-        }
-        for (int t = 0; t < 5; ++t) {
-            for (auto& col : tabCollections[t]) {
-                for (auto& item : col.items) {
-                    if (item.id == activeGameForDetailAndStream.id) {
-                        item = activeGameForDetailAndStream;
-                    }
-                }
-            }
-        }
-
+        activeGameForDetailAndStream = currentDetailGame;
         detailZone = 0;
         detailBtnIdx = 0;
         detailScreenshotIdx = 0;
@@ -594,6 +599,41 @@ int main(int argc, char* argv[]) {
 
     while (g_running) {
         padMgr.poll();
+
+        // Procesar peticion de lanzamiento de juego recibida desde el Web Bridge (/api/play?asin=...)
+        std::string reqPlayAsin;
+        {
+            std::lock_guard<std::mutex> lk(webPlayMutex);
+            if (!webPlayAsin.empty()) {
+                reqPlayAsin = webPlayAsin;
+                webPlayAsin.clear();
+            }
+        }
+        if (!reqPlayAsin.empty()) {
+            luna::util::CrashLogger::log("[Main] Lanzando juego desde Web Bridge: %s", reqPlayAsin.c_str());
+            const luna::display::GameTile* foundTile = nullptr;
+            for (const auto& g : games) {
+                if (g.id == reqPlayAsin) {
+                    foundTile = &g;
+                    break;
+                }
+            }
+            if (foundTile) {
+                if (appState == AppState::Streaming || appState == AppState::StartingSession) {
+                    teardownStreamingSession("Cambiando a juego seleccionado en Web Bridge");
+                }
+                startCloudGameSession(*foundTile);
+            } else {
+                luna::display::GameTile webTile;
+                webTile.id = reqPlayAsin;
+                webTile.title = "Juego Web Amazon Luna";
+                webTile.isEntitled = true;
+                if (appState == AppState::Streaming || appState == AppState::StartingSession) {
+                    teardownStreamingSession("Cambiando a juego seleccionado en Web Bridge");
+                }
+                startCloudGameSession(webTile);
+            }
+        }
 
         if (padMgr.isExitComboPressed()) {
             break;
@@ -962,15 +1002,10 @@ int main(int argc, char* argv[]) {
                         break;
                     }
 
-                    // Triangulo -> Cerrar sesion de cuenta Amazon
+                    // Triangulo -> Mostrar URL del Puente Web Oficial en LAN
                     if (pressedNow & luna::input::PAD_TRIANGLE) {
-                        luna::util::CrashLogger::log("[Main] Cerrando sesion de Amazon...");
-                        cbl.logout();
-                        catalogFetched = false;
-                        g_catalogDiagnostic.clear();
-                        g_lastStatusText.clear();
-                        appState = AppState::LoginCBL;
-                        break;
+                        g_lastStatusText = "PUENTE WEB ACTIVO: Abre http://192.168.18.21:8080/luna en navegador PS5/PC/Movil";
+                        luna::util::CrashLogger::log("[Main] %s", g_lastStatusText.c_str());
                     }
                 } // fin (!profileMenuOpen && !searchOpen)
 
@@ -1022,12 +1057,12 @@ int main(int argc, char* argv[]) {
             }
 
             case AppState::GameDetail: {
-                for (const auto& sim : activeGameForDetailAndStream.similarGames) {
+                for (const auto& sim : currentDetailGame.similarGames) {
                     requestTileImages(sim);
                 }
 
-                size_t numScreens = activeGameForDetailAndStream.screenshotUrls.size();
-                size_t numSimilar = activeGameForDetailAndStream.similarGames.size();
+                size_t numScreens = currentDetailGame.screenshotUrls.size();
+                size_t numSimilar = currentDetailGame.similarGames.size();
                 int simZone = (numScreens > 0) ? 2 : 1;
 
                 // Circulo (O) -> Volver al Catalogo
@@ -1099,10 +1134,11 @@ int main(int argc, char* argv[]) {
                 if (pressedNow & luna::input::PAD_CROSS) {
                     if (detailZone == 0) {
                         if (detailBtnIdx == 0) {
-                            if (activeGameForDetailAndStream.isEntitled) {
-                                startCloudGameSession(activeGameForDetailAndStream);
+                            if (currentDetailGame.isEntitled) {
+                                activeGameForDetailAndStream = currentDetailGame;
+                                startCloudGameSession(currentDetailGame);
                             } else {
-                                std::string price = activeGameForDetailAndStream.secondaryButtonText.empty() ? "9,99 EUR/mes" : activeGameForDetailAndStream.secondaryButtonText;
+                                std::string price = currentDetailGame.secondaryButtonText.empty() ? "9,99 EUR/mes" : currentDetailGame.secondaryButtonText;
                                 g_lastStatusText = "Este juego requiere suscripcion a Luna Premium (" + price + ").";
                             }
                         } else {
@@ -1110,7 +1146,7 @@ int main(int argc, char* argv[]) {
                         }
                         break;
                     } else if (detailZone == simZone && detailSimilarIdx >= 0 && detailSimilarIdx < static_cast<int>(numSimilar)) {
-                        openGameDetail(activeGameForDetailAndStream.similarGames[detailSimilarIdx]);
+                        openGameDetail(currentDetailGame.similarGames[detailSimilarIdx]);
                         break;
                     }
                 }
@@ -1118,7 +1154,7 @@ int main(int argc, char* argv[]) {
                 int selectedCarouselIdx = (detailZone == 1 && numScreens > 0) ? detailScreenshotIdx : detailSimilarIdx;
 
                 display.drawGameDetailScreen(
-                    activeGameForDetailAndStream,
+                    currentDetailGame,
                     sessionClient.getPlayerProfile(),
                     g_lastStatusText.empty()
                         ? ("Listo para jugar a " + activeGameForDetailAndStream.title + " en 1080p 60 FPS")
@@ -1344,6 +1380,7 @@ int main(int argc, char* argv[]) {
     videoDecoder.shutdown();
     padMgr.shutdown();
     audio.shutdown();
+    authServer.stop();
     display.shutdown();
     luna::util::ImageLoader::instance().shutdown();
     luna::net::HttpClient::shutdown();

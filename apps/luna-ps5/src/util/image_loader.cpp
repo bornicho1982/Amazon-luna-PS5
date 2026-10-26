@@ -95,31 +95,123 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
                            ImagePreset preset) {
     if (!srcRgba || srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return false;
 
-    dstRgba.resize(static_cast<size_t>(dstW) * static_cast<size_t>(dstH) * 4);
+    dstRgba.assign(static_cast<size_t>(dstW) * static_cast<size_t>(dstH) * 4, 0);
 
-    // Bilinear interpolation
+    const uint8_t bgR = 0x0E;
+    const uint8_t bgG = 0x0B;
+    const uint8_t bgB = 0x16;
+
+    bool isPanoramic = (preset == ImagePreset::PanoramicHero || preset == ImagePreset::PanoramicDetail);
+
+    if (isPanoramic && srcW < srcH) {
+        // IMAGEN VERTICAL (POSTER 3:4): NO estirar a 16:9 deformandola
+        // Llenar todo el fondo con #0E0B16
+        for (size_t i = 0; i < dstRgba.size(); i += 4) {
+            dstRgba[i + 0] = bgR;
+            dstRgba[i + 1] = bgG;
+            dstRgba[i + 2] = bgB;
+            dstRgba[i + 3] = 255;
+        }
+
+        // Escalar la imagen vertical a la derecha manteniendo su relacion de aspecto
+        int fitH = static_cast<int>(dstH * 0.95f);
+        int fitW = static_cast<int>(fitH * (static_cast<float>(srcW) / srcH));
+        if (fitW > dstW / 2) fitW = dstW / 2;
+        int posX = dstW - fitW - 80;
+        int posY = (dstH - fitH) / 2;
+
+        float scaleX = static_cast<float>(srcW) / static_cast<float>(fitW);
+        float scaleY = static_cast<float>(srcH) / static_cast<float>(fitH);
+
+        int fadeBorder = 50;
+
+        for (int dy = 0; dy < fitH; ++dy) {
+            int targetY = posY + dy;
+            if (targetY < 0 || targetY >= dstH) continue;
+
+            float sy = (dy + 0.5f) * scaleY - 0.5f;
+            int y0 = std::clamp(static_cast<int>(std::floor(sy)), 0, srcH - 1);
+            int y1 = std::clamp(y0 + 1, 0, srcH - 1);
+            float fy = std::clamp(sy - static_cast<float>(y0), 0.0f, 1.0f);
+
+            const uint8_t* row0 = srcRgba + (static_cast<size_t>(y0) * srcW * 4);
+            const uint8_t* row1 = srcRgba + (static_cast<size_t>(y1) * srcW * 4);
+            uint8_t* dstRow = dstRgba.data() + (static_cast<size_t>(targetY) * dstW * 4);
+
+            float edgeFadeY = 1.0f;
+            if (dy < fadeBorder) edgeFadeY = static_cast<float>(dy) / fadeBorder;
+            else if (dy >= fitH - fadeBorder) edgeFadeY = static_cast<float>(fitH - 1 - dy) / fadeBorder;
+
+            for (int dx = 0; dx < fitW; ++dx) {
+                int targetX = posX + dx;
+                if (targetX < 0 || targetX >= dstW) continue;
+
+                float sx = (dx + 0.5f) * scaleX - 0.5f;
+                int x0 = std::clamp(static_cast<int>(std::floor(sx)), 0, srcW - 1);
+                int x1 = std::clamp(x0 + 1, 0, srcW - 1);
+                float fx = std::clamp(sx - static_cast<float>(x0), 0.0f, 1.0f);
+
+                const uint8_t* p00 = row0 + (x0 * 4);
+                const uint8_t* p01 = row0 + (x1 * 4);
+                const uint8_t* p10 = row1 + (x0 * 4);
+                const uint8_t* p11 = row1 + (x1 * 4);
+
+                float w00 = (1.0f - fx) * (1.0f - fy);
+                float w01 = fx * (1.0f - fy);
+                float w10 = (1.0f - fx) * fy;
+                float w11 = fx * fy;
+
+                uint8_t r = static_cast<uint8_t>(p00[0] * w00 + p01[0] * w01 + p10[0] * w10 + p11[0] * w11);
+                uint8_t g = static_cast<uint8_t>(p00[1] * w00 + p01[1] * w01 + p10[1] * w10 + p11[1] * w11);
+                uint8_t b = static_cast<uint8_t>(p00[2] * w00 + p01[2] * w01 + p10[2] * w10 + p11[2] * w11);
+
+                float edgeFadeX = 1.0f;
+                if (dx < fadeBorder) edgeFadeX = static_cast<float>(dx) / fadeBorder;
+                else if (dx >= fitW - fadeBorder) edgeFadeX = static_cast<float>(fitW - 1 - dx) / fadeBorder;
+
+                float alphaFade = edgeFadeX * edgeFadeY;
+
+                uint8_t* out = dstRow + (targetX * 4);
+                out[0] = static_cast<uint8_t>(r * alphaFade + bgR * (1.0f - alphaFade));
+                out[1] = static_cast<uint8_t>(g * alphaFade + bgG * (1.0f - alphaFade));
+                out[2] = static_cast<uint8_t>(b * alphaFade + bgB * (1.0f - alphaFade));
+                out[3] = 255;
+            }
+        }
+        return true;
+    }
+
+    // Aspect-Fill si es panoramico
+    float cropX = 0.0f;
+    float cropY = 0.0f;
     float scaleX = static_cast<float>(srcW) / static_cast<float>(dstW);
     float scaleY = static_cast<float>(srcH) / static_cast<float>(dstH);
 
+    if (isPanoramic) {
+        float fillScale = std::max(static_cast<float>(dstW) / srcW, static_cast<float>(dstH) / srcH);
+        float cropW = dstW / fillScale;
+        float cropH = dstH / fillScale;
+        cropX = (srcW - cropW) * 0.5f;
+        cropY = (srcH - cropH) * 0.5f;
+        scaleX = 1.0f / fillScale;
+        scaleY = 1.0f / fillScale;
+    }
+
     for (int dy = 0; dy < dstH; ++dy) {
-        float sy = (dy + 0.5f) * scaleY - 0.5f;
+        float sy = isPanoramic ? (cropY + (dy + 0.5f) * scaleY - 0.5f) : ((dy + 0.5f) * scaleY - 0.5f);
         int y0 = std::clamp(static_cast<int>(std::floor(sy)), 0, srcH - 1);
         int y1 = std::clamp(y0 + 1, 0, srcH - 1);
-        float fy = sy - static_cast<float>(y0);
-        if (fy < 0.0f) fy = 0.0f;
-        if (fy > 1.0f) fy = 1.0f;
+        float fy = std::clamp(sy - static_cast<float>(y0), 0.0f, 1.0f);
 
         const uint8_t* row0 = srcRgba + (static_cast<size_t>(y0) * static_cast<size_t>(srcW) * 4);
         const uint8_t* row1 = srcRgba + (static_cast<size_t>(y1) * static_cast<size_t>(srcW) * 4);
         uint8_t* dstRow = dstRgba.data() + (static_cast<size_t>(dy) * static_cast<size_t>(dstW) * 4);
 
         for (int dx = 0; dx < dstW; ++dx) {
-            float sx = (dx + 0.5f) * scaleX - 0.5f;
+            float sx = isPanoramic ? (cropX + (dx + 0.5f) * scaleX - 0.5f) : ((dx + 0.5f) * scaleX - 0.5f);
             int x0 = std::clamp(static_cast<int>(std::floor(sx)), 0, srcW - 1);
             int x1 = std::clamp(x0 + 1, 0, srcW - 1);
-            float fx = sx - static_cast<float>(x0);
-            if (fx < 0.0f) fx = 0.0f;
-            if (fx > 1.0f) fx = 1.0f;
+            float fx = std::clamp(sx - static_cast<float>(x0), 0.0f, 1.0f);
 
             const uint8_t* p00 = row0 + (x0 * 4);
             const uint8_t* p01 = row0 + (x1 * 4);
@@ -139,7 +231,6 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
         }
     }
 
-    // Apply preset specific post-processing
     switch (preset) {
         case ImagePreset::VerticalPoster:
             applyCornerMask(dstRgba.data(), dstW, dstH, 14);
@@ -148,10 +239,10 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
             applyCornerMask(dstRgba.data(), dstW, dstH, 10);
             break;
         case ImagePreset::PanoramicHero:
-            applyDarkGradient(dstRgba.data(), dstW, dstH, 700, 140);
+            applyDarkGradient(dstRgba.data(), dstW, dstH, 850, 160);
             break;
         case ImagePreset::PanoramicDetail:
-            applyDarkGradient(dstRgba.data(), dstW, dstH, 800, 180);
+            applyDarkGradient(dstRgba.data(), dstW, dstH, 850, 220);
             break;
         case ImagePreset::ProductLogo:
         case ImagePreset::Raw:
@@ -204,10 +295,12 @@ std::shared_ptr<const DecodedImage> ImageLoader::getImage(const std::string& url
     if (it != cache_.end() && it->second && it->second->ready) {
         return it->second;
     }
-    // Fallback: verificar si existe en cache con cualquier otro preset
-    for (const auto& kv : cache_) {
-        if (kv.first.rfind(url, 0) == 0 && kv.second && kv.second->ready) {
-            return kv.second;
+    // Solo permitir fallback si se pide Raw o preset identico
+    if (preset == ImagePreset::Raw) {
+        for (const auto& kv : cache_) {
+            if (kv.first.rfind(url + "@", 0) == 0 && kv.second && kv.second->ready) {
+                return kv.second;
+            }
         }
     }
     return nullptr;
@@ -280,7 +373,7 @@ void ImageLoader::workerLoop() {
                 break;
             case ImagePreset::PanoramicDetail:
                 targetW = 1920;
-                targetH = 720;
+                targetH = 1080;
                 break;
             case ImagePreset::ProductLogo: {
                 float aspect = static_cast<float>(origW) / static_cast<float>(origH);
