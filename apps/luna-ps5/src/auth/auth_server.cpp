@@ -653,6 +653,7 @@ fetch('/api/catalog')
 }
 
 bool AuthServer::start(int port) {
+    stop();
     port_ = port;
 
 #if defined(_WIN32)

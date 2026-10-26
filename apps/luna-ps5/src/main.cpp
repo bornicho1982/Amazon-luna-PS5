@@ -506,6 +506,13 @@ int main(int argc, char* argv[]) {
         currentDetailGame = selectedTile;
         sessionClient.preloadGameDetails(currentDetailGame, cbl.getAccessToken(), cbl.getDeviceSerial());
 
+        if (currentDetailGame.backdropUrl.empty()) {
+            if (!currentDetailGame.screenshotUrls.empty()) {
+                currentDetailGame.backdropUrl = currentDetailGame.screenshotUrls[0];
+            } else if (!currentDetailGame.coverUrl.empty()) {
+                currentDetailGame.backdropUrl = currentDetailGame.coverUrl;
+            }
+        }
         requestTileImages(currentDetailGame);
         if (!currentDetailGame.backdropUrl.empty()) {
             luna::util::ImageLoader::instance().requestImage(currentDetailGame.backdropUrl, luna::util::ImagePreset::PanoramicDetail);

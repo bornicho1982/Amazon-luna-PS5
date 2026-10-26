@@ -3,7 +3,8 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
-#include <mutex>
+#include <atomic>
+#include <time.h>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -15,13 +16,55 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+extern "C" uint64_t scePthreadSelf(void);
 #endif
 
 namespace luna::net {
 
 namespace {
 
-static std::recursive_mutex g_httpMutex;
+class AtomicRecursiveLock {
+    std::atomic<uint64_t> owner_{0};
+    uint32_t count_{0};
+public:
+    void lock() {
+#if defined(_WIN32)
+        uint64_t tid = static_cast<uint64_t>(GetCurrentThreadId());
+#else
+        uint64_t tid = scePthreadSelf();
+#endif
+        if (owner_.load(std::memory_order_relaxed) == tid) {
+            count_++;
+            return;
+        }
+        uint64_t expected = 0;
+        while (!owner_.compare_exchange_weak(expected, tid, std::memory_order_acquire, std::memory_order_relaxed)) {
+            expected = 0;
+#if defined(_WIN32)
+            Sleep(1);
+#else
+            struct timespec ts = {0, 1000000}; // 1ms
+            nanosleep(&ts, nullptr);
+#endif
+        }
+        count_ = 1;
+    }
+
+    void unlock() {
+        if (--count_ == 0) {
+            owner_.store(0, std::memory_order_release);
+        }
+    }
+};
+
+class AtomicRecursiveGuard {
+    AtomicRecursiveLock& lock_;
+public:
+    explicit AtomicRecursiveGuard(AtomicRecursiveLock& l) : lock_(l) { lock_.lock(); }
+    ~AtomicRecursiveGuard() { lock_.unlock(); }
+};
+
+static AtomicRecursiveLock g_httpLock;
 
 #if !defined(_WIN32)
 int g_netPoolId = -1;
@@ -51,7 +94,7 @@ static std::string trimString(const std::string& str) {
 } // namespace
 
 bool HttpClient::init() {
-    std::lock_guard<std::recursive_mutex> lock(g_httpMutex);
+    AtomicRecursiveGuard lock(g_httpLock);
 #if defined(_WIN32)
     return true;
 #else
@@ -96,7 +139,7 @@ bool HttpClient::init() {
 }
 
 void HttpClient::shutdown() {
-    std::lock_guard<std::recursive_mutex> lock(g_httpMutex);
+    AtomicRecursiveGuard lock(g_httpLock);
 #if defined(_WIN32)
     // No-op
 #else
@@ -128,7 +171,7 @@ void HttpClient::shutdown() {
 HttpResponse HttpClient::post(const std::string& url,
                              const std::string& jsonBody,
                              const std::vector<std::pair<std::string, std::string>>& headers) {
-    std::lock_guard<std::recursive_mutex> lock(g_httpMutex);
+    AtomicRecursiveGuard lock(g_httpLock);
     HttpResponse resp;
 
 #if defined(_WIN32)
@@ -278,7 +321,7 @@ HttpResponse HttpClient::post(const std::string& url,
 
 HttpResponse HttpClient::get(const std::string& url,
                             const std::vector<std::pair<std::string, std::string>>& headers) {
-    std::lock_guard<std::recursive_mutex> lock(g_httpMutex);
+    AtomicRecursiveGuard lock(g_httpLock);
     HttpResponse resp;
 
 #if defined(_WIN32)

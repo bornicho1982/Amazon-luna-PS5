@@ -60,7 +60,16 @@ static_assert(sizeof(AllocationHeader) == kAllocationAlignment);
         void *mapping =
             mmap(nullptr, mapped_size, kProtectionReadWrite, kMapPrivateAnonymous, -1, 0);
         if (mapping != reinterpret_cast<void *>(-1))
+        {
             header = static_cast<AllocationHeader *>(mapping);
+        }
+        else
+        {
+            mapped_size = 0;
+            void *storage = nullptr;
+            if (posix_memalign(&storage, kAllocationAlignment, total) == 0)
+                header = static_cast<AllocationHeader *>(storage);
+        }
     }
     else
     {
@@ -164,6 +173,8 @@ void *operator new(std::size_t size)
 {
     if (void *address = allocate(size))
         return address;
+    if (void *fallback = malloc(size ? size : 1))
+        return fallback;
     allocation_failure();
 }
 

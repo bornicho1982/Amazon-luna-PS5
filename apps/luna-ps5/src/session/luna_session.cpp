@@ -162,7 +162,13 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
             }
         }
     }
-    if (cleanGid.empty()) return false;
+    if (cleanGid.empty()) {
+        if (colId.find("featured_rotator") != std::string::npos || swType.find("ROTATOR") != std::string::npos) {
+            cleanGid = swId.empty() ? ("promo_" + std::to_string(colorIdx)) : swId;
+        } else {
+            return false;
+        }
+    }
 
     std::string title = pdata["title"].asString();
     if (title.empty()) title = pdata["gameTitle"].asString();
@@ -212,17 +218,29 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     std::string coverUrl = pdata["imagePortrait"].asString();
     if (coverUrl.empty()) coverUrl = pdata["tileImagePortrait"].asString();
     if (coverUrl.empty()) coverUrl = pdata["focusedImagePortrait"].asString();
+    if (coverUrl.empty()) coverUrl = pdata["backgroundFeaturePortrait"].asString();
     if (coverUrl.empty()) coverUrl = pdata["boxArtUrl"].asString();
     if (coverUrl.empty()) coverUrl = pdata["tileImageLandscape"].asString();
     if (coverUrl.empty()) coverUrl = pdata["imageLandscape"].asString();
+    if (coverUrl.empty()) coverUrl = pdata["imageUrl"].asString();
+    if (coverUrl.empty()) coverUrl = sw["imageUrl"].asString();
 
     std::string backdropUrl = pdata["focusedImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["focusedImage"].asString();
     if (backdropUrl.empty()) backdropUrl = pdata["backgroundFeatureLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["focusedImage"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImage"].asString();
     if (backdropUrl.empty()) backdropUrl = pdata["backgroundImageLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["unfocusedImageLandscape"].asString();
     if (backdropUrl.empty()) backdropUrl = pdata["tileImageLandscape"].asString();
     if (backdropUrl.empty()) backdropUrl = pdata["imageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImage"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["imageUrl"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["heroImageUrl"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["bannerUrl"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["artUrl"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["promoImageUrl"].asString();
+    if (backdropUrl.empty()) backdropUrl = sw["backgroundImage"].asString();
+    if (backdropUrl.empty()) backdropUrl = sw["imageUrl"].asString();
+    if (backdropUrl.empty()) backdropUrl = coverUrl;
 
     std::string logoUrl = pdata["productIcon"].asString();
     if (logoUrl.empty()) logoUrl = pdata["iconUrl"].asString();
@@ -523,6 +541,33 @@ std::vector<luna::display::LunaCollection> LunaSessionClient::fetchPageCollectio
             }
         }
         if (heroCollection.items.size() >= 6) break;
+    }
+
+    // Garantizar que ningún slide del Hero Banner se quede sin imagen de fondo
+    std::string fallbackHeroBackdrop;
+    for (const auto& h : heroCollection.items) {
+        if (!h.backdropUrl.empty()) {
+            fallbackHeroBackdrop = h.backdropUrl;
+            break;
+        }
+    }
+    if (fallbackHeroBackdrop.empty()) {
+        for (const auto& col : collections) {
+            for (const auto& item : col.items) {
+                if (!item.backdropUrl.empty()) {
+                    fallbackHeroBackdrop = item.backdropUrl;
+                    break;
+                }
+            }
+            if (!fallbackHeroBackdrop.empty()) break;
+        }
+    }
+    if (!fallbackHeroBackdrop.empty()) {
+        for (auto& h : heroCollection.items) {
+            if (h.backdropUrl.empty()) {
+                h.backdropUrl = fallbackHeroBackdrop;
+            }
+        }
     }
 
     if (!heroCollection.items.empty()) {

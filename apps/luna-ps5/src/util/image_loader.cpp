@@ -266,6 +266,9 @@ ImageLoader::~ImageLoader() {
 
 void ImageLoader::init() {
     if (running_) return;
+    if (workerThread_.joinable()) {
+        workerThread_.join();
+    }
     running_ = true;
     workerThread_ = std::thread(&ImageLoader::workerLoop, this);
 }
