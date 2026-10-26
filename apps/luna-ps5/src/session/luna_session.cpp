@@ -233,7 +233,7 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     if (subtitle.empty()) subtitle = pdata["subtitle"].asString();
 
     std::string btnText = pdata["buttonText"].asString();
-    if (btnText.empty()) btnText = "MÃ¡s informaciÃ³n";
+    if (btnText.empty()) btnText = "Mas informacion";
 
     std::string synopsis = pdata["primaryText"].asString();
     if (synopsis.empty()) synopsis = pdata["description"].asString();
@@ -653,9 +653,13 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
                     std::string portUrl = pdata["tileImagePortrait"].asString();
                     if (!portUrl.empty() && inoutTile->coverUrl.empty()) inoutTile->coverUrl = portUrl;
 
-                    std::string landUrl = pdata["backgroundImageLandscape"].asString();
+                    std::string landUrl = pdata["focusedImageLandscape"].asString();
+                    if (landUrl.empty()) landUrl = pdata["focusedImage"].asString();
+                    if (landUrl.empty()) landUrl = pdata["backgroundFeatureLandscape"].asString();
+                    if (landUrl.empty()) landUrl = pdata["backgroundImageLandscape"].asString();
                     if (landUrl.empty()) landUrl = pdata["tileImageLandscape"].asString();
                     if (landUrl.empty()) landUrl = pdata["imageLandscape"].asString();
+                    if (landUrl.empty()) landUrl = pdata["backgroundImage"].asString();
                     if (!landUrl.empty()) inoutTile->backdropUrl = landUrl;
 
                     std::string logo = pdata["productIcon"].asString();
@@ -816,6 +820,14 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
             outBuildId = extractJsonString(resp.body, "buildId");
         }
 
+        if (inoutTile && inoutTile->backdropUrl.empty()) {
+            if (!inoutTile->screenshotUrls.empty()) {
+                inoutTile->backdropUrl = inoutTile->screenshotUrls[0];
+            } else if (!inoutTile->coverUrl.empty()) {
+                inoutTile->backdropUrl = inoutTile->coverUrl;
+            }
+        }
+
         // Extraer profileId del JWT playToken (segundo segmento base64url)
         if (!outPlayToken.empty()) {
             size_t dot1 = outPlayToken.find('.');
@@ -839,7 +851,7 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
                 inoutTile->isEntitled = true;
                 inoutTile->playToken = outPlayToken;
                 inoutTile->buildId = outBuildId;
-                inoutTile->buttonText = "â¶ Jugar ahora";
+                inoutTile->buttonText = "Jugar ahora";
                 inoutTile->secondaryButtonText = "";
                 inoutTile->detailsLoaded = true;
             }
@@ -848,11 +860,11 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
                 inoutTile->isEntitled = false;
                 inoutTile->playToken.clear();
                 inoutTile->buildId.clear();
-                if (inoutTile->buttonText.empty() || inoutTile->buttonText == "â¶ Jugar ahora") {
+                if (inoutTile->buttonText.empty() || inoutTile->buttonText == "Jugar ahora") {
                     inoutTile->buttonText = "Incluido en Luna Premium";
                 }
                 if (inoutTile->secondaryButtonText.empty()) {
-                    inoutTile->secondaryButtonText = "9,99 â¬/mes";
+                    inoutTile->secondaryButtonText = "9,99 EUR/mes";
                 }
                 inoutTile->detailsLoaded = true;
             }

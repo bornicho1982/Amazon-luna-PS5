@@ -68,6 +68,7 @@ public:
     void onAudio(AudioFrameCallback cb) { audioCb_ = std::move(cb); }
 
     bool isConnected() const { return isConnected_.load(); }
+    bool isStopping() const { return m_stopping_.load(); }
     const StreamStats& getStats() const { return stats_; }
 
     std::string getIceStateStr() const { return iceStateStr_; }
@@ -98,6 +99,7 @@ private:
     std::shared_ptr<rtc::DataChannel> messageChannel_;
 
     std::atomic<bool> isConnected_{false};
+    std::atomic<bool> m_stopping_{false};
     std::atomic<bool> isGatheringComplete_{false};
     std::mutex gatheringMutex_;
     std::condition_variable gatheringCv_;

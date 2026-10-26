@@ -271,11 +271,11 @@ int main(int argc, char* argv[]) {
     {
         luna::display::GameTile g;
         g.id = "amzn1.adg.product.f0b7b7d7-2026-4d5e-8a3f-galacticracer";
-        g.title = "STAR WARS: Galactic Racerâ¢";
+        g.title = "STAR WARS: Galactic Racer";
         g.publisher = "Secret Mode";
         g.developer = "Fuse Games";
         g.releaseYear = "2026";
-        g.genres = "Carreras â¢ AcciÃ³n";
+        g.genres = "Carreras, Accion";
         g.inputMethods = "Mando DualSense";
         g.playerCount = "1-4 jugadores";
         g.channelSubtext = "Incluido con Prime";
@@ -285,7 +285,7 @@ int main(int argc, char* argv[]) {
         g.heroColor = 0xFF9146FF;
         g.pegiRating = "PEGI 12";
         g.isEntitled = true;
-        g.buttonText = "â¶ Jugar ahora";
+        g.buttonText = "Jugar ahora";
         games.push_back(std::move(g));
     }
 
@@ -310,10 +310,50 @@ int main(int argc, char* argv[]) {
     };
 
     int activeTabIdx = 0;
+    int navColIdx = 0; // 0..4 = tabs, 5 = Buscar (lupa), 6 = Perfil (B)
     int focusZone = 1; // 0 = Top Navbar, 1 = Content (Hero Rotator / Swimlanes)
     int selectedRowIdx = 0;
     std::vector<int> rowSelectedCol;
-    int heroBtnIdx = 0; // 0 = Jugar ahora, 1 = Más información
+    int heroBtnIdx = 0; // 0 = Jugar ahora, 1 = Mas informacion
+
+    bool profileMenuOpen = false;
+    int profileMenuIdx = 0;
+
+    bool searchOpen = false;
+    int searchZone = 0;
+    int searchLetterIdx = 0;
+    int searchGridIdx = 0;
+    std::vector<luna::display::GameTile> filteredGames;
+
+    static const char* kFilterLetters[] = {
+        "TODOS", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L",
+        "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "#"
+    };
+
+    auto updateFilteredGames = [&]() {
+        filteredGames.clear();
+        if (searchLetterIdx == 0) {
+            filteredGames = games;
+        } else if (searchLetterIdx == 27) { // "#"
+            for (const auto& g : games) {
+                if (g.title.empty()) continue;
+                char c = static_cast<char>(std::toupper(static_cast<unsigned char>(g.title[0])));
+                if (c < 'A' || c > 'Z') {
+                    filteredGames.push_back(g);
+                }
+            }
+        } else {
+            char target = kFilterLetters[searchLetterIdx][0];
+            for (const auto& g : games) {
+                if (g.title.empty()) continue;
+                char c = static_cast<char>(std::toupper(static_cast<unsigned char>(g.title[0])));
+                if (c == target) {
+                    filteredGames.push_back(g);
+                }
+            }
+        }
+        searchGridIdx = 0;
+    };
 
     std::vector<luna::display::LunaCollection> tabCollections[5];
 
@@ -408,9 +448,10 @@ int main(int argc, char* argv[]) {
     };
 
     luna::display::GameTile activeGameForDetailAndStream = games[0];
-    int detailZone = 0;       // 0 = Botones [Jugar ahora / Volver], 1 = Carrusel "También te puede interesar"
-    int detailBtnIdx = 0;     // 0 = Jugar ahora, 1 = Volver al catálogo
-    int detailSimilarIdx = 0; // Indice en similarGames
+    int detailZone = 0;           // 0 = Botones [Jugar ahora, Favorito], 1 = Capturas, 2 = "Tambien te puede interesar"
+    int detailBtnIdx = 0;         // 0 = Jugar ahora, 1 = Favorito
+    int detailScreenshotIdx = 0;
+    int detailSimilarIdx = 0;     // Indice en similarGames
 
     auto loadCatalogIfAuthenticated = [&]() {
         if (cbl.isAuthenticated() && !catalogFetched) {
@@ -486,13 +527,32 @@ int main(int argc, char* argv[]) {
 
         detailZone = 0;
         detailBtnIdx = 0;
+        detailScreenshotIdx = 0;
         detailSimilarIdx = 0;
         appState = AppState::GameDetail;
     };
 
+    // Estado del stream e In-Game Overlay oficial de Luna (Fase 4)
+    int streamingActiveFrames = 0;
+    bool hudPinned = false;
+    bool overlayOpen = false;
+    int overlaySelectedIdx = 0;
+    bool prevOverlayCombo = false;
+    auto teardownStreamingSession = [&](const std::string& reason) {
+        luna::util::CrashLogger::log("[Main] teardownStreamingSession: %s", reason.c_str());
+        rtcClient.stop();
+        sessionClient.terminateSession(cbl.getAccessToken());
+        clearMediaQueues();
+        overlayOpen = false;
+        streamingActiveFrames = 0;
+        videoStreaming.store(false);
+        g_lastStatusText = reason;
+        appState = AppState::Catalog;
+    };
+
     auto startCloudGameSession = [&](const luna::display::GameTile& targetTile) {
         if (!targetTile.isEntitled) {
-            std::string price = targetTile.secondaryButtonText.empty() ? "9,99 â¬/mes" : targetTile.secondaryButtonText;
+            std::string price = targetTile.secondaryButtonText.empty() ? "9,99 EUR/mes" : targetTile.secondaryButtonText;
             g_lastStatusText = "Este juego requiere suscripcion a Luna Premium (" + price + ").";
             g_catalogDiagnostic = g_lastStatusText;
             luna::util::CrashLogger::log("[Main] Juego no disponible en tu suscripcion (%s)", targetTile.title.c_str());
@@ -529,12 +589,6 @@ int main(int argc, char* argv[]) {
     uint8_t reportBuf[64];
     size_t reportLen = 0;
 
-    // Estado del stream e In-Game Overlay oficial de Luna (Fase 4)
-    int streamingActiveFrames = 0;
-    bool hudPinned = false;
-    bool overlayOpen = false;
-    int overlaySelectedIdx = 0;
-    bool prevOverlayCombo = false;
 
     std::printf("[Main] Bucle principal activo a 60 FPS\n");
 
@@ -583,162 +637,346 @@ int main(int argc, char* argv[]) {
             }
 
             case AppState::Catalog: {
-                syncRowSelectionSize();
-
-                // Cambio rapido de pestañas superiores con L2 / R2 desde cualquier zona
-                if (pressedNow & luna::input::PAD_L2) {
-                    activeTabIdx = (activeTabIdx + static_cast<int>(kNavTabs.size()) - 1) % static_cast<int>(kNavTabs.size());
-                    selectedRowIdx = 0;
-                    heroBtnIdx = 0;
-                    rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
-                    lastNavTime = now;
-                }
-                if (pressedNow & luna::input::PAD_R2) {
-                    activeTabIdx = (activeTabIdx + 1) % static_cast<int>(kNavTabs.size());
-                    selectedRowIdx = 0;
-                    heroBtnIdx = 0;
-                    rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
-                    lastNavTime = now;
-                }
-
-                syncRowSelectionSize();
-                auto& activeCols = tabCollections[activeTabIdx];
-                bool onHeroRow = (!activeCols.empty() && selectedRowIdx == 0 && activeCols[0].isHeroRotator);
-
-                // L1 / R1: En Hero Rotator cambia de diapositiva; en Swimlanes salta 5 tarjetas
-                if (pressedNow & luna::input::PAD_L1) {
-                    if (!activeCols.empty() && selectedRowIdx < static_cast<int>(activeCols.size())) {
-                        int step = onHeroRow ? 1 : 5;
-                        int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
-                        if (total > 0) {
-                            if (onHeroRow) {
-                                rowSelectedCol[0] = (rowSelectedCol[0] + total - 1) % total;
-                            } else {
-                                rowSelectedCol[selectedRowIdx] = std::max(0, rowSelectedCol[selectedRowIdx] - step);
-                            }
+                if (profileMenuOpen) {
+                    if (navElapsedMs > 155) {
+                        bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
+                        bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
+                        if (moveUp) {
+                            profileMenuIdx = (profileMenuIdx + 2) % 3;
+                            lastNavTime = now;
+                        } else if (moveDown) {
+                            profileMenuIdx = (profileMenuIdx + 1) % 3;
+                            lastNavTime = now;
                         }
                     }
-                    lastNavTime = now;
-                }
-                if (pressedNow & luna::input::PAD_R1) {
-                    if (!activeCols.empty() && selectedRowIdx < static_cast<int>(activeCols.size())) {
-                        int step = onHeroRow ? 1 : 5;
-                        int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
-                        if (total > 0) {
-                            if (onHeroRow) {
-                                rowSelectedCol[0] = (rowSelectedCol[0] + 1) % total;
-                            } else {
-                                rowSelectedCol[selectedRowIdx] = std::min(total - 1, rowSelectedCol[selectedRowIdx] + step);
-                            }
+
+                    if (pressedNow & luna::input::PAD_CIRCLE) {
+                        profileMenuOpen = false;
+                    } else if (pressedNow & luna::input::PAD_CROSS) {
+                        if (profileMenuIdx == 0) {
+                            luna::util::CrashLogger::log("[Main] Recargando catalogo desde menu de perfil...");
+                            catalogFetched = false;
+                            loadCatalogIfAuthenticated();
+                            profileMenuOpen = false;
+                        } else if (profileMenuIdx == 1) {
+                            luna::util::CrashLogger::log("[Main] Cerrando sesion desde menu de perfil...");
+                            cbl.logout();
+                            catalogFetched = false;
+                            g_catalogDiagnostic.clear();
+                            g_lastStatusText.clear();
+                            appState = AppState::LoginCBL;
+                            profileMenuOpen = false;
+                            break;
+                        } else if (profileMenuIdx == 2) {
+                            profileMenuOpen = false;
                         }
                     }
-                    lastNavTime = now;
-                }
+                } else if (searchOpen) {
+                    if (pressedNow & luna::input::PAD_CIRCLE) {
+                        if (searchZone == 1) {
+                            searchZone = 0;
+                        } else {
+                            searchOpen = false;
+                        }
+                    }
 
-                // Navegacion 2D (ARRIBA/ABAJO entre Zonas y Filas; IZQUIERDA/DERECHA entre Botones/Tarjetas)
-                if (navElapsedMs > 155) {
-                    bool moved = false;
-                    bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
-                    bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
-                    bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
-                    bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
+                    if (searchZone == 0) {
+                        if (pressedNow & luna::input::PAD_L1) {
+                            searchLetterIdx = (searchLetterIdx + 28 - 5) % 28;
+                            updateFilteredGames();
+                            lastNavTime = now;
+                        } else if (pressedNow & luna::input::PAD_R1) {
+                            searchLetterIdx = (searchLetterIdx + 5) % 28;
+                            updateFilteredGames();
+                            lastNavTime = now;
+                        }
 
-                    if (moveUp) {
-                        if (focusZone == 1) {
-                            if (selectedRowIdx > 0) {
-                                selectedRowIdx--;
-                                moved = true;
-                            } else {
-                                focusZone = 0; // Subir a la Barra de Navegacion Superior
-                                moved = true;
+                        if (navElapsedMs > 155) {
+                            bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
+                            bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
+                            bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
+
+                            if (moveLeft) {
+                                searchLetterIdx = (searchLetterIdx + 28 - 1) % 28;
+                                updateFilteredGames();
+                                lastNavTime = now;
+                            } else if (moveRight) {
+                                searchLetterIdx = (searchLetterIdx + 1) % 28;
+                                updateFilteredGames();
+                                lastNavTime = now;
+                            } else if (moveDown && !filteredGames.empty()) {
+                                searchZone = 1;
+                                searchGridIdx = 0;
+                                lastNavTime = now;
                             }
                         }
-                    } else if (moveDown) {
-                        if (focusZone == 0) {
-                            focusZone = 1;
-                            selectedRowIdx = 0;
-                            moved = true;
-                        } else if (selectedRowIdx + 1 < static_cast<int>(activeCols.size())) {
-                            selectedRowIdx++;
-                            moved = true;
+
+                        if ((pressedNow & luna::input::PAD_CROSS) && !filteredGames.empty()) {
+                            searchZone = 1;
+                            searchGridIdx = 0;
                         }
-                    } else if (moveLeft) {
-                        if (focusZone == 0) {
-                            activeTabIdx = (activeTabIdx + static_cast<int>(kNavTabs.size()) - 1) % static_cast<int>(kNavTabs.size());
-                            selectedRowIdx = 0;
-                            rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
-                            moved = true;
-                        } else if (onHeroRow) {
-                            if (heroBtnIdx > 0) {
-                                heroBtnIdx = 0;
-                                moved = true;
-                            } else {
-                                int total = static_cast<int>(activeCols[0].items.size());
-                                if (total > 0) {
+                    } else if (searchZone == 1) {
+                        int numF = static_cast<int>(filteredGames.size());
+                        if (navElapsedMs > 155) {
+                            bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
+                            bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
+                            bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
+                            bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
+
+                            if (moveUp) {
+                                if (searchGridIdx < 6) {
+                                    searchZone = 0;
+                                } else {
+                                    searchGridIdx -= 6;
+                                }
+                                lastNavTime = now;
+                            } else if (moveDown) {
+                                if (searchGridIdx + 6 < numF) {
+                                    searchGridIdx += 6;
+                                    lastNavTime = now;
+                                }
+                            } else if (moveLeft) {
+                                if (searchGridIdx > 0) {
+                                    searchGridIdx--;
+                                    lastNavTime = now;
+                                }
+                            } else if (moveRight) {
+                                if (searchGridIdx + 1 < numF) {
+                                    searchGridIdx++;
+                                    lastNavTime = now;
+                                }
+                            }
+                        }
+
+                        if ((pressedNow & luna::input::PAD_CROSS) && searchGridIdx >= 0 && searchGridIdx < numF) {
+                            openGameDetail(filteredGames[searchGridIdx]);
+                            searchOpen = false;
+                            break;
+                        }
+                    }
+                } else {
+                    syncRowSelectionSize();
+
+                    // Cambio rapido de pestanas superiores con L2 / R2 desde cualquier zona
+                    if (pressedNow & luna::input::PAD_L2) {
+                        activeTabIdx = (activeTabIdx + static_cast<int>(kNavTabs.size()) - 1) % static_cast<int>(kNavTabs.size());
+                        navColIdx = activeTabIdx;
+                        selectedRowIdx = 0;
+                        heroBtnIdx = 0;
+                        rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
+                        lastNavTime = now;
+                    }
+                    if (pressedNow & luna::input::PAD_R2) {
+                        activeTabIdx = (activeTabIdx + 1) % static_cast<int>(kNavTabs.size());
+                        navColIdx = activeTabIdx;
+                        selectedRowIdx = 0;
+                        heroBtnIdx = 0;
+                        rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
+                        lastNavTime = now;
+                    }
+
+                    syncRowSelectionSize();
+                    auto& activeCols = tabCollections[activeTabIdx];
+                    bool onHeroRow = (!activeCols.empty() && selectedRowIdx == 0 && activeCols[0].isHeroRotator);
+
+                    // L1 / R1: En Hero Rotator cambia de diapositiva; en Swimlanes salta 5 tarjetas
+                    if (pressedNow & luna::input::PAD_L1) {
+                        if (!activeCols.empty() && selectedRowIdx < static_cast<int>(activeCols.size())) {
+                            int step = onHeroRow ? 1 : 5;
+                            int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
+                            if (total > 0) {
+                                if (onHeroRow) {
                                     rowSelectedCol[0] = (rowSelectedCol[0] + total - 1) % total;
+                                } else {
+                                    rowSelectedCol[selectedRowIdx] = std::max(0, rowSelectedCol[selectedRowIdx] - step);
+                                }
+                            }
+                        }
+                        lastNavTime = now;
+                    }
+                    if (pressedNow & luna::input::PAD_R1) {
+                        if (!activeCols.empty() && selectedRowIdx < static_cast<int>(activeCols.size())) {
+                            int step = onHeroRow ? 1 : 5;
+                            int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
+                            if (total > 0) {
+                                if (onHeroRow) {
+                                    rowSelectedCol[0] = (rowSelectedCol[0] + 1) % total;
+                                } else {
+                                    rowSelectedCol[selectedRowIdx] = std::min(total - 1, rowSelectedCol[selectedRowIdx] + step);
+                                }
+                            }
+                        }
+                        lastNavTime = now;
+                    }
+
+                    // Navegacion 2D
+                    if (navElapsedMs > 155) {
+                        bool moved = false;
+                        bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
+                        bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
+                        bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
+                        bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
+
+                        if (moveUp) {
+                            if (focusZone == 1) {
+                                if (selectedRowIdx > 0) {
+                                    selectedRowIdx--;
+                                    moved = true;
+                                } else {
+                                    focusZone = 0; // Subir a la Barra de Navegacion Superior
+                                    navColIdx = activeTabIdx;
                                     moved = true;
                                 }
                             }
-                        } else if (!activeCols.empty()) {
-                            int& col = rowSelectedCol[selectedRowIdx];
-                            if (col > 0) {
-                                col--;
+                        } else if (moveDown) {
+                            if (focusZone == 0) {
+                                focusZone = 1;
+                                selectedRowIdx = 0;
+                                moved = true;
+                            } else if (selectedRowIdx + 1 < static_cast<int>(activeCols.size())) {
+                                selectedRowIdx++;
                                 moved = true;
                             }
-                        }
-                    } else if (moveRight) {
-                        if (focusZone == 0) {
-                            activeTabIdx = (activeTabIdx + 1) % static_cast<int>(kNavTabs.size());
-                            selectedRowIdx = 0;
-                            rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
-                            moved = true;
-                        } else if (onHeroRow) {
-                            if (heroBtnIdx < 1) {
-                                heroBtnIdx = 1;
+                        } else if (moveLeft) {
+                            if (focusZone == 0) {
+                                navColIdx = (navColIdx + 7 - 1) % 7;
+                                if (navColIdx < static_cast<int>(kNavTabs.size())) {
+                                    activeTabIdx = navColIdx;
+                                    selectedRowIdx = 0;
+                                    rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
+                                }
                                 moved = true;
-                            } else {
-                                int total = static_cast<int>(activeCols[0].items.size());
-                                if (total > 0) {
-                                    rowSelectedCol[0] = (rowSelectedCol[0] + 1) % total;
+                            } else if (onHeroRow) {
+                                if (heroBtnIdx > 0) {
                                     heroBtnIdx = 0;
                                     moved = true;
+                                } else {
+                                    int total = static_cast<int>(activeCols[0].items.size());
+                                    if (total > 0) {
+                                        rowSelectedCol[0] = (rowSelectedCol[0] + total - 1) % total;
+                                        moved = true;
+                                    }
+                                }
+                            } else if (!activeCols.empty()) {
+                                int& col = rowSelectedCol[selectedRowIdx];
+                                if (col > 0) {
+                                    col--;
+                                    moved = true;
                                 }
                             }
-                        } else if (!activeCols.empty()) {
-                            int& col = rowSelectedCol[selectedRowIdx];
-                            int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
-                            if (col + 1 < total) {
-                                col++;
+                        } else if (moveRight) {
+                            if (focusZone == 0) {
+                                navColIdx = (navColIdx + 1) % 7;
+                                if (navColIdx < static_cast<int>(kNavTabs.size())) {
+                                    activeTabIdx = navColIdx;
+                                    selectedRowIdx = 0;
+                                    rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
+                                }
                                 moved = true;
+                            } else if (onHeroRow) {
+                                if (heroBtnIdx < 1) {
+                                    heroBtnIdx = 1;
+                                    moved = true;
+                                } else {
+                                    int total = static_cast<int>(activeCols[0].items.size());
+                                    if (total > 0) {
+                                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % total;
+                                        heroBtnIdx = 0;
+                                        moved = true;
+                                    }
+                                }
+                            } else if (!activeCols.empty()) {
+                                int& col = rowSelectedCol[selectedRowIdx];
+                                int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
+                                if (col + 1 < total) {
+                                    col++;
+                                    moved = true;
+                                }
+                            }
+                        }
+
+                        if (moved) {
+                            lastNavTime = now;
+                            if (g_lastStatusText.find("Error") == std::string::npos &&
+                                g_lastStatusText.find("Fallo") == std::string::npos) {
+                                g_lastStatusText.clear();
                             }
                         }
                     }
 
-                    if (moved) {
-                        lastNavTime = now;
-                        if (g_lastStatusText.find("Error") == std::string::npos &&
-                            g_lastStatusText.find("Fallo") == std::string::npos) {
-                            g_lastStatusText.clear();
+                    syncRowSelectionSize();
+                    auto& curCols = tabCollections[activeTabIdx];
+
+                    // Pre-cargar imagenes en background de tarjetas visibles
+                    int startR = std::max(0, selectedRowIdx - 1);
+                    int endR = std::min(static_cast<int>(curCols.size()), selectedRowIdx + 3);
+                    for (int r = startR; r < endR; ++r) {
+                        int selC = (r < static_cast<int>(rowSelectedCol.size())) ? rowSelectedCol[r] : 0;
+                        int startC = std::max(0, selC - 2);
+                        int endC = std::min(static_cast<int>(curCols[r].items.size()), selC + 6);
+                        for (int c = startC; c < endC; ++c) {
+                            requestTileImages(curCols[r].items[c]);
                         }
                     }
-                }
+
+                    // Determinar el juego actualmente enfocado
+                    const luna::display::GameTile* focusedGame = nullptr;
+                    if (!curCols.empty() && selectedRowIdx >= 0 && selectedRowIdx < static_cast<int>(curCols.size())) {
+                        const auto& rowItems = curCols[selectedRowIdx].items;
+                        int selC = rowSelectedCol[selectedRowIdx];
+                        if (!rowItems.empty() && selC >= 0 && selC < static_cast<int>(rowItems.size())) {
+                            focusedGame = &rowItems[selC];
+                        }
+                    }
+
+                    // Accion con (X):
+                    if (pressedNow & luna::input::PAD_CROSS) {
+                        if (focusZone == 0) {
+                            if (navColIdx < static_cast<int>(kNavTabs.size())) {
+                                activeTabIdx = navColIdx;
+                                focusZone = 1;
+                                selectedRowIdx = 0;
+                            } else if (navColIdx == 5) { // Buscar
+                                searchOpen = true;
+                                searchZone = 0;
+                                searchLetterIdx = 0;
+                                updateFilteredGames();
+                            } else if (navColIdx == 6) { // Perfil
+                                profileMenuOpen = true;
+                                profileMenuIdx = 0;
+                            }
+                        } else if (focusedGame) {
+                            bool isHeroPlayNow = (selectedRowIdx == 0 && curCols[0].isHeroRotator && heroBtnIdx == 0);
+                            if (isHeroPlayNow) {
+                                startCloudGameSession(*focusedGame);
+                            } else {
+                                openGameDetail(*focusedGame);
+                            }
+                            break;
+                        }
+                    }
+
+                    // Atajo directo con [CUADRADO]
+                    if ((pressedNow & luna::input::PAD_SQUARE) && focusedGame && focusZone == 1) {
+                        startCloudGameSession(*focusedGame);
+                        break;
+                    }
+
+                    // Triangulo -> Cerrar sesion de cuenta Amazon
+                    if (pressedNow & luna::input::PAD_TRIANGLE) {
+                        luna::util::CrashLogger::log("[Main] Cerrando sesion de Amazon...");
+                        cbl.logout();
+                        catalogFetched = false;
+                        g_catalogDiagnostic.clear();
+                        g_lastStatusText.clear();
+                        appState = AppState::LoginCBL;
+                        break;
+                    }
+                } // fin (!profileMenuOpen && !searchOpen)
 
                 syncRowSelectionSize();
                 auto& curCols = tabCollections[activeTabIdx];
 
-                // Pre-cargar imagenes en background de tarjetas visibles (asincrono y no bloqueante)
-                int startR = std::max(0, selectedRowIdx - 1);
-                int endR = std::min(static_cast<int>(curCols.size()), selectedRowIdx + 3);
-                for (int r = startR; r < endR; ++r) {
-                    int selC = (r < static_cast<int>(rowSelectedCol.size())) ? rowSelectedCol[r] : 0;
-                    int startC = std::max(0, selC - 2);
-                    int endC = std::min(static_cast<int>(curCols[r].items.size()), selC + 6);
-                    for (int c = startC; c < endC; ++c) {
-                        requestTileImages(curCols[r].items[c]);
-                    }
-                }
-
-                // Determinar el juego actualmente enfocado
                 const luna::display::GameTile* focusedGame = nullptr;
                 if (!curCols.empty() && selectedRowIdx >= 0 && selectedRowIdx < static_cast<int>(curCols.size())) {
                     const auto& rowItems = curCols[selectedRowIdx].items;
@@ -748,42 +986,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Accion con (X):
-                // - En Zona 0 (Navbar): bajar a Zona 1
-                // - En Hero Rotator con heroBtnIdx == 0 ("▶ Jugar ahora"): iniciar juego Cloud directo
-                // - En Hero Rotator con heroBtnIdx == 1 ("Más información") o en cualquier tarjeta de fila: abrir Ficha GameDetail
-                if (pressedNow & luna::input::PAD_CROSS) {
-                    if (focusZone == 0) {
-                        focusZone = 1;
-                        selectedRowIdx = 0;
-                    } else if (focusedGame) {
-                        bool isHeroPlayNow = (selectedRowIdx == 0 && curCols[0].isHeroRotator && heroBtnIdx == 0);
-                        if (isHeroPlayNow) {
-                            startCloudGameSession(*focusedGame);
-                        } else {
-                            openGameDetail(*focusedGame);
-                        }
-                        break;
-                    }
-                }
-
-                // Atajo directo con [CUADRADO]: Jugar ahora directamente desde cualquier tarjeta o Hero
-                if ((pressedNow & luna::input::PAD_SQUARE) && focusedGame) {
-                    startCloudGameSession(*focusedGame);
-                    break;
-                }
-
-                // Triangulo -> Cerrar sesion de cuenta Amazon
-                if (pressedNow & luna::input::PAD_TRIANGLE) {
-                    luna::util::CrashLogger::log("[Main] Cerrando sesion de Amazon...");
-                    cbl.logout();
-                    catalogFetched = false;
-                    g_catalogDiagnostic.clear();
-                    g_lastStatusText.clear();
-                    appState = AppState::LoginCBL;
-                    break;
-                }
-
                 std::string catalogStatus;
                 if (!g_lastStatusText.empty()) {
                     catalogStatus = g_lastStatusText;
@@ -791,9 +993,9 @@ int main(int argc, char* argv[]) {
                     catalogStatus = g_catalogDiagnostic;
                 } else if (focusedGame) {
                     catalogStatus = "Seleccionado: " + focusedGame->title + " (" + focusedGame->publisher +
-                                    " • " + focusedGame->pegiRating + ")";
+                                    " - " + focusedGame->pegiRating + ")";
                 } else {
-                    catalogStatus = "Explora tu catálogo de Amazon Luna";
+                    catalogStatus = "Explora tu catalogo de Amazon Luna";
                 }
 
                 display.drawLunaHomeScreen(
@@ -801,13 +1003,20 @@ int main(int argc, char* argv[]) {
                     kNavTabs,
                     activeTabIdx,
                     focusZone,
+                    navColIdx,
                     selectedRowIdx,
                     rowSelectedCol,
                     heroBtnIdx,
                     sessionClient.getPlayerProfile(),
                     padMgr.isConnected(),
                     catalogStatus,
-                    frameCount
+                    frameCount,
+                    profileMenuOpen,
+                    profileMenuIdx,
+                    searchOpen,
+                    searchLetterIdx,
+                    searchGridIdx,
+                    filteredGames
                 );
                 break;
             }
@@ -817,14 +1026,18 @@ int main(int argc, char* argv[]) {
                     requestTileImages(sim);
                 }
 
-                // Circulo (O) -> Volver al Catalogo en la misma fila y posicion
+                size_t numScreens = activeGameForDetailAndStream.screenshotUrls.size();
+                size_t numSimilar = activeGameForDetailAndStream.similarGames.size();
+                int simZone = (numScreens > 0) ? 2 : 1;
+
+                // Circulo (O) -> Volver al Catalogo
                 if (pressedNow & luna::input::PAD_CIRCLE) {
                     luna::util::CrashLogger::log("[Main] Regresando al catalogo desde ficha de detalles");
                     appState = AppState::Catalog;
                     break;
                 }
 
-                // Navegacion en Ficha de Detalle (Zona 0: Botones Jugar/Volver, Zona 1: "También te puede interesar")
+                // Navegacion en Ficha de Detalle (Zona 0: Botones, Zona 1: Capturas, Zona 2 / 1: Similares)
                 if (navElapsedMs > 155) {
                     bool moved = false;
                     bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
@@ -832,17 +1045,38 @@ int main(int argc, char* argv[]) {
                     bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
                     bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
 
-                    if (moveDown && detailZone == 0 && !activeGameForDetailAndStream.similarGames.empty()) {
-                        detailZone = 1;
-                        moved = true;
-                    } else if (moveUp && detailZone == 1) {
-                        detailZone = 0;
-                        moved = true;
+                    if (moveDown) {
+                        if (detailZone == 0) {
+                            if (numScreens > 0) {
+                                detailZone = 1;
+                                detailScreenshotIdx = 0;
+                                moved = true;
+                            } else if (numSimilar > 0) {
+                                detailZone = simZone;
+                                detailSimilarIdx = 0;
+                                moved = true;
+                            }
+                        } else if (detailZone == 1 && numScreens > 0 && numSimilar > 0) {
+                            detailZone = 2;
+                            detailSimilarIdx = 0;
+                            moved = true;
+                        }
+                    } else if (moveUp) {
+                        if (detailZone == 2) {
+                            detailZone = (numScreens > 0) ? 1 : 0;
+                            moved = true;
+                        } else if (detailZone == 1) {
+                            detailZone = 0;
+                            moved = true;
+                        }
                     } else if (moveLeft) {
                         if (detailZone == 0 && detailBtnIdx > 0) {
                             detailBtnIdx = 0;
                             moved = true;
-                        } else if (detailZone == 1 && detailSimilarIdx > 0) {
+                        } else if (detailZone == 1 && numScreens > 0 && detailScreenshotIdx > 0) {
+                            detailScreenshotIdx--;
+                            moved = true;
+                        } else if (detailZone == simZone && detailSimilarIdx > 0) {
                             detailSimilarIdx--;
                             moved = true;
                         }
@@ -850,8 +1084,10 @@ int main(int argc, char* argv[]) {
                         if (detailZone == 0 && detailBtnIdx < 1) {
                             detailBtnIdx = 1;
                             moved = true;
-                        } else if (detailZone == 1 &&
-                                   detailSimilarIdx + 1 < static_cast<int>(activeGameForDetailAndStream.similarGames.size())) {
+                        } else if (detailZone == 1 && numScreens > 0 && detailScreenshotIdx + 1 < static_cast<int>(numScreens) && detailScreenshotIdx + 1 < 4) {
+                            detailScreenshotIdx++;
+                            moved = true;
+                        } else if (detailZone == simZone && detailSimilarIdx + 1 < static_cast<int>(numSimilar) && detailSimilarIdx + 1 < 8) {
                             detailSimilarIdx++;
                             moved = true;
                         }
@@ -866,21 +1102,20 @@ int main(int argc, char* argv[]) {
                             if (activeGameForDetailAndStream.isEntitled) {
                                 startCloudGameSession(activeGameForDetailAndStream);
                             } else {
-                                std::string price = activeGameForDetailAndStream.secondaryButtonText.empty() ? "9,99 â¬/mes" : activeGameForDetailAndStream.secondaryButtonText;
+                                std::string price = activeGameForDetailAndStream.secondaryButtonText.empty() ? "9,99 EUR/mes" : activeGameForDetailAndStream.secondaryButtonText;
                                 g_lastStatusText = "Este juego requiere suscripcion a Luna Premium (" + price + ").";
                             }
                         } else {
-                            appState = AppState::Catalog;
+                            g_lastStatusText = "Juego anadido a Favoritos de Amazon Luna.";
                         }
                         break;
-                    } else if (detailZone == 1 &&
-                               detailSimilarIdx >= 0 &&
-                               detailSimilarIdx < static_cast<int>(activeGameForDetailAndStream.similarGames.size())) {
-                        luna::display::GameTile chosenSimilar = activeGameForDetailAndStream.similarGames[detailSimilarIdx];
-                        openGameDetail(chosenSimilar);
+                    } else if (detailZone == simZone && detailSimilarIdx >= 0 && detailSimilarIdx < static_cast<int>(numSimilar)) {
+                        openGameDetail(activeGameForDetailAndStream.similarGames[detailSimilarIdx]);
                         break;
                     }
                 }
+
+                int selectedCarouselIdx = (detailZone == 1 && numScreens > 0) ? detailScreenshotIdx : detailSimilarIdx;
 
                 display.drawGameDetailScreen(
                     activeGameForDetailAndStream,
@@ -891,7 +1126,7 @@ int main(int argc, char* argv[]) {
                     false,
                     detailZone,
                     detailBtnIdx,
-                    detailSimilarIdx,
+                    selectedCarouselIdx,
                     frameCount
                 );
                 break;
@@ -923,32 +1158,29 @@ int main(int argc, char* argv[]) {
                     appState = AppState::Streaming;
                 } else if (sessionClient.getState() == luna::session::SessionState::Failed) {
                     luna::util::CrashLogger::log("[Main CRITICAL] Error al iniciar sesion: %s", sessionClient.getStatusMessage().c_str());
-                    g_lastStatusText = sessionClient.getStatusMessage();
-                    g_catalogDiagnostic = g_lastStatusText;
-                    luna::util::CrashLogger::logStep(4, ("Fallo: " + g_lastStatusText).c_str());
-                    if (g_lastStatusText.find("caducada") != std::string::npos ||
-                        g_lastStatusText.find("403") != std::string::npos ||
-                        g_lastStatusText.find("401") != std::string::npos) {
-                        luna::util::CrashLogger::log("[Main] Sesión de cuenta inválida o revocada. Reseteando a código QR...");
+                    std::string failMsg = sessionClient.getStatusMessage();
+                    if (failMsg.find("caducada") != std::string::npos ||
+                        failMsg.find("403") != std::string::npos ||
+                        failMsg.find("401") != std::string::npos) {
+                        luna::util::CrashLogger::log("[Main] Sesion de cuenta invalida o revocada. Reseteando a codigo QR...");
                         cbl.logout();
                         catalogFetched = false;
+                        teardownStreamingSession("Sesion expirada");
                         appState = AppState::LoginCBL;
-                    } else if (g_lastStatusText.find("not fresh") != std::string::npos ||
-                               g_lastStatusText.find("re-authenticate") != std::string::npos) {
+                    } else if (failMsg.find("not fresh") != std::string::npos ||
+                               failMsg.find("re-authenticate") != std::string::npos) {
                         cbl.refreshAccessToken();
-                        g_lastStatusText = "Token refrescado. Pulsa (X) para reintentar.";
-                        g_catalogDiagnostic = g_lastStatusText;
+                        teardownStreamingSession("Token refrescado. Pulsa (X) para reintentar.");
                         appState = AppState::GameDetail;
                     } else {
+                        teardownStreamingSession("Error: " + failMsg);
                         appState = AppState::GameDetail;
                     }
                 }
 
                 // Permitir cancelar con Circulo (O) mientras se solicita el servidor
                 if (pressedNow & luna::input::PAD_CIRCLE) {
-                    sessionClient.terminateSession(cbl.getAccessToken());
-                    g_lastStatusText = "Solicitud de sesion cancelada.";
-                    appState = AppState::Catalog;
+                    teardownStreamingSession("Solicitud de sesion cancelada.");
                     break;
                 }
 
@@ -959,7 +1191,7 @@ int main(int argc, char* argv[]) {
                     true,
                     detailZone,
                     detailBtnIdx,
-                    detailSimilarIdx,
+                    (detailZone == 1 && !activeGameForDetailAndStream.screenshotUrls.empty()) ? detailScreenshotIdx : detailSimilarIdx,
                     frameCount
                 );
                 break;
@@ -982,20 +1214,12 @@ int main(int argc, char* argv[]) {
                 if (!isLiveVideo) {
                     // Antes de que empiece el video: (O) o el combo permiten cancelar y regresar al catalogo
                     if ((pressedNow & luna::input::PAD_CIRCLE) || (comboNow && !prevOverlayCombo)) {
-                        luna::util::CrashLogger::log("[Main] Cancelando conexion de stream y regresando al catalogo");
-                        rtcClient.stop();
-                        sessionClient.terminateSession(cbl.getAccessToken());
-                        clearMediaQueues();
-                        overlayOpen = false;
-                        g_lastStatusText = "Conexion de juego cancelada.";
-                        appState = AppState::Catalog;
+                        teardownStreamingSession("Conexion de juego cancelada.");
                         prevOverlayCombo = comboNow;
                         break;
                     }
                 } else {
-                    // Fase 4: Durante el gameplay activo (videoStreaming == true):
-                    // - L3 y Circulo (O) quedan 100% libres para el juego (sprint, agacharse, derrapar, cancelar en juego)
-                    // - El combo [L1+R1+OPTIONS] o [OPTIONS+TOUCHPAD] abre/cierra el "Luna In-Game Overlay"
+                    // Durante el gameplay activo (videoStreaming == true):
                     if (comboNow && !prevOverlayCombo) {
                         overlayOpen = !overlayOpen;
                         overlaySelectedIdx = 0;
@@ -1027,14 +1251,7 @@ int main(int argc, char* argv[]) {
                                 overlayOpen = false;
                             } else if (overlaySelectedIdx == 2) {
                                 // 2: Salir del juego a Amazon Luna
-                                luna::util::CrashLogger::log("[Main] Saliendo del juego desde Luna In-Game Overlay");
-                                rtcClient.stop();
-                                sessionClient.terminateSession(cbl.getAccessToken());
-                                clearMediaQueues();
-                                overlayOpen = false;
-                                streamingActiveFrames = 0;
-                                g_lastStatusText = "Partida finalizada.";
-                                appState = AppState::Catalog;
+                                teardownStreamingSession("Partida finalizada.");
                                 prevOverlayCombo = comboNow;
                                 break;
                             }
@@ -1043,7 +1260,7 @@ int main(int argc, char* argv[]) {
                 }
                 prevOverlayCombo = comboNow;
 
-                // Enviar entrada de mando al juego Cloud a 60 Hz SOLO cuando el Overlay NO está abierto
+                // Enviar entrada de mando al juego Cloud a 60 Hz SOLO cuando el Overlay NO esta abierto
                 if (!overlayOpen) {
                     padMgr.serializeLunaProtobufReport(reportBuf, sizeof(reportBuf), reportLen, seq++);
                     if (rtcClient.isConnected() && reportLen > 0) {
@@ -1082,14 +1299,14 @@ int main(int argc, char* argv[]) {
                     );
                 } else {
                     streamingActiveFrames++;
-                    // Auto-ocultar la barra técnica tras los primeros 3 segundos (180 frames a 60 FPS), salvo que esté fijada
+                    // Auto-ocultar la barra tecnica tras los primeros 3 segundos (180 frames a 60 FPS), salvo que este fijada
                     bool showHudNow = (streamingActiveFrames <= 180) || hudPinned;
 
                     std::string hudLine1 = "FPS: 60 | 1080p | RTP Video: " + std::to_string(stats.rtpPacketsReceived) +
                                            " (IDR:" + std::to_string(stats.idrCount) +
                                            ") | Frames: " + std::to_string(decFrames) +
                                            " | Audio Pkts: " + std::to_string(stats.audioFramesReceived);
-                    std::string hudLine2 = "[L1 + R1 + OPTIONS] o [OPTIONS + TOUCHPAD]: Abrir menú de partida Amazon Luna";
+                    std::string hudLine2 = "[L1 + R1 + OPTIONS] o [OPTIONS + TOUCHPAD]: Abrir menu de partida Amazon Luna";
 
                     std::lock_guard<std::mutex> lk(latestFrameMutex);
                     if (hasValidFrame) {
@@ -1105,13 +1322,12 @@ int main(int argc, char* argv[]) {
                 break;
             }
         }
-
         frameCount++;
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
-    if (appState == AppState::Streaming) {
-        sessionClient.terminateSession(cbl.getAccessToken());
+    if (appState == AppState::Streaming || appState == AppState::StartingSession) {
+        teardownStreamingSession("Cierre de aplicacion");
     }
 
     rtcClient.stop();

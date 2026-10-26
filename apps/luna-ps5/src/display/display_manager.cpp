@@ -333,8 +333,9 @@ void DisplayManager::drawImage(int rx, int ry, int rw, int rh, const uint8_t* rg
 }
 
 
-void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int imgW, int imgH) {
+void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int imgW, int imgH, int strideW) {
     if (!isReady_ || !mappedMemory_ || !rgba || imgW <= 0 || imgH <= 0) return;
+    if (strideW <= 0) strideW = imgW;
     uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
 
     int x0 = std::max(0, rx);
@@ -342,13 +343,18 @@ void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int
     int x1 = std::min(width_, rx + imgW);
     int y1 = std::min(height_, ry + imgH);
 
+    bool directBlit = (strideW == imgW);
+    float scaleX = static_cast<float>(strideW) / static_cast<float>(imgW);
+
     for (int y = y0; y < y1; ++y) {
         int srcY = y - ry;
-        const uint8_t* p = rgba + (static_cast<size_t>(srcY * imgW + (x0 - rx)) * 4);
-        for (int x = x0; x < x1; ++x, p += 4) {
+        const uint8_t* row = rgba + (static_cast<size_t>(srcY) * static_cast<size_t>(strideW) * 4);
+        for (int x = x0; x < x1; ++x) {
+            int srcX = directBlit ? (x - rx) : std::clamp(static_cast<int>((x - rx) * scaleX), 0, strideW - 1);
+            const uint8_t* p = row + (srcX * 4);
             uint8_t a = p[3];
             if (a == 255) {
-                uint32_t argb = 0xFF000000 | (static_cast<uint32_t>(p[0]) << 16) | (static_cast<uint32_t>(p[1]) << 8) | p[2];
+                uint32_t argb = 0xFF000000U | (static_cast<uint32_t>(p[0]) << 16) | (static_cast<uint32_t>(p[1]) << 8) | p[2];
                 setPixelSwizzled(base, x, y, argb);
             } else if (a > 0) {
                 uint32_t argb = (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(p[0]) << 16) | (static_cast<uint32_t>(p[1]) << 8) | p[2];
@@ -356,6 +362,69 @@ void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int
             }
         }
     }
+}
+
+void DisplayManager::drawPlayTriangleIcon(int cx, int cy, int size, uint32_t color) {
+    if (!isReady_ || !mappedMemory_ || size <= 0) return;
+    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    int left = cx - size * 2 / 3;
+    int right = cx + size * 4 / 3;
+    int span = right - left;
+    if (span <= 0) return;
+
+    for (int x = left; x <= right; ++x) {
+        if (x < 0 || x >= width_) continue;
+        float frac = static_cast<float>(right - x) / static_cast<float>(span);
+        int halfH = static_cast<int>(std::round(static_cast<float>(size) * frac));
+        int y0 = std::max(0, cy - halfH);
+        int y1 = std::min(height_ - 1, cy + halfH);
+        for (int y = y0; y <= y1; ++y) {
+            setPixelSwizzled(base, x, y, color);
+        }
+    }
+}
+
+void DisplayManager::drawStarIcon(int cx, int cy, int size, uint32_t color) {
+    if (!isReady_ || !mappedMemory_ || size <= 0) return;
+    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    float rOuter = static_cast<float>(size);
+    float rInner = rOuter * 0.45f;
+    int minX = std::max(0, static_cast<int>(cx - rOuter - 1));
+    int maxX = std::min(width_ - 1, static_cast<int>(cx + rOuter + 1));
+    int minY = std::max(0, static_cast<int>(cy - rOuter - 1));
+    int maxY = std::min(height_ - 1, static_cast<int>(cy + rOuter + 1));
+
+    float vx[10], vy[10];
+    for (int i = 0; i < 10; ++i) {
+        float angle = -1.5707963f + static_cast<float>(i) * 0.62831853f;
+        float r = (i % 2 == 0) ? rOuter : rInner;
+        vx[i] = static_cast<float>(cx) + r * std::cos(angle);
+        vy[i] = static_cast<float>(cy) + r * std::sin(angle);
+    }
+
+    for (int y = minY; y <= maxY; ++y) {
+        float py = static_cast<float>(y);
+        for (int x = minX; x <= maxX; ++x) {
+            float px = static_cast<float>(x);
+            bool inside = false;
+            for (int i = 0, j = 9; i < 10; j = i++) {
+                if (((vy[i] > py) != (vy[j] > py)) &&
+                    (px < (vx[j] - vx[i]) * (py - vy[i]) / (vy[j] - vy[i]) + vx[i])) {
+                    inside = !inside;
+                }
+            }
+            if (inside) {
+                setPixelSwizzled(base, x, y, color);
+            }
+        }
+    }
+}
+
+void DisplayManager::drawLunaLogoIcon(int x, int y, int size) {
+    if (!isReady_ || !mappedMemory_ || size <= 0) return;
+    int s2 = size * 2 / 3;
+    drawRoundedRect(x, y + 4, s2, s2, 5, 0xFF02FDDB);
+    drawRoundedRect(x + size / 3, y, s2, s2, 5, 0xFF9146FF);
 }
 
 void DisplayManager::drawRoundedRect(int x, int y, int w, int h, int r, uint32_t colorArgb) {
@@ -423,38 +492,33 @@ void DisplayManager::drawRoundedBorder(int x, int y, int w, int h, int r, int th
     }
 }
 
-void DisplayManager::drawPillButton(int x, int y, int w, int h, const std::string& text, bool focused, const std::string& subtext) {
+void DisplayManager::drawPillButton(int x, int y, int w, int h, const std::string& text, bool focused, const std::string& subtext, bool hasPlayIcon) {
     int r = h / 2;
-    if (focused) {
-        drawRoundedRect(x, y, w, h, r, 0xFFFFFFFF);
-        if (subtext.empty()) {
-            int tw = fontRenderer_.measureText(text, 22);
-            int tx = x + (w - tw) / 2;
-            int ty = y + (h - 22) / 2;
-            drawText(tx, ty, 2, text, 0xFF0E0B16);
+    uint32_t bgColor = focused ? 0xFFFFFFFF : 0xFF353047;
+    uint32_t fgColor = focused ? 0xFF0E0B16 : 0xFFFFFFFF;
+    uint32_t subColor = focused ? 0xFF353047 : 0xFF94A3B8;
+
+    drawRoundedRect(x, y, w, h, r, bgColor);
+
+    if (subtext.empty()) {
+        int tw = fontRenderer_.measureText(text, 22);
+        int totalW = tw + (hasPlayIcon ? 28 : 0);
+        int startX = x + (w - totalW) / 2;
+        int ty = y + (h - 22) / 2;
+
+        if (hasPlayIcon) {
+            drawPlayTriangleIcon(startX + 8, y + h / 2, 10, fgColor);
+            drawText(startX + 24, ty, 2, text, fgColor);
         } else {
-            int tw1 = fontRenderer_.measureText(text, 18);
-            int tx1 = x + (w - tw1) / 2;
-            drawText(tx1, y + 10, 1, text, 0xFF0E0B16);
-            int tw2 = fontRenderer_.measureText(subtext, 14);
-            int tx2 = x + (w - tw2) / 2;
-            drawText(tx2, y + 36, 1, subtext, 0xFF353047);
+            drawText(startX, ty, 2, text, fgColor);
         }
     } else {
-        drawRoundedRect(x, y, w, h, r, 0xFF353047);
-        if (subtext.empty()) {
-            int tw = fontRenderer_.measureText(text, 22);
-            int tx = x + (w - tw) / 2;
-            int ty = y + (h - 22) / 2;
-            drawText(tx, ty, 2, text, 0xFFFFFFFF);
-        } else {
-            int tw1 = fontRenderer_.measureText(text, 18);
-            int tx1 = x + (w - tw1) / 2;
-            drawText(tx1, y + 10, 1, text, 0xFFFFFFFF);
-            int tw2 = fontRenderer_.measureText(subtext, 14);
-            int tx2 = x + (w - tw2) / 2;
-            drawText(tx2, y + 36, 1, subtext, 0xFF94A3B8);
-        }
+        int tw1 = fontRenderer_.measureText(text, 18);
+        int tx1 = x + (w - tw1) / 2;
+        drawText(tx1, y + 10, 1, text, fgColor);
+        int tw2 = fontRenderer_.measureText(subtext, 14);
+        int tx2 = x + (w - tw2) / 2;
+        drawText(tx2, y + 36, 1, subtext, subColor);
     }
 }
 namespace {
@@ -837,15 +901,22 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                                         const std::vector<std::string>& navTabs,
                                         int activeTabIdx,
                                         int focusZone,
+                                        int navColIdx,
                                         int selectedRowIdx,
                                         const std::vector<int>& rowSelectedCol,
                                         int heroBtnIdx,
                                         const PlayerProfileInfo& profile,
                                         bool padConnected,
                                         const std::string& statusText,
-                                        uint64_t frameCount) {
+                                        uint64_t frameCount,
+                                        bool profileMenuOpen,
+                                        int profileMenuIdx,
+                                        bool searchOpen,
+                                        int searchLetterIdx,
+                                        int searchGridIdx,
+                                        const std::vector<GameTile>& filteredGames) {
     if (!isReady_ || !mappedMemory_) return;
-    (void)navTabs; (void)heroBtnIdx; (void)profile; (void)frameCount;
+    (void)heroBtnIdx; (void)frameCount;
 
     // 1. Fondo principal oficial de Amazon Luna (#0E0B16 Cosmic Deep)
     clear(0xFF0E0B16);
@@ -865,7 +936,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         yOffset = (clampedRow - 1) * 360;
     }
 
-    // 2. HERO BANNER PANORAMICO 16:9 (Captura 1)
+    // 2. HERO BANNER PANORAMICO 16:9
     if (hasHero) {
         const auto& heroCol = collections[0];
         int heroIdx = (!rowSelectedCol.empty()) ? rowSelectedCol[0] : 0;
@@ -876,9 +947,9 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         int heroY = 0 - yOffset;
         if (heroY + 560 > 0) {
             // Fondo panoramico que ocupa todo el ancho superior con degradado suave a #0E0B16
-            const auto* heroImg = luna::util::ImageLoader::instance().getImage(heroGame.backdropUrl);
+            auto heroImg = luna::util::ImageLoader::instance().getImage(heroGame.backdropUrl, luna::util::ImagePreset::PanoramicHero);
             if (heroImg && heroImg->ready) {
-                drawPreScaledImage(0, heroY, heroImg->rgba.data(), heroImg->width, heroImg->height);
+                drawPreScaledImage(0, heroY, heroImg->rgba.data(), 1920, 540, heroImg->width);
             } else {
                 if (!heroGame.backdropUrl.empty()) {
                     luna::util::ImageLoader::instance().requestImage(heroGame.backdropUrl, luna::util::ImagePreset::PanoramicHero);
@@ -890,9 +961,9 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
             // A. Logo transparente PNG (productIcon) o titulo en grande
             bool drawnLogo = false;
             if (!heroGame.logoUrl.empty()) {
-                const auto* logoImg = luna::util::ImageLoader::instance().getImage(heroGame.logoUrl);
+                auto logoImg = luna::util::ImageLoader::instance().getImage(heroGame.logoUrl, luna::util::ImagePreset::ProductLogo);
                 if (logoImg && logoImg->ready) {
-                    drawPreScaledImage(68, heroY + 115, logoImg->rgba.data(), logoImg->width, logoImg->height);
+                    drawPreScaledImage(68, heroY + 115, logoImg->rgba.data(), logoImg->width, logoImg->height, logoImg->width);
                     drawnLogo = true;
                 } else {
                     luna::util::ImageLoader::instance().requestImage(heroGame.logoUrl, luna::util::ImagePreset::ProductLogo);
@@ -912,7 +983,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
             std::string btnTxt = heroGame.buttonText.empty() ? "Mas informacion" : heroGame.buttonText;
             drawPillButton(68, heroY + 365, btnW, btnH, btnTxt, heroFocused);
 
-            // D. Indicador de carrusel (dots: • ━━━ • •)
+            // D. Indicador de carrusel (dots)
             int totalSlides = std::min(static_cast<int>(heroCol.items.size()), 6);
             int dotX = 68;
             int dotY = heroY + 450;
@@ -928,7 +999,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         }
     }
 
-    // 3. SECCION DE SWIMLANES / FILAS HORIZONTALES (Captura 1 y 2)
+    // 3. SECCION DE SWIMLANES / FILAS HORIZONTALES
     int firstRowIdx = hasHero ? 1 : 0;
     int baseRowY = (hasHero ? 515 : 100) - yOffset;
     int cardW = 200;
@@ -957,18 +1028,15 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
             bool isSelectedCard = isFocusedRow && (static_cast<int>(i) == selectedCol);
             int cardY = rowY + 50;
 
-            // En la fila de rankings ("Las mejores novedades en juegos"):
-            // Dibuja el NUMERO GIGANTE SEMITRANSPARENTE (1, 2, 3...) abajo a la izquierda del poster
             if (row.isRankings) {
                 std::string rankStr = std::to_string(i + 1);
                 drawText(cardX - 16, cardY + cardH - 80, 8, rankStr, 0x77484064);
                 drawText(cardX - 18, cardY + cardH - 82, 8, rankStr, 0x996E6490);
             }
 
-            // Dibuja EXCLUSIVAMENTE el poster vertical con esquinas redondeadas (sin texto debajo ni barras encima)
-            const auto* coverImg = luna::util::ImageLoader::instance().getImage(item.coverUrl);
+            auto coverImg = luna::util::ImageLoader::instance().getImage(item.coverUrl, luna::util::ImagePreset::VerticalPoster);
             if (coverImg && coverImg->ready) {
-                drawPreScaledImage(cardX, cardY, coverImg->rgba.data(), 200, 280);
+                drawPreScaledImage(cardX, cardY, coverImg->rgba.data(), 200, 280, coverImg->width);
             } else {
                 if (!item.coverUrl.empty()) {
                     luna::util::ImageLoader::instance().requestImage(item.coverUrl, luna::util::ImagePreset::VerticalPoster);
@@ -977,56 +1045,146 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                 drawText(cardX + 16, cardY + 110, 2, utf8SafeTruncate(item.title, 18), 0xFFFFFFFF);
             }
 
-            // Resalte de foco: UNICAMENTE borde blanco/lavanda redondeado (#FFFFFF) alrededor del poster
             if (isSelectedCard) {
                 drawRoundedBorder(cardX - 2, cardY - 2, cardW + 4, cardH + 4, 16, 3, 0xFFFFFFFF);
             }
         }
     }
 
-    // 4. BARRA DE NAVEGACION SUPERIOR TRANSPARENTE / VIDRIO (Capturas 1 y 4)
-    // < > ▲ luna  Inicio  GameNight  Mi espacio  Remote Play [NUEVO]       🔍  [Avatar Teal]
+    // 4. BARRA DE NAVEGACION SUPERIOR
     fillRect(0, 0, 1920, 68, 0xCC0E0B16);
-
     drawText(44, 22, 2, "<", 0xFF94A3B8);
     drawText(74, 22, 2, ">", 0xFF94A3B8);
-    drawText(112, 18, 3, "â² luna", 0xFF9146FF);
+    drawLunaLogoIcon(112, 22, 22);
+    drawText(142, 20, 3, "luna", 0xFFFFFFFF);
 
-    int tabX = 220;
-    static const char* kTabTitles[] = {"Inicio", "GameNight", "Mi espacio", "Remote Play"};
-    for (int t = 0; t < 4; ++t) {
+    int tabX = 230;
+    int numTabs = static_cast<int>(navTabs.size());
+    for (int t = 0; t < numTabs; ++t) {
         bool active = (t == activeTabIdx);
-        bool focusedTab = (focusZone == 0 && t == activeTabIdx);
+        bool focusedTab = (focusZone == 0 && navColIdx == t);
 
         uint32_t tColor = (active || focusedTab) ? 0xFFFFFFFF : 0xFF94A3B8;
-        drawText(tabX, 22, 2, kTabTitles[t], tColor);
-        int tw = fontRenderer_.measureText(kTabTitles[t], 20);
+        drawText(tabX, 22, 2, navTabs[t], tColor);
+        int tw = fontRenderer_.measureText(navTabs[t], 20);
 
-        if (t == 3) {
-            drawRoundedRect(tabX + tw + 8, 22, 54, 20, 6, 0xFF9146FF);
-            drawText(tabX + tw + 12, 24, 1, "NUEVO", 0xFFFFFFFF);
-            tw += 68;
-        }
-
-        if (active) {
+        if (focusedTab) {
+            drawRoundedBorder(tabX - 8, 14, tw + 16, 40, 8, 2, 0xFF9146FF);
+        } else if (active) {
             fillRect(tabX, 52, tw, 3, 0xFFFFFFFF);
         }
         tabX += tw + 32;
     }
 
     int magX = 1754, magY = 32, magR = 8;
-    drawRoundedBorder(magX - magR, magY - magR, magR * 2, magR * 2, magR, 2, 0xFFCBD5E1);
-    for (int d = 0; d < 6; ++d) {
-        fillRect(magX + magR - 3 + d, magY + magR - 3 + d, 2, 2, 0xFFCBD5E1);
+    bool magFocused = (focusZone == 0 && navColIdx == numTabs);
+    if (magFocused) {
+        drawRoundedBorder(magX - 16, 14, 38, 38, 8, 2, 0xFFFFFFFF);
     }
-    drawRoundedRect(1810, 16, 38, 38, 19, 0xFF14B8A6);
-    drawText(1822, 24, 2, "B", 0xFFFFFFFF);
+    drawRoundedBorder(magX - magR, magY - magR, magR * 2, magR * 2, magR, 2, magFocused ? 0xFFFFFFFF : 0xFFCBD5E1);
+    for (int d = 0; d < 6; ++d) {
+        fillRect(magX + magR - 3 + d, magY + magR - 3 + d, 2, 2, magFocused ? 0xFFFFFFFF : 0xFFCBD5E1);
+    }
+
+    int profX = 1810, profY = 16;
+    bool profFocused = (focusZone == 0 && navColIdx == numTabs + 1);
+    if (profFocused) {
+        drawRoundedBorder(profX - 3, profY - 3, 44, 44, 22, 3, 0xFFFFFFFF);
+    }
+    drawRoundedRect(profX, profY, 38, 38, 19, 0xFF14B8A6);
+    drawText(profX + 12, profY + 8, 2, "B", 0xFFFFFFFF);
 
     // 5. BARRA DE ESTADO INFERIOR
     if (!statusText.empty()) {
         fillRect(0, 1046, 1920, 34, 0xEE0B0912);
         drawText(44, 1054, 1, statusText, 0xFF94A3B8);
         drawText(1700, 1054, 1, "DualSense conectado", padConnected ? 0xFF10B981 : 0xFFEF4444);
+    }
+
+    // 6. POPUP MENU PERFIL DE USUARIO
+    if (profileMenuOpen) {
+        int pw = 450, ph = 260;
+        int px = 1920 - pw - 40;
+        int py = 76;
+        drawRoundedRect(px, py, pw, ph, 14, 0xF5140F24);
+        drawRoundedBorder(px, py, pw, ph, 14, 2, 0xFF9146FF);
+
+        drawRoundedRect(px + 20, py + 20, 42, 42, 21, 0xFF14B8A6);
+        drawText(px + 34, py + 29, 2, "B", 0xFFFFFFFF);
+        drawText(px + 74, py + 22, 2, profile.displayName + " " + profile.discriminator, 0xFFFFFFFF);
+        drawText(px + 74, py + 46, 1, profile.planStatus, 0xFF10B981);
+
+        fillRect(px + 20, py + 74, pw - 40, 1, 0xFF2D2545);
+
+        const char* menuOpts[3] = {
+            "Recargar catalogo de Amazon Luna",
+            "Cerrar sesion de Amazon (Cambiar cuenta)",
+            "Cerrar menu"
+        };
+        for (int m = 0; m < 3; ++m) {
+            int by = py + 86 + m * 50;
+            bool btnFoc = (profileMenuIdx == m);
+            if (btnFoc) {
+                drawRoundedRect(px + 16, by, pw - 32, 42, 8, 0xFF9146FF);
+                drawText(px + 32, by + 12, 1, menuOpts[m], 0xFFFFFFFF);
+            } else {
+                drawText(px + 32, by + 12, 1, menuOpts[m], 0xFFCBD5E1);
+            }
+        }
+    }
+
+    // 7. VISTA DE BUSQUEDA Y FILTRADO RAPIDO
+    if (searchOpen) {
+        fillRect(0, 0, 1920, 1080, 0xF80B0912);
+        drawRoundedRect(68, 28, 1784, 54, 10, 0xFF1C152E);
+        drawRoundedBorder(68, 28, 1784, 54, 10, 2, 0xFF9146FF);
+        drawText(90, 44, 2, "FILTRAR CATALOGO POR LETRA / BUSQUEDA RAPIDA", 0xFFFFFFFF);
+        drawText(1600, 46, 1, "(O) Volver al inicio", 0xFF94A3B8);
+
+        static const char* kFilterLetters[] = {
+            "TODOS", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L",
+            "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "#"
+        };
+        int letX = 68;
+        int letY = 96;
+        for (int l = 0; l < 28; ++l) {
+            bool letFoc = (searchLetterIdx == l);
+            int lw = fontRenderer_.measureText(kFilterLetters[l], 18) + 16;
+            if (letFoc) {
+                drawRoundedRect(letX, letY, lw, 36, 6, 0xFF9146FF);
+                drawText(letX + 8, letY + 8, 2, kFilterLetters[l], 0xFFFFFFFF);
+            } else {
+                drawText(letX + 8, letY + 8, 2, kFilterLetters[l], 0xFF94A3B8);
+            }
+            letX += lw + 6;
+        }
+
+        int gBaseX = 68;
+        int gBaseY = 150;
+        int gCardW = 200;
+        int gCardH = 280;
+        int gGap = 24;
+        int numFiltered = static_cast<int>(filteredGames.size());
+        for (int g = 0; g < numFiltered && g < 12; ++g) {
+            int col = g % 6;
+            int row = g / 6;
+            int gx = gBaseX + col * (gCardW + gGap);
+            int gy = gBaseY + row * (gCardH + 110);
+            bool gFoc = (searchGridIdx == g);
+
+            const auto& tile = filteredGames[g];
+            auto cImg = luna::util::ImageLoader::instance().getImage(tile.coverUrl, luna::util::ImagePreset::VerticalPoster);
+            if (cImg && cImg->ready) {
+                drawPreScaledImage(gx, gy, cImg->rgba.data(), gCardW, gCardH, cImg->width);
+            } else {
+                drawRoundedRect(gx, gy, gCardW, gCardH, 12, 0xFF241B3B);
+            }
+            if (gFoc) {
+                drawRoundedBorder(gx - 2, gy - 2, gCardW + 4, gCardH + 4, 14, 3, 0xFFFFFFFF);
+            }
+            drawText(gx, gy + 290, 2, utf8SafeTruncate(tile.title, 18), 0xFFFFFFFF);
+            drawText(gx, gy + 316, 1, utf8SafeTruncate(tile.genres, 22), 0xFF94A3B8);
+        }
     }
 
     present();
@@ -1046,13 +1204,15 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
     // 1. Fondo principal oficial
     clear(0xFF0E0B16);
 
-    // 2. Fondo panoramico 16:9 que cubre toda la pantalla (Captura 3 - Star Wars Jedi: Survivor)
-    const auto* bgImg = luna::util::ImageLoader::instance().getImage(game.backdropUrl);
+    // 2. Fondo panoramico 16:9 completo con degradado
+    auto bgImg = luna::util::ImageLoader::instance().getImage(game.backdropUrl, luna::util::ImagePreset::PanoramicDetail);
     if (bgImg && bgImg->ready) {
-        drawPreScaledImage(0, 0, bgImg->rgba.data(), bgImg->width, bgImg->height);
+        drawPreScaledImage(0, 0, bgImg->rgba.data(), 1920, 720, bgImg->width);
     } else {
         if (!game.backdropUrl.empty()) {
             luna::util::ImageLoader::instance().requestImage(game.backdropUrl, luna::util::ImagePreset::PanoramicDetail);
+        } else if (!game.coverUrl.empty()) {
+            luna::util::ImageLoader::instance().requestImage(game.coverUrl, luna::util::ImagePreset::PanoramicDetail);
         }
         fillRect(0, 0, 1920, 1080, 0xFF140F24);
     }
@@ -1069,12 +1229,11 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
     drawText(1822, 24, 2, "B", 0xFFFFFFFF);
 
     // 3. Lado izquierdo (x = 68): Ficha del Juego
-    // A. Logo del juego (productIcon) o titulo en blanco
     bool drawnLogo = false;
     if (!game.logoUrl.empty()) {
-        const auto* logoImg = luna::util::ImageLoader::instance().getImage(game.logoUrl);
+        auto logoImg = luna::util::ImageLoader::instance().getImage(game.logoUrl, luna::util::ImagePreset::ProductLogo);
         if (logoImg && logoImg->ready) {
-            drawPreScaledImage(68, 135, logoImg->rgba.data(), logoImg->width, logoImg->height);
+            drawPreScaledImage(68, 135, logoImg->rgba.data(), logoImg->width, logoImg->height, logoImg->width);
             drawnLogo = true;
         } else {
             luna::util::ImageLoader::instance().requestImage(game.logoUrl, luna::util::ImagePreset::ProductLogo);
@@ -1084,33 +1243,30 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
         drawText(68, 155, 6, utf8SafeTruncate(game.title, 26), 0xFFFFFFFF);
     }
 
-    // B. Generos ("Accion, Aventura")
     std::string genreText = game.genres.empty() ? "Accion, Aventura" : game.genres;
     drawText(68, 320, 2, genreText, 0xFFA0A0B0);
 
-    // C. Boton primario
+    // Boton primario (Jugar ahora con icono play)
     int btnW = 340;
     int btnH = 64;
     bool primFocused = (detailZone == 0 && detailBtnIdx == 0);
 
     if (game.isEntitled) {
-        std::string label = isConnecting ? "CONECTANDO..." : "â¶ Jugar ahora";
-        drawPillButton(68, 360, btnW, btnH, label, primFocused);
+        std::string label = isConnecting ? "CONECTANDO..." : "Jugar ahora";
+        drawPillButton(68, 360, btnW, btnH, label, primFocused, "", true);
     } else {
         std::string pri = game.buttonText.empty() ? "Incluido en Luna Premium" : game.buttonText;
-        std::string sec = game.secondaryButtonText.empty() ? "9,99 â¬/mes" : game.secondaryButtonText;
+        std::string sec = game.secondaryButtonText.empty() ? "9,99 EUR/mes" : game.secondaryButtonText;
         drawPillButton(68, 360, btnW, btnH, pri, primFocused, sec);
     }
 
-    // Boton de favoritos [ ★ ] (#353047)
+    // Boton de favoritos con estrella vectorial
     bool favFocused = (detailZone == 0 && detailBtnIdx == 1);
     drawRoundedRect(425, 360, 64, 64, 14, favFocused ? 0xFFFFFFFF : 0xFF353047);
-    drawText(448, 380, 3, "â", favFocused ? 0xFF0E0B16 : 0xFFFFFFFF);
+    drawStarIcon(457, 392, 12, favFocused ? 0xFF0E0B16 : 0xFFFFFFFF);
 
-    // D. Enlaces secundarios
     drawText(68, 448, 1, "Compartir    Anadir al escritorio    Informar de un problema", 0xFF94A3B8);
 
-    // E. Cuenta vinculada y sinopsis
     std::string acctStr = "Cuenta vinculada: " + profile.displayName + " (" + profile.planStatus + ")";
     drawText(68, 474, 1, acctStr, 0xFF64748B);
 
@@ -1121,12 +1277,8 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
         synY += 26;
     }
 
-    // 4. Lado derecho (x = 1525, y = 350): BADGE OFICIAL PEGI (Captura 3)
-    int pegiX = 1525;
-    int pegiY = 350;
-    int pegiW = 74;
-    int pegiH = 86;
-
+    // 4. Lado derecho: BADGE OFICIAL PEGI
+    int pegiX = 1525, pegiY = 350, pegiW = 74, pegiH = 86;
     uint32_t pegiBg = 0xFFF59E0B;
     std::string pegiNum = "12";
     if (game.pegiRating.find("18") != std::string::npos) {
@@ -1159,40 +1311,60 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
         drawText(descX, descY + 22, 1, "Palabras malsonantes leves", 0xFFCBD5E1);
     }
 
-    // 5. Carrusel inferior 16:9 "Trailer y capturas de pantalla" (Captura 3)
-    int carY = 635;
-    drawText(68, carY, 3, "Trailer y capturas de pantalla", 0xFFFFFFFF);
-
-    int thumbW = 270;
-    int thumbH = 152;
-    int thumbGap = 16;
-    int thumbY = carY + 40;
-
-    int totalThumbs = std::max(4, static_cast<int>(game.screenshotUrls.size()) + 1);
-    for (int t = 0; t < totalThumbs && t < 6; ++t) {
-        int tx = 68 + t * (thumbW + thumbGap);
-        if (tx + thumbW > 1920) break;
-
-        bool isTrailer = (t == 0);
-        std::string imgUrl = isTrailer ? game.backdropUrl : ((t - 1 < static_cast<int>(game.screenshotUrls.size())) ? game.screenshotUrls[t - 1] : game.backdropUrl);
-
-        const auto* thImg = luna::util::ImageLoader::instance().getImage(imgUrl);
-        if (thImg && thImg->ready) {
-            drawPreScaledImage(tx, thumbY, thImg->rgba.data(), 270, 152);
-        } else {
-            if (!imgUrl.empty()) {
+    // 5. Carrusel inferior: Si hay screenshots reales, mostrarlas
+    int curY = 590;
+    size_t numScreens = game.screenshotUrls.size();
+    if (numScreens > 0) {
+        drawText(68, curY, 3, "Trailer y capturas de pantalla", 0xFFFFFFFF);
+        int thumbW = 270, thumbH = 152, thumbGap = 16;
+        int thumbY = curY + 36;
+        for (size_t t = 0; t < numScreens && t < 4; ++t) {
+            int tx = 68 + static_cast<int>(t) * (thumbW + thumbGap);
+            if (tx + thumbW > 1920) break;
+            bool isTrailer = (t == 0);
+            std::string imgUrl = game.screenshotUrls[t];
+            auto thImg = luna::util::ImageLoader::instance().getImage(imgUrl, luna::util::ImagePreset::ScreenshotThumbnail);
+            if (thImg && thImg->ready) {
+                drawPreScaledImage(tx, thumbY, thImg->rgba.data(), thumbW, thumbH, thImg->width);
+            } else {
                 luna::util::ImageLoader::instance().requestImage(imgUrl, luna::util::ImagePreset::ScreenshotThumbnail);
+                drawRoundedRect(tx, thumbY, thumbW, thumbH, 10, 0xFF241B3B);
             }
-            drawRoundedRect(tx, thumbY, thumbW, thumbH, 10, 0xFF241B3B);
+            if (isTrailer) {
+                drawRoundedRect(tx + (thumbW - 54) / 2, thumbY + (thumbH - 54) / 2, 54, 54, 27, 0xCC0E0B16);
+                drawPlayTriangleIcon(tx + thumbW / 2, thumbY + thumbH / 2, 12, 0xFFFFFFFF);
+            }
+            if (detailZone == 1 && similarSelectedIdx == static_cast<int>(t)) {
+                drawRoundedBorder(tx - 2, thumbY - 2, thumbW + 4, thumbH + 4, 12, 3, 0xFFFFFFFF);
+            }
         }
+        curY += 210;
+    }
 
-        if (isTrailer) {
-            drawRoundedRect(tx + (thumbW - 54) / 2, thumbY + (thumbH - 54) / 2, 54, 54, 27, 0xCC0E0B16);
-            drawText(tx + (thumbW - 54) / 2 + 18, thumbY + (thumbH - 54) / 2 + 12, 3, "â¶", 0xFFFFFFFF);
-        }
-
-        if (detailZone == 1 && similarSelectedIdx == t) {
-            drawRoundedBorder(tx - 2, thumbY - 2, thumbW + 4, thumbH + 4, 12, 3, 0xFFFFFFFF);
+    // Carrusel "Tambien te puede interesar"
+    if (!game.similarGames.empty() && curY + 220 <= 1046) {
+        drawText(68, curY, 3, "Tambien te puede interesar", 0xFFFFFFFF);
+        int simCardW = 140, simCardH = 196, simGap = 20;
+        int simCardsY = curY + 36;
+        int simFocusZone = (numScreens > 0) ? 2 : 1;
+        for (size_t s = 0; s < game.similarGames.size() && s < 8; ++s) {
+            int sx = 68 + static_cast<int>(s) * (simCardW + simGap);
+            if (sx + simCardW > 1920) break;
+            const auto& simTile = game.similarGames[s];
+            auto sImg = luna::util::ImageLoader::instance().getImage(simTile.coverUrl, luna::util::ImagePreset::VerticalPoster);
+            if (sImg && sImg->ready) {
+                drawPreScaledImage(sx, simCardsY, sImg->rgba.data(), simCardW, simCardH, sImg->width);
+            } else {
+                if (!simTile.coverUrl.empty()) {
+                    luna::util::ImageLoader::instance().requestImage(simTile.coverUrl, luna::util::ImagePreset::VerticalPoster);
+                }
+                drawRoundedRect(sx, simCardsY, simCardW, simCardH, 10, 0xFF241B3B);
+                drawText(sx + 8, simCardsY + 80, 1, utf8SafeTruncate(simTile.title, 14), 0xFFFFFFFF);
+            }
+            bool isSimFoc = (detailZone == simFocusZone && similarSelectedIdx == static_cast<int>(s));
+            if (isSimFoc) {
+                drawRoundedBorder(sx - 2, simCardsY - 2, simCardW + 4, simCardH + 4, 12, 3, 0xFFFFFFFF);
+            }
         }
     }
 
@@ -1386,10 +1558,9 @@ bool DisplayManager::presentYuv420WithHud(const uint8_t* y, const uint8_t* u, co
         fillRect(ovX + 3, ovY + 3, ovW - 6, 72, 0xFF1F1638);
         fillRect(ovX + 3, ovY + 75, ovW - 6, 2, 0xFF382B54);
 
-        fillRect(ovX + 36, ovY + 28, 16, 16, 0xFF9146FF);
-        fillRect(ovX + 40, ovY + 32, 8, 8, 0xFF02FDDB);
-        drawText(ovX + 62, ovY + 18, 5, "luna", 0xFFFFFFFF);
-        drawText(ovX + 185, ovY + 29, 2, "MENÚ DE PARTIDA EN LA NUBE", 0xFF02FDDB);
+        drawLunaLogoIcon(ovX + 36, ovY + 26, 22);
+        drawText(ovX + 70, ovY + 20, 5, "luna", 0xFFFFFFFF);
+        drawText(ovX + 195, ovY + 29, 2, "MENU DE PARTIDA EN LA NUBE", 0xFF02FDDB);
 
         if (!gameTitle.empty()) {
             drawText(ovX + 36, ovY + 94, 3, utf8SafeTruncate("Jugando a: " + gameTitle, 48), 0xFFFFFFFF);
@@ -1402,7 +1573,7 @@ bool DisplayManager::presentYuv420WithHud(const uint8_t* y, const uint8_t* u, co
 
         // 3 Botones interactivos del Overlay
         const std::string btnLabels[3] = {
-            "▶   Reanudar partida",
+            "Reanudar partida",
             std::string("HUD de rendimiento en pantalla: ") + (hudPinned ? "[FIJADO VISIBLE]" : "[OCULTO AUTOMÁTICO]"),
             "Salir del juego y volver al catálogo de Amazon Luna"
         };

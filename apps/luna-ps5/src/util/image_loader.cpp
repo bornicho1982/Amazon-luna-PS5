@@ -148,10 +148,10 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
             applyCornerMask(dstRgba.data(), dstW, dstH, 10);
             break;
         case ImagePreset::PanoramicHero:
-            applyDarkGradient(dstRgba.data(), dstW, dstH, 450, 140);
+            applyDarkGradient(dstRgba.data(), dstW, dstH, 700, 140);
             break;
         case ImagePreset::PanoramicDetail:
-            applyDarkGradient(dstRgba.data(), dstW, dstH, 550, 180);
+            applyDarkGradient(dstRgba.data(), dstW, dstH, 800, 180);
             break;
         case ImagePreset::ProductLogo:
         case ImagePreset::Raw:
@@ -192,23 +192,35 @@ void ImageLoader::shutdown() {
     }
 }
 
-const DecodedImage* ImageLoader::getImage(const std::string& url) {
+static inline std::string getCacheKey(const std::string& url, ImagePreset preset) {
+    return url + "@" + std::to_string(static_cast<int>(preset));
+}
+
+std::shared_ptr<const DecodedImage> ImageLoader::getImage(const std::string& url, ImagePreset preset) {
     if (url.empty()) return nullptr;
+    std::string key = getCacheKey(url, preset);
     std::lock_guard<std::mutex> lk(mutex_);
-    auto it = cache_.find(url);
-    if (it != cache_.end() && it->second.ready) {
-        return &it->second;
+    auto it = cache_.find(key);
+    if (it != cache_.end() && it->second && it->second->ready) {
+        return it->second;
+    }
+    // Fallback: verificar si existe en cache con cualquier otro preset
+    for (const auto& kv : cache_) {
+        if (kv.first.rfind(url, 0) == 0 && kv.second && kv.second->ready) {
+            return kv.second;
+        }
     }
     return nullptr;
 }
 
 void ImageLoader::requestImage(const std::string& url, ImagePreset preset) {
     if (url.empty() || url.rfind("http", 0) != 0) return;
+    std::string key = getCacheKey(url, preset);
     std::lock_guard<std::mutex> lk(mutex_);
-    if (cache_.find(url) != cache_.end()) return;
-    if (inFlight_[url]) return;
+    if (cache_.find(key) != cache_.end()) return;
+    if (inFlight_[key]) return;
 
-    inFlight_[url] = true;
+    inFlight_[key] = true;
     queue_.push_back(Request{url, preset});
     cv_.notify_one();
 }
@@ -233,10 +245,11 @@ void ImageLoader::workerLoop() {
             queue_.pop_front();
         }
 
+        std::string reqKey = getCacheKey(req.url, req.preset);
         auto resp = luna::net::HttpClient::get(req.url);
         if (!resp.ok() || resp.body.empty()) {
             std::lock_guard<std::mutex> lk(mutex_);
-            inFlight_.erase(req.url);
+            inFlight_.erase(reqKey);
             continue;
         }
 
@@ -245,7 +258,7 @@ void ImageLoader::workerLoop() {
         if (!decodeImageRgba(reinterpret_cast<const uint8_t*>(resp.body.data()),
                              resp.body.size(), rawRgba, origW, origH)) {
             std::lock_guard<std::mutex> lk(mutex_);
-            inFlight_.erase(req.url);
+            inFlight_.erase(reqKey);
             continue;
         }
 
@@ -262,11 +275,11 @@ void ImageLoader::workerLoop() {
                 targetH = 152;
                 break;
             case ImagePreset::PanoramicHero:
-                targetW = 1280;
+                targetW = 1920;
                 targetH = 540;
                 break;
             case ImagePreset::PanoramicDetail:
-                targetW = 1280;
+                targetW = 1920;
                 targetH = 720;
                 break;
             case ImagePreset::ProductLogo: {
@@ -295,14 +308,15 @@ void ImageLoader::workerLoop() {
         }
 
         {
+            auto dec = std::make_shared<DecodedImage>();
+            dec->rgba = std::move(processedRgba);
+            dec->width = targetW;
+            dec->height = targetH;
+            dec->ready = true;
+
             std::lock_guard<std::mutex> lk(mutex_);
-            DecodedImage dec;
-            dec.rgba = std::move(processedRgba);
-            dec.width = targetW;
-            dec.height = targetH;
-            dec.ready = true;
-            cache_[req.url] = std::move(dec);
-            inFlight_.erase(req.url);
+            cache_[reqKey] = std::move(dec);
+            inFlight_.erase(reqKey);
         }
     }
 }

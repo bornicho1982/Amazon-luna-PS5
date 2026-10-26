@@ -74,10 +74,13 @@ public:
     void drawText(int x, int y, int scale, const std::string& text, uint32_t colorArgb);
     void drawQrCode(int x, int y, int moduleScale, const std::string& text);
     void drawImage(int x, int y, int w, int h, const uint8_t* rgba, int imgW, int imgH);
-    void drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int imgW, int imgH);
+    void drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int imgW, int imgH, int strideW = 0);
     void drawRoundedRect(int x, int y, int w, int h, int r, uint32_t colorArgb);
     void drawRoundedBorder(int x, int y, int w, int h, int r, int thickness, uint32_t colorArgb);
-    void drawPillButton(int x, int y, int w, int h, const std::string& text, bool focused, const std::string& subtext = "");
+    void drawPlayTriangleIcon(int cx, int cy, int size, uint32_t color);
+    void drawStarIcon(int cx, int cy, int size, uint32_t color);
+    void drawLunaLogoIcon(int x, int y, int size);
+    void drawPillButton(int x, int y, int w, int h, const std::string& text, bool focused, const std::string& subtext = "", bool hasPlayIcon = false);
 
     void drawLoginScreen(const std::string& publicCode,
                          const std::string& verificationUri,
@@ -97,13 +100,20 @@ public:
                             const std::vector<std::string>& navTabs,
                             int activeTabIdx,
                             int focusZone,
+                            int navColIdx,
                             int selectedRowIdx,
                             const std::vector<int>& rowSelectedCol,
                             int heroBtnIdx,
                             const PlayerProfileInfo& profile,
                             bool padConnected,
                             const std::string& statusText,
-                            uint64_t frameCount);
+                            uint64_t frameCount,
+                            bool profileMenuOpen = false,
+                            int profileMenuIdx = 0,
+                            bool searchOpen = false,
+                            int searchLetterIdx = 0,
+                            int searchGridIdx = 0,
+                            const std::vector<GameTile>& filteredGames = {});
 
     void drawGameDetailScreen(const GameTile& game,
                               const PlayerProfileInfo& profile,

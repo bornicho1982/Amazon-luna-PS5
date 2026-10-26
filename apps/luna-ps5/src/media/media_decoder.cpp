@@ -95,6 +95,11 @@ size_t align16k(size_t n) {
     return (n + 0x3FFF) & ~static_cast<size_t>(0x3FFF);
 }
 
+#if defined(LUNA_TARGET_PS5)
+static Vdec2DecoderConfig s_vdecCfg{};
+static Vdec2DecoderMemory s_vdecMem{};
+#endif
+
 void* allocDirectMemory(size_t size, int protection) {
     int64_t start = 0;
     int rc = sceKernelAllocateDirectMemory(0, static_cast<int64_t>(sceKernelGetDirectMemorySize()), size, 0x4000,
@@ -196,6 +201,8 @@ bool VideoDecoder::init(int maxWidth, int maxHeight) {
                         int cRc = sceVideodec2CreateDecoder(&cfg, &mem, &decoder_);
                         luna::util::CrashLogger::log("[VideoDecoder] sceVideodec2CreateDecoder -> 0x%08X", static_cast<unsigned>(cRc));
                         if (cRc == 0 && decoder_) {
+                            s_vdecCfg = cfg;
+                            s_vdecMem = mem;
                             hwActive_ = true;
                             luna::util::CrashLogger::log("[VideoDecoder] Decodificador Hardware PS5 (libSceVideodec2) ACTIVO (%dx%d, dpb=%d)",
                                                          maxWidth, maxHeight, cfg.maxDpbFrames);
@@ -237,6 +244,18 @@ void VideoDecoder::resetStreamState() {
         for (int i = 0; i < 16; ++i) {
             int rc = sceVideodec2Flush(decoder_, &flushFrame, &flushOutput);
             if (rc != 0 || flushOutput.valid == 0) break;
+        }
+
+        // Recrear decoder con memoria ya mapeada para limpiar DPB y estado entre juegos
+        sceVideodec2DeleteDecoder(decoder_);
+        decoder_ = nullptr;
+        if (s_vdecMem.cpu && s_vdecMem.gpu && frameBuffer_) {
+            int cRc = sceVideodec2CreateDecoder(&s_vdecCfg, &s_vdecMem, &decoder_);
+            luna::util::CrashLogger::log("[VideoDecoder] sceVideodec2CreateDecoder recreado para nuevo juego -> 0x%08X", static_cast<unsigned>(cRc));
+            if (cRc != 0 || !decoder_) {
+                hwActive_ = false;
+                luna::util::CrashLogger::log("[VideoDecoder ERROR] Error recreando Videodec2: 0x%08X", static_cast<unsigned>(cRc));
+            }
         }
     }
 #endif

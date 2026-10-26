@@ -42,7 +42,7 @@ public:
     void shutdown();
 
     // Instant non-blocking cache lookup for UI thread
-    const DecodedImage* getImage(const std::string& url);
+    std::shared_ptr<const DecodedImage> getImage(const std::string& url, ImagePreset preset = ImagePreset::Raw);
 
     // Enqueues background download and pre-scale if not already cached
     void requestImage(const std::string& url, ImagePreset preset);
@@ -64,7 +64,7 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     std::deque<Request> queue_;
-    std::unordered_map<std::string, DecodedImage> cache_;
+    std::unordered_map<std::string, std::shared_ptr<const DecodedImage>> cache_;
     std::unordered_map<std::string, bool> inFlight_;
     std::thread workerThread_;
     bool running_ = false;

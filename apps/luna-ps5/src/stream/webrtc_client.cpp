@@ -70,7 +70,7 @@ public:
     explicit GlobalMediaRouter(WebRtcClient* client) : client_(client) {}
 
     void incoming(rtc::message_vector& messages, [[maybe_unused]] const rtc::message_callback& send) override {
-        if (!client_) return;
+        if (!client_ || client_->isStopping()) return;
 
         for (auto& m : messages) {
             if (!m || m->size() < 12) continue;
@@ -153,6 +153,7 @@ void WebRtcClient::setupPeerConnection() {
     pc_->setMediaHandler(std::make_shared<GlobalMediaRouter>(this));
 
     pc_->onLocalCandidate([this](rtc::Candidate c) {
+        if (m_stopping_.load()) return;
         std::string candStr = std::string(c);
         {
             std::lock_guard<std::mutex> lock(candidateMutex_);
@@ -164,6 +165,7 @@ void WebRtcClient::setupPeerConnection() {
     });
 
     pc_->onGatheringStateChange([this](rtc::PeerConnection::GatheringState state) {
+        if (m_stopping_.load()) return;
         luna::util::CrashLogger::log("[WebRTC] Gathering state: %d", static_cast<int>(state));
         if (state == rtc::PeerConnection::GatheringState::Complete) {
             std::lock_guard<std::mutex> lock(gatheringMutex_);
@@ -175,6 +177,7 @@ void WebRtcClient::setupPeerConnection() {
     });
 
     pc_->onIceStateChange([this](rtc::PeerConnection::IceState state) {
+        if (m_stopping_.load()) return;
         const char* stateStr = "Unknown";
         switch (state) {
             case rtc::PeerConnection::IceState::New: stateStr = "New"; break;
@@ -190,6 +193,7 @@ void WebRtcClient::setupPeerConnection() {
     });
 
     pc_->onStateChange([this](rtc::PeerConnection::State state) {
+        if (m_stopping_.load()) return;
         const char* stStr = "Unknown";
         switch (state) {
             case rtc::PeerConnection::State::New: stStr = "New"; break;
@@ -221,6 +225,7 @@ void WebRtcClient::setupPeerConnection() {
     });
 
     audioTrack_->onMessage([this](rtc::message_variant msg) {
+        if (m_stopping_.load()) return;
         if (auto b = std::get_if<rtc::binary>(&msg)) {
             if (!b->empty()) {
                 processAudioRtp(reinterpret_cast<const uint8_t*>(b->data()), b->size());
@@ -246,6 +251,7 @@ void WebRtcClient::setupPeerConnection() {
     });
 
     videoTrack_->onMessage([this](rtc::message_variant msg) {
+        if (m_stopping_.load()) return;
         if (auto b = std::get_if<rtc::binary>(&msg)) {
             if (!b->empty()) {
                 processVideoRtp(reinterpret_cast<const uint8_t*>(b->data()), b->size());
@@ -285,6 +291,7 @@ void WebRtcClient::setupPeerConnection() {
         requestKeyframe();
     });
     messageChannel_->onMessage([this](rtc::message_variant msg) {
+        if (m_stopping_.load()) return;
         if (auto text = std::get_if<std::string>(&msg)) {
             luna::util::CrashLogger::log("[WebRTC clientMessageChannel RX TEXT] %s", text->c_str());
         } else if (auto b = std::get_if<rtc::binary>(&msg)) {
@@ -531,6 +538,7 @@ std::string WebRtcClient::generateSdpOffer() {
     luna::util::CrashLogger::logStep(1, "Starting WebRTC generateSdpOffer...");
     try {
         stop();
+        m_stopping_.store(false);
         setupPeerConnection();
 
         isGatheringComplete_ = false;
@@ -658,6 +666,7 @@ bool WebRtcClient::start() {
 }
 
 void WebRtcClient::stop() {
+    m_stopping_.store(true);
     isConnected_ = false;
     iceStateStr_ = "Closed";
     peerStateStr_ = "Closed";
@@ -711,6 +720,7 @@ void WebRtcClient::stop() {
         try { pc_->close(); } catch (...) {}
     }
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     inputChannel_.reset();
     messageChannel_.reset();
     videoTrack_.reset();
