@@ -221,11 +221,25 @@ bool VideoDecoder::init(int maxWidth, int maxHeight) {
 }
 
 void VideoDecoder::resetStreamState() {
+    std::lock_guard<std::mutex> lock(decodeMutex_);
     needsKeyframe_.store(true);
     hasReceivedKeyframe_ = false;
     lastDecodeRc_.store(0);
     lastDecodeError_.store(0);
     decodedFrames_.store(0);
+
+#if defined(LUNA_TARGET_PS5)
+    if (hwActive_ && decoder_) {
+        Vdec2Frame flushFrame{};
+        flushFrame.size = sizeof(flushFrame);
+        Vdec2Output flushOutput{};
+        flushOutput.size = sizeof(flushOutput);
+        for (int i = 0; i < 16; ++i) {
+            int rc = sceVideodec2Flush(decoder_, &flushFrame, &flushOutput);
+            if (rc != 0 || flushOutput.valid == 0) break;
+        }
+    }
+#endif
 }
 
 void VideoDecoder::shutdown() {
@@ -248,6 +262,7 @@ void VideoDecoder::shutdown() {
 
 bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, DecodedVideoFrame& outFrame) {
     if (!isReady_ || !h264Data || size < 4) return false;
+    std::lock_guard<std::mutex> lock(decodeMutex_);
 
     bool hasSps = false;
     bool hasPps = false;

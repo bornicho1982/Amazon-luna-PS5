@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <atomic>
+#include <mutex>
 
 namespace luna::media {
 
@@ -37,6 +38,7 @@ public:
     uint64_t getDecodedFrameCount() const { return decodedFrames_.load(); }
 
 private:
+    std::mutex decodeMutex_;
     bool isReady_ = false;
     bool hwActive_ = false;
     std::atomic<bool> needsKeyframe_{true};

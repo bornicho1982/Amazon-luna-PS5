@@ -313,7 +313,7 @@ void PadManager::serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, siz
     if (state_.buttons & PAD_LEFT)     lunaButtons |= 0x0004;
     if (state_.buttons & PAD_RIGHT)    lunaButtons |= 0x0008;
     if ((state_.buttons & PAD_OPTIONS) && !overlayCombo) lunaButtons |= 0x0010; // Start / Menu
-    if ((state_.buttons & PAD_TOUCH) && !overlayCombo)   lunaButtons |= 0x0020; // View / Select / Back (Mapa / Inventario)
+    if ((state_.buttons & PAD_TOUCH) && !overlayCombo)   lunaButtons |= (0x0020 | 0x10000); // Back/Select + DS4 Touchpad click
     if (state_.buttons & PAD_L3)       lunaButtons |= 0x0040;
     if (state_.buttons & PAD_R3)       lunaButtons |= 0x0080;
     if (state_.buttons & PAD_L1)       lunaButtons |= 0x0100;
@@ -330,7 +330,7 @@ void PadManager::serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, siz
     uint32_t thumbRY = static_cast<uint32_t>(32767 - state_.rightY);
 
     // 2. Serializar sub-mensaje proto.dcv.input.GamePadEvent
-    uint8_t evtBuf[64];
+    uint8_t evtBuf[96];
     size_t e = 0;
 
     // tag 1: deviceid (uint32, omit if 0 per proto3)
@@ -391,6 +391,17 @@ void PadManager::serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, siz
     evtBuf[e++] = (11 << 3) | 0;
     e += writeVarint(evtBuf + e, 1);
 
+    // tag 12: til (proto.dcv.input.TempoInputLatency: field 3 = hardwareClass: CLASS_CONTROLLER_DUALSENSE = 9)
+    uint8_t tilBuf[8];
+    size_t t = 0;
+    tilBuf[t++] = (3 << 3) | 0;
+    t += writeVarint(tilBuf + t, 9); // CLASS_CONTROLLER_DUALSENSE
+
+    evtBuf[e++] = (12 << 3) | 2;
+    e += writeVarint(evtBuf + e, t);
+    std::memcpy(evtBuf + e, tilBuf, t);
+    e += t;
+
     // 3. Envolver en proto.dcv.input.ClientMessage (field 104 = gamePadEvent, wire tag (104 << 3) | 2 = 834 = 0xC2 0x06)
     size_t outIdx = 0;
     buffer[outIdx++] = 0xC2;
@@ -400,6 +411,36 @@ void PadManager::serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, siz
     outIdx += e;
 
     outLen = outIdx;
+}
+
+void PadManager::serializeGamepadConnectionEvent(uint8_t* buffer, size_t maxLen, size_t& outLen,
+                                                 uint32_t deviceId, uint32_t status, uint32_t devicetype) {
+    if (maxLen < 16) {
+        outLen = 0;
+        return;
+    }
+
+    // proto.dcv.input.GamePadConnectionEvent:
+    // field 1: deviceId (uint32)
+    // field 2: status (uint32, 0 = Connect, 1 = Disconnect)
+    // field 10: devicetype (enum GamePadType: 0 = X360, 1 = DS4)
+    uint8_t sub[16];
+    size_t s = 0;
+    sub[s++] = (1 << 3) | 0;
+    s += writeVarint(sub + s, deviceId);
+    sub[s++] = (2 << 3) | 0;
+    s += writeVarint(sub + s, status);
+    sub[s++] = (10 << 3) | 0;
+    s += writeVarint(sub + s, devicetype);
+
+    // Envolver en ClientMessage (field 105 = 842 = 0xCA 0x06)
+    size_t out = 0;
+    buffer[out++] = 0xCA;
+    buffer[out++] = 0x06;
+    out += writeVarint(buffer + out, s);
+    std::memcpy(buffer + out, sub, s);
+    out += s;
+    outLen = out;
 }
 
 } // namespace luna::input

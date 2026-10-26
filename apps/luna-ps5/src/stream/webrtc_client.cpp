@@ -262,8 +262,8 @@ void WebRtcClient::setupPeerConnection() {
     inputChannel_ = pc_->createDataChannel("inputChannel", inputInit);
     inputChannel_->onOpen([this]() {
         luna::util::CrashLogger::log("[WebRTC] DataChannel inputChannel (DualSense) abierto. Enviando GamePadConnectionEvent (DS4)...");
-        // proto.dcv.input.ClientMessage { field 105: GamePadConnectionEvent { devicetype = DS4(1) } }
-        static constexpr uint8_t kGamepadConnectMsg[5] = {0xCA, 0x06, 0x02, 0x50, 0x01};
+        // proto.dcv.input.ClientMessage { field 105: GamePadConnectionEvent { deviceId=0, status=0(Connect), devicetype=DS4(1) } }
+        static constexpr uint8_t kGamepadConnectMsg[9] = {0xCA, 0x06, 0x06, 0x08, 0x00, 0x10, 0x00, 0x50, 0x01};
         std::lock_guard<std::mutex> lock(txMutex_);
         if (inputChannel_ && inputChannel_->isOpen()) {
             inputChannel_->send(reinterpret_cast<const std::byte*>(kGamepadConnectMsg), sizeof(kGamepadConnectMsg));
@@ -670,18 +670,57 @@ void WebRtcClient::stop() {
     lastPingTimeMs_ = 0;
     lastIdleResetTimeMs_ = 0;
     pingsSentCount_ = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(txMutex_);
+        if (inputChannel_) {
+            inputChannel_->onOpen(nullptr);
+            inputChannel_->onMessage(nullptr);
+            inputChannel_->onError(nullptr);
+            inputChannel_->onClosed(nullptr);
+            try { inputChannel_->close(); } catch (...) {}
+        }
+        if (messageChannel_) {
+            messageChannel_->onOpen(nullptr);
+            messageChannel_->onMessage(nullptr);
+            messageChannel_->onError(nullptr);
+            messageChannel_->onClosed(nullptr);
+            try { messageChannel_->close(); } catch (...) {}
+        }
+    }
+
+    if (videoTrack_) {
+        videoTrack_->onOpen(nullptr);
+        videoTrack_->onClosed(nullptr);
+        videoTrack_->onMessage(nullptr);
+    }
+    if (audioTrack_) {
+        audioTrack_->onOpen(nullptr);
+        audioTrack_->onClosed(nullptr);
+        audioTrack_->onMessage(nullptr);
+    }
+
+    if (pc_) {
+        pc_->onStateChange(nullptr);
+        pc_->onIceStateChange(nullptr);
+        pc_->onGatheringStateChange(nullptr);
+        pc_->onLocalCandidate(nullptr);
+        pc_->onLocalDescription(nullptr);
+        pc_->onDataChannel(nullptr);
+        pc_->onTrack(nullptr);
+        try { pc_->close(); } catch (...) {}
+    }
+
+    inputChannel_.reset();
+    messageChannel_.reset();
+    videoTrack_.reset();
+    audioTrack_.reset();
+    pc_.reset();
+
     {
         std::lock_guard<std::mutex> lock(candidateMutex_);
         localCandidatesList_.clear();
     }
-    if (pc_) {
-        pc_->close();
-        pc_.reset();
-    }
-    videoTrack_.reset();
-    audioTrack_.reset();
-    inputChannel_.reset();
-    messageChannel_.reset();
     {
         std::lock_guard<std::mutex> lock(videoRtpMutex_);
         currentAccessUnit_.clear();

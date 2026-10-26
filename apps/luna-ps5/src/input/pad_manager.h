@@ -57,6 +57,7 @@ public:
 
     void serializeReport(uint8_t* buffer, size_t maxLen, size_t& outLen, uint32_t seq, int padIndex = 0);
     void serializeLunaProtobufReport(uint8_t* buffer, size_t maxLen, size_t& outLen, uint32_t packetNum, int padIndex = 0);
+    void serializeGamepadConnectionEvent(uint8_t* buffer, size_t maxLen, size_t& outLen, uint32_t deviceId = 0, uint32_t status = 0, uint32_t devicetype = 1);
 
 private:
     int32_t userId_ = -1;

@@ -32,6 +32,7 @@
 #include "media/media_decoder.h"
 #include "util/crash_logger.h"
 #include "util/image_loader.h"
+#include "util/image_loader.h"
 
 namespace {
 std::atomic<bool> g_running{true};
@@ -65,6 +66,7 @@ int main(int argc, char* argv[]) {
 
     // 1. Inicializar HTTP nativo
     luna::net::HttpClient::init();
+    luna::util::ImageLoader::instance().init();
 
     // 2. Inicializar subsistema de pantalla (1080p60 64KB Macro-Tiled Triple-Buffer)
     luna::display::DisplayManager display;
@@ -265,64 +267,38 @@ int main(int argc, char* argv[]) {
     bool catalogFetched = false;
 
     // 10. Catalogo base de respaldo y estructura 2D de colecciones oficiales de Amazon Luna
-    std::vector<luna::display::GameTile> games = {
-        {
-            "amzn1.adg.product.f0b7b7d7-2026-4d5e-8a3f-galacticracer",
-            "STAR WARS: Galactic Racer™",
-            "Secret Mode",
-            "Fuse Games",
-            "2026",
-            "Carreras • Acción",
-            "Mando DualSense",
-            "1-4 jugadores",
-            "",
-            "Incluido con Prime con Luna Estándar",
-            0xFF9146FF,
-            "INCLUIDO CON PRIME",
-            "Participa en carreras de alta velocidad por el Borde Exterior de la galaxia de Star Wars.",
-            0xFF9146FF,
-            "", "", {}, 0, 0, "PEGI 12", false, {}
+    std::vector<luna::display::GameTile> games;
+    {
+        luna::display::GameTile g;
+        g.id = "amzn1.adg.product.f0b7b7d7-2026-4d5e-8a3f-galacticracer";
+        g.title = "STAR WARS: Galactic Racerâ¢";
+        g.publisher = "Secret Mode";
+        g.developer = "Fuse Games";
+        g.releaseYear = "2026";
+        g.genres = "Carreras â¢ AcciÃ³n";
+        g.inputMethods = "Mando DualSense";
+        g.playerCount = "1-4 jugadores";
+        g.channelSubtext = "Incluido con Prime";
+        g.badgeColor = 0xFF9146FF;
+        g.category = "INCLUIDO CON PRIME";
+        g.synopsis = "Participa en carreras de alta velocidad por el Borde Exterior de la galaxia de Star Wars.";
+        g.heroColor = 0xFF9146FF;
+        g.pegiRating = "PEGI 12";
+        g.isEntitled = true;
+        g.buttonText = "â¶ Jugar ahora";
+        games.push_back(std::move(g));
+    }
+
+    auto requestTileImages = [&](const luna::display::GameTile& tile) {
+        if (!tile.coverUrl.empty()) {
+            luna::util::ImageLoader::instance().requestImage(tile.coverUrl, luna::util::ImagePreset::VerticalPoster);
         }
-    };
-
-    struct CachedCover {
-        std::vector<uint8_t> rgba;
-        int width = 0;
-        int height = 0;
-    };
-    std::unordered_map<std::string, CachedCover> coverCache;
-
-    auto ensureTileCover = [&](luna::display::GameTile& tile, bool allowNetworkDownload) -> bool {
-        if (!tile.coverRgba.empty() && tile.coverWidth > 0 && tile.coverHeight > 0) {
-            if (!tile.coverUrl.empty() && coverCache.find(tile.coverUrl) == coverCache.end()) {
-                coverCache[tile.coverUrl] = CachedCover{tile.coverRgba, tile.coverWidth, tile.coverHeight};
-            }
-            return false;
+        if (!tile.backdropUrl.empty()) {
+            luna::util::ImageLoader::instance().requestImage(tile.backdropUrl, luna::util::ImagePreset::PanoramicHero);
         }
-        if (tile.coverUrl.empty() || tile.coverUrl.rfind("http", 0) != 0) return false;
-
-        auto it = coverCache.find(tile.coverUrl);
-        if (it != coverCache.end() && !it->second.rgba.empty()) {
-            tile.coverRgba = it->second.rgba;
-            tile.coverWidth = it->second.width;
-            tile.coverHeight = it->second.height;
-            return false;
+        if (!tile.logoUrl.empty()) {
+            luna::util::ImageLoader::instance().requestImage(tile.logoUrl, luna::util::ImagePreset::ProductLogo);
         }
-
-        if (!allowNetworkDownload) return false;
-
-        auto imgResp = luna::net::HttpClient::get(tile.coverUrl);
-        if (imgResp.ok() && !imgResp.body.empty()) {
-            int w = 0, h = 0;
-            if (luna::util::decodeImageRgba(reinterpret_cast<const uint8_t*>(imgResp.body.data()),
-                                            imgResp.body.size(), tile.coverRgba, w, h)) {
-                tile.coverWidth = w;
-                tile.coverHeight = h;
-                coverCache[tile.coverUrl] = CachedCover{tile.coverRgba, w, h};
-                return true;
-            }
-        }
-        return false;
     };
 
     static const std::vector<std::string> kNavTabs = {
@@ -410,16 +386,8 @@ int main(int argc, char* argv[]) {
         }
         if (tabCollections[4].empty()) tabCollections[4] = tabCollections[0];
 
-        // Poblar cache inicial de portadas ya descargadas
         for (auto& g : games) {
-            ensureTileCover(g, false);
-        }
-        for (int t = 0; t < 5; ++t) {
-            for (auto& col : tabCollections[t]) {
-                for (auto& item : col.items) {
-                    ensureTileCover(item, false);
-                }
-            }
+            requestTileImages(g);
         }
     };
 
@@ -479,9 +447,18 @@ int main(int argc, char* argv[]) {
     auto openGameDetail = [&](const luna::display::GameTile& selectedTile) {
         activeGameForDetailAndStream = selectedTile;
         sessionClient.preloadGameDetails(activeGameForDetailAndStream, cbl.getAccessToken(), cbl.getDeviceSerial());
-        ensureTileCover(activeGameForDetailAndStream, true);
 
-        // Si game_detail no devolvió similares, poblar con juegos del mismo género o destacados del catálogo
+        requestTileImages(activeGameForDetailAndStream);
+        if (!activeGameForDetailAndStream.backdropUrl.empty()) {
+            luna::util::ImageLoader::instance().requestImage(activeGameForDetailAndStream.backdropUrl, luna::util::ImagePreset::PanoramicDetail);
+        }
+        if (!activeGameForDetailAndStream.logoUrl.empty()) {
+            luna::util::ImageLoader::instance().requestImage(activeGameForDetailAndStream.logoUrl, luna::util::ImagePreset::ProductLogo);
+        }
+        for (const auto& shot : activeGameForDetailAndStream.screenshotUrls) {
+            luna::util::ImageLoader::instance().requestImage(shot, luna::util::ImagePreset::ScreenshotThumbnail);
+        }
+
         if (activeGameForDetailAndStream.similarGames.empty()) {
             for (const auto& g : games) {
                 if (g.id != activeGameForDetailAndStream.id) {
@@ -491,10 +468,9 @@ int main(int argc, char* argv[]) {
             }
         }
         for (auto& sim : activeGameForDetailAndStream.similarGames) {
-            ensureTileCover(sim, false);
+            requestTileImages(sim);
         }
 
-        // Actualizar también la ficha en las colecciones en memoria para cachear la sinopsis completa
         for (auto& g : games) {
             if (g.id == activeGameForDetailAndStream.id) g = activeGameForDetailAndStream;
         }
@@ -515,9 +491,15 @@ int main(int argc, char* argv[]) {
     };
 
     auto startCloudGameSession = [&](const luna::display::GameTile& targetTile) {
-        activeGameForDetailAndStream = targetTile;
-        ensureTileCover(activeGameForDetailAndStream, false);
+        if (!targetTile.isEntitled) {
+            std::string price = targetTile.secondaryButtonText.empty() ? "9,99 â¬/mes" : targetTile.secondaryButtonText;
+            g_lastStatusText = "Este juego requiere suscripcion a Luna Premium (" + price + ").";
+            g_catalogDiagnostic = g_lastStatusText;
+            luna::util::CrashLogger::log("[Main] Juego no disponible en tu suscripcion (%s)", targetTile.title.c_str());
+            return;
+        }
 
+        activeGameForDetailAndStream = targetTile;
         std::string targetGameId = activeGameForDetailAndStream.id;
         luna::util::CrashLogger::log("[Main] Iniciando sesion de juego Cloud para: %s (%s)...",
                                      activeGameForDetailAndStream.title.c_str(), targetGameId.c_str());
@@ -736,8 +718,7 @@ int main(int argc, char* argv[]) {
                 syncRowSelectionSize();
                 auto& curCols = tabCollections[activeTabIdx];
 
-                // Carga progresiva bajo demanda de portadas en las filas visibles (max 1 descarga HTTP por frame)
-                bool downloadedThisFrame = false;
+                // Pre-cargar imagenes en background de tarjetas visibles (asincrono y no bloqueante)
                 int startR = std::max(0, selectedRowIdx - 1);
                 int endR = std::min(static_cast<int>(curCols.size()), selectedRowIdx + 3);
                 for (int r = startR; r < endR; ++r) {
@@ -745,9 +726,7 @@ int main(int argc, char* argv[]) {
                     int startC = std::max(0, selC - 2);
                     int endC = std::min(static_cast<int>(curCols[r].items.size()), selC + 6);
                     for (int c = startC; c < endC; ++c) {
-                        if (ensureTileCover(curCols[r].items[c], !downloadedThisFrame)) {
-                            downloadedThisFrame = true;
-                        }
+                        requestTileImages(curCols[r].items[c]);
                     }
                 }
 
@@ -826,12 +805,8 @@ int main(int argc, char* argv[]) {
             }
 
             case AppState::GameDetail: {
-                // Descargar bajo demanda las portadas de "También te puede interesar" (1 por frame)
-                bool simDownloaded = false;
-                for (auto& sim : activeGameForDetailAndStream.similarGames) {
-                    if (ensureTileCover(sim, !simDownloaded)) {
-                        simDownloaded = true;
-                    }
+                for (const auto& sim : activeGameForDetailAndStream.similarGames) {
+                    requestTileImages(sim);
                 }
 
                 // Circulo (O) -> Volver al Catalogo en la misma fila y posicion
@@ -880,7 +855,12 @@ int main(int argc, char* argv[]) {
                 if (pressedNow & luna::input::PAD_CROSS) {
                     if (detailZone == 0) {
                         if (detailBtnIdx == 0) {
-                            startCloudGameSession(activeGameForDetailAndStream);
+                            if (activeGameForDetailAndStream.isEntitled) {
+                                startCloudGameSession(activeGameForDetailAndStream);
+                            } else {
+                                std::string price = activeGameForDetailAndStream.secondaryButtonText.empty() ? "9,99 â¬/mes" : activeGameForDetailAndStream.secondaryButtonText;
+                                g_lastStatusText = "Este juego requiere suscripcion a Luna Premium (" + price + ").";
+                            }
                         } else {
                             appState = AppState::Catalog;
                         }
@@ -1141,6 +1121,7 @@ int main(int argc, char* argv[]) {
     padMgr.shutdown();
     audio.shutdown();
     display.shutdown();
+    luna::util::ImageLoader::instance().shutdown();
     luna::net::HttpClient::shutdown();
 
     std::printf("[Main] Cierre ordenado completado con exito.\n");

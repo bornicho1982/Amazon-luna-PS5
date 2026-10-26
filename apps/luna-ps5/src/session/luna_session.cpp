@@ -216,11 +216,24 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     if (coverUrl.empty()) coverUrl = pdata["tileImageLandscape"].asString();
     if (coverUrl.empty()) coverUrl = pdata["imageLandscape"].asString();
 
-    std::string backdropUrl = pdata["imageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["focusedImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["tileImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImage"].asString();
+    std::string backdropUrl = pdata["focusedImageLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["focusedImage"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["backgroundFeatureLandscape"].asString();
     if (backdropUrl.empty()) backdropUrl = pdata["backgroundImageLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["tileImageLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["imageLandscape"].asString();
+    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImage"].asString();
+
+    std::string logoUrl = pdata["productIcon"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["iconUrl"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["logoUrl"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["titleLogoUrl"].asString();
+
+    std::string subtitle = pdata["primaryText"].asString();
+    if (subtitle.empty()) subtitle = pdata["subtitle"].asString();
+
+    std::string btnText = pdata["buttonText"].asString();
+    if (btnText.empty()) btnText = "MÃ¡s informaciÃ³n";
 
     std::string synopsis = pdata["primaryText"].asString();
     if (synopsis.empty()) synopsis = pdata["description"].asString();
@@ -261,6 +274,9 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     outTile.category = category;
     outTile.coverUrl = coverUrl;
     outTile.backdropUrl = backdropUrl;
+    outTile.logoUrl = logoUrl;
+    outTile.subtitle = subtitle;
+    outTile.buttonText = btnText;
 
     uint32_t colColor = kCardColors[colorIdx % 12];
     outTile.badgeColor = colColor;
@@ -649,9 +665,59 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
                     std::string portUrl = pdata["tileImagePortrait"].asString();
                     if (!portUrl.empty() && inoutTile->coverUrl.empty()) inoutTile->coverUrl = portUrl;
 
-                    std::string landUrl = pdata["tileImageLandscape"].asString();
-                    if (landUrl.empty()) landUrl = pdata["backgroundImageLandscape"].asString();
+                    std::string landUrl = pdata["backgroundImageLandscape"].asString();
+                    if (landUrl.empty()) landUrl = pdata["tileImageLandscape"].asString();
+                    if (landUrl.empty()) landUrl = pdata["imageLandscape"].asString();
                     if (!landUrl.empty()) inoutTile->backdropUrl = landUrl;
+
+                    std::string logo = pdata["productIcon"].asString();
+                    if (logo.empty()) logo = pdata["iconUrl"].asString();
+                    if (!logo.empty()) inoutTile->logoUrl = logo;
+
+                    std::string ageCat = pdata["ageRating"]["categoryId"].asString();
+                    if (!ageCat.empty()) inoutTile->pegiRating = ageCat;
+
+                    const auto& descArr = pdata["ageRating"]["contentDescription"];
+                    if (descArr.isArray()) {
+                        inoutTile->ageRatingDescriptors.clear();
+                        for (size_t d = 0; d < descArr.size(); ++d) {
+                            std::string dt = descArr[d].asString();
+                            if (!dt.empty()) inoutTile->ageRatingDescriptors.push_back(dt);
+                        }
+                    }
+                }
+
+                // 1b. Extraer botones y estado de subscripcion (collection_game_detail_buttons_*)
+                if (inoutTile && (wId.find("buttons") != std::string::npos || wType == "BUTTON_GROUP")) {
+                    const auto& swList = widget["widgets"];
+                    if (swList.isArray()) {
+                        for (size_t s = 0; s < swList.size(); ++s) {
+                            if (swList[s]["id"].asString().find("primary") != std::string::npos || s == 0) {
+                                JsonValue bp = JsonValue::parse(swList[s]["presentationData"].asString());
+                                std::string pri = bp["primaryText"].asString();
+                                std::string sec = bp["secondaryText"].asString();
+                                if (!pri.empty()) inoutTile->buttonText = pri;
+                                if (!sec.empty()) inoutTile->secondaryButtonText = sec;
+                            }
+                        }
+                    }
+                }
+
+                // 1c. Extraer trailer y capturas de pantalla 16:9 (collection_trailer_screenshots)
+                if (inoutTile && (wId == "collection_trailer_screenshots" || wId.find("trailer") != std::string::npos || wId.find("screenshot") != std::string::npos)) {
+                    const auto& swList = widget["widgets"];
+                    if (swList.isArray()) {
+                        inoutTile->screenshotUrls.clear();
+                        for (size_t s = 0; s < swList.size(); ++s) {
+                            JsonValue sp = JsonValue::parse(swList[s]["presentationData"].asString());
+                            std::string imgUrl = sp["imageUrl"].asString();
+                            if (imgUrl.empty()) imgUrl = sp["tileImageLandscape"].asString();
+                            if (imgUrl.empty()) imgUrl = sp["imageLandscape"].asString();
+                            if (!imgUrl.empty()) {
+                                inoutTile->screenshotUrls.push_back(imgUrl);
+                            }
+                        }
+                    }
                 }
 
                 // 2. Extraer generos reales desde collection_game_metadata_v2
@@ -780,9 +846,34 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
             }
         }
 
-        luna::util::CrashLogger::log("[LunaSession] resolveGameDetails exito: playToken len=%zu, buildId=%s, profileId=%s",
-                                     outPlayToken.size(), outBuildId.c_str(), outProfileId.c_str());
-        return !outPlayToken.empty();
+        if (!outPlayToken.empty()) {
+            if (inoutTile) {
+                inoutTile->isEntitled = true;
+                inoutTile->playToken = outPlayToken;
+                inoutTile->buildId = outBuildId;
+                inoutTile->buttonText = "â¶ Jugar ahora";
+                inoutTile->secondaryButtonText = "";
+                inoutTile->detailsLoaded = true;
+            }
+        } else {
+            if (inoutTile) {
+                inoutTile->isEntitled = false;
+                inoutTile->playToken.clear();
+                inoutTile->buildId.clear();
+                if (inoutTile->buttonText.empty() || inoutTile->buttonText == "â¶ Jugar ahora") {
+                    inoutTile->buttonText = "Incluido en Luna Premium";
+                }
+                if (inoutTile->secondaryButtonText.empty()) {
+                    inoutTile->secondaryButtonText = "9,99 â¬/mes";
+                }
+                inoutTile->detailsLoaded = true;
+            }
+        }
+
+        luna::util::CrashLogger::log("[LunaSession] resolveGameDetails exito: playToken len=%zu, buildId=%s, profileId=%s, entitled=%d",
+                                     outPlayToken.size(), outBuildId.c_str(), outProfileId.c_str(),
+                                     inoutTile ? (inoutTile->isEntitled ? 1 : 0) : -1);
+        return true;
     }
 
     return false;

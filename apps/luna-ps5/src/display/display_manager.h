@@ -12,6 +12,13 @@ namespace luna::display {
 struct GameTile {
     std::string id;
     std::string title;
+    std::string subtitle;
+    std::string buttonText = "â¶ Jugar ahora";
+    std::string secondaryButtonText = "";
+    bool isEntitled = true;
+    std::string playToken;
+    std::string buildId;
+
     std::string publisher;
     std::string developer;
     std::string releaseYear;
@@ -19,17 +26,22 @@ struct GameTile {
     std::string inputMethods = "Mando DualSense";
     std::string playerCount = "1 jugador";
     std::string metacritic;
-    std::string channelSubtext = "Incluido con Prime con Luna Estándar";
+    std::string channelSubtext = "Incluido con Prime";
     uint32_t badgeColor = 0xFF9146FF;
     std::string category = "LUNA+";
     std::string synopsis = "Disponible para jugar al instante en Amazon Luna Cloud.";
     uint32_t heroColor = 0xFF9146FF;
+
     std::string coverUrl;
     std::string backdropUrl;
+    std::string logoUrl;
+    std::vector<std::string> screenshotUrls;
+
     std::vector<uint8_t> coverRgba;
     int coverWidth = 0;
     int coverHeight = 0;
     std::string pegiRating = "PEGI 12";
+    std::vector<std::string> ageRatingDescriptors;
     bool detailsLoaded = false;
     std::vector<GameTile> similarGames;
 };
@@ -62,6 +74,10 @@ public:
     void drawText(int x, int y, int scale, const std::string& text, uint32_t colorArgb);
     void drawQrCode(int x, int y, int moduleScale, const std::string& text);
     void drawImage(int x, int y, int w, int h, const uint8_t* rgba, int imgW, int imgH);
+    void drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int imgW, int imgH);
+    void drawRoundedRect(int x, int y, int w, int h, int r, uint32_t colorArgb);
+    void drawRoundedBorder(int x, int y, int w, int h, int r, int thickness, uint32_t colorArgb);
+    void drawPillButton(int x, int y, int w, int h, const std::string& text, bool focused, const std::string& subtext = "");
 
     void drawLoginScreen(const std::string& publicCode,
                          const std::string& verificationUri,
