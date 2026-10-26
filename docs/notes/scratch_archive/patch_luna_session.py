@@ -1,119 +1,83 @@
-#!/usr/bin/env python3
-
-path = "apps/luna-ps5/src/session/luna_session.cpp"
-with open(path, "r", encoding="utf-8") as f:
+with open('apps/luna-ps5/src/session/luna_session.cpp', 'r', encoding='utf-8') as f:
     content = f.read()
 
-content = content.replace("\r\n", "\n")
+# 1. Update logoUrl in parseGameTileFromWidget
+old_logo = '''    std::string logoUrl = pdata["productIcon"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["iconUrl"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["logoUrl"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["titleLogoUrl"].asString();'''
 
-# 1. Update cleanGid check in parseGameTileFromWidget to allow rotator slides
-old_cleanGid = """    if (cleanGid.empty()) return false;"""
+new_logo = '''    std::string logoUrl = pdata["productIcon"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["titleLogo"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["logoImage"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["productLogo"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["iconUrl"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["logoUrl"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["titleLogoUrl"].asString();'''
 
-new_cleanGid = """    if (cleanGid.empty()) {
-        if (colId.find("featured_rotator") != std::string::npos || swType.find("ROTATOR") != std::string::npos) {
-            cleanGid = swId.empty() ? ("promo_" + std::to_string(colorIdx)) : swId;
-        } else {
-            return false;
+assert old_logo in content, 'old_logo not found'
+content = content.replace(old_logo, new_logo)
+
+# 2. Filter out non-games in rankings
+old_rank_end = '''        if (!row.items.empty()) {
+            collections.push_back(std::move(row));
+        }'''
+
+new_rank_end = '''        if (row.isRankings) {
+            auto it = std::remove_if(row.items.begin(), row.items.end(), [](const luna::display::GameTile& t) {
+                return t.title.find("Luna Premium") != std::string::npos ||
+                       t.id.find("luna_premium") != std::string::npos ||
+                       t.id.find("channel.") != std::string::npos ||
+                       t.id.find("promo_") != std::string::npos;
+            });
+            row.items.erase(it, row.items.end());
         }
-    }"""
 
-if old_cleanGid in content:
-    content = content.replace(old_cleanGid, new_cleanGid, 1)
-    print("cleanGid rotator fallback patched!")
-else:
-    print("cleanGid target not found!")
+        if (!row.items.empty()) {
+            collections.push_back(std::move(row));
+        }'''
 
-# 2. Update coverUrl and backdropUrl extraction in parseGameTileFromWidget
-old_images = """    std::string coverUrl = pdata["imagePortrait"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["tileImagePortrait"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["focusedImagePortrait"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["boxArtUrl"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["tileImageLandscape"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["imageLandscape"].asString();
+assert old_rank_end in content, 'old_rank_end not found'
+content = content.replace(old_rank_end, new_rank_end, 1)
 
-    std::string backdropUrl = pdata["focusedImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["focusedImage"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["backgroundFeatureLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["tileImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["imageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImage"].asString();"""
+# 3. Logo in resolveGameDetails
+old_res_logo = '''                    std::string logo = pdata["productIcon"].asString();
+                    if (logo.empty()) logo = pdata["iconUrl"].asString();
+                    if (!logo.empty()) inoutTile->logoUrl = logo;'''
 
-new_images = """    std::string coverUrl = pdata["imagePortrait"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["tileImagePortrait"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["focusedImagePortrait"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["backgroundFeaturePortrait"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["boxArtUrl"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["tileImageLandscape"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["imageLandscape"].asString();
-    if (coverUrl.empty()) coverUrl = pdata["imageUrl"].asString();
-    if (coverUrl.empty()) coverUrl = sw["imageUrl"].asString();
+new_res_logo = '''                    std::string logo = pdata["productIcon"].asString();
+                    if (logo.empty()) logo = pdata["titleLogo"].asString();
+                    if (logo.empty()) logo = pdata["logoImage"].asString();
+                    if (logo.empty()) logo = pdata["productLogo"].asString();
+                    if (logo.empty()) logo = pdata["iconUrl"].asString();
+                    if (logo.empty()) logo = pdata["logoUrl"].asString();
+                    if (logo.empty()) logo = pdata["titleLogoUrl"].asString();
+                    if (!logo.empty()) inoutTile->logoUrl = logo;'''
 
-    std::string backdropUrl = pdata["focusedImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["backgroundFeatureLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["focusedImage"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImage"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["backgroundImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["unfocusedImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["tileImageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["imageLandscape"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["imageUrl"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["heroImageUrl"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["bannerUrl"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["artUrl"].asString();
-    if (backdropUrl.empty()) backdropUrl = pdata["promoImageUrl"].asString();
-    if (backdropUrl.empty()) backdropUrl = sw["backgroundImage"].asString();
-    if (backdropUrl.empty()) backdropUrl = sw["imageUrl"].asString();
-    if (backdropUrl.empty()) backdropUrl = coverUrl;"""
+assert old_res_logo in content, 'old_res_logo not found'
+content = content.replace(old_res_logo, new_res_logo)
 
-if old_images in content:
-    content = content.replace(old_images, new_images, 1)
-    print("images extraction patched!")
-else:
-    print("images target not found!")
+# 4. Preload images in resolveGameDetails
+old_preload_req = '''        luna::util::CrashLogger::log("[LunaSession] resolveGameDetails exito: playToken len=%zu, buildId=%s, profileId=%s, entitled=%d",'''
 
-# 3. Add fallback backdrop logic in fetchPageCollections for hero rotator
-old_hero_insert = """    if (!heroCollection.items.empty()) {
-        collections.insert(collections.begin(), std::move(heroCollection));
-    }"""
-
-new_hero_insert = """    // Garantizar que ningún slide del Hero Banner se quede sin imagen de fondo
-    std::string fallbackHeroBackdrop;
-    for (const auto& h : heroCollection.items) {
-        if (!h.backdropUrl.empty()) {
-            fallbackHeroBackdrop = h.backdropUrl;
-            break;
-        }
-    }
-    if (fallbackHeroBackdrop.empty()) {
-        for (const auto& col : collections) {
-            for (const auto& item : col.items) {
-                if (!item.backdropUrl.empty()) {
-                    fallbackHeroBackdrop = item.backdropUrl;
-                    break;
-                }
+new_preload_req = '''        if (inoutTile) {
+            if (!inoutTile->logoUrl.empty()) {
+                luna::util::ImageLoader::instance().requestImage(inoutTile->logoUrl, luna::util::ImagePreset::ProductLogo);
             }
-            if (!fallbackHeroBackdrop.empty()) break;
-        }
-    }
-    if (!fallbackHeroBackdrop.empty()) {
-        for (auto& h : heroCollection.items) {
-            if (h.backdropUrl.empty()) {
-                h.backdropUrl = fallbackHeroBackdrop;
+            if (!inoutTile->backdropUrl.empty()) {
+                luna::util::ImageLoader::instance().requestImage(inoutTile->backdropUrl, luna::util::ImagePreset::PanoramicDetail);
+            }
+            for (const auto& sUrl : inoutTile->screenshotUrls) {
+                luna::util::ImageLoader::instance().requestImage(sUrl, luna::util::ImagePreset::ScreenshotThumbnail);
             }
         }
-    }
 
-    if (!heroCollection.items.empty()) {
-        collections.insert(collections.begin(), std::move(heroCollection));
-    }"""
+        luna::util::CrashLogger::log("[LunaSession] resolveGameDetails exito: playToken len=%zu, buildId=%s, profileId=%s, entitled=%d",'''
 
-if old_hero_insert in content:
-    content = content.replace(old_hero_insert, new_hero_insert, 1)
-    print("hero fallback backdrop patched!")
-else:
-    print("hero_insert target not found!")
+assert old_preload_req in content, 'old_preload_req not found'
+content = content.replace(old_preload_req, new_preload_req)
 
-with open(path, "w", encoding="utf-8") as f:
+with open('apps/luna-ps5/src/session/luna_session.cpp', 'w', encoding='utf-8') as f:
     f.write(content)
-print("luna_session.cpp updated!")
+
+print('Successfully patched luna_session.cpp')

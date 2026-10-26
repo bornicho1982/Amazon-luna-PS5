@@ -243,6 +243,9 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     if (backdropUrl.empty()) backdropUrl = coverUrl;
 
     std::string logoUrl = pdata["productIcon"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["titleLogo"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["logoImage"].asString();
+    if (logoUrl.empty()) logoUrl = pdata["productLogo"].asString();
     if (logoUrl.empty()) logoUrl = pdata["iconUrl"].asString();
     if (logoUrl.empty()) logoUrl = pdata["logoUrl"].asString();
     if (logoUrl.empty()) logoUrl = pdata["titleLogoUrl"].asString();
@@ -518,6 +521,16 @@ std::vector<luna::display::LunaCollection> LunaSessionClient::fetchPageCollectio
             }
         }
 
+        if (row.isRankings) {
+            auto it = std::remove_if(row.items.begin(), row.items.end(), [](const luna::display::GameTile& t) {
+                return t.title.find("Luna Premium") != std::string::npos ||
+                       t.id.find("luna_premium") != std::string::npos ||
+                       t.id.find("channel.") != std::string::npos ||
+                       t.id.find("promo_") != std::string::npos;
+            });
+            row.items.erase(it, row.items.end());
+        }
+
         if (!row.items.empty()) {
             collections.push_back(std::move(row));
         }
@@ -708,7 +721,12 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
                     if (!landUrl.empty()) inoutTile->backdropUrl = landUrl;
 
                     std::string logo = pdata["productIcon"].asString();
+                    if (logo.empty()) logo = pdata["titleLogo"].asString();
+                    if (logo.empty()) logo = pdata["logoImage"].asString();
+                    if (logo.empty()) logo = pdata["productLogo"].asString();
                     if (logo.empty()) logo = pdata["iconUrl"].asString();
+                    if (logo.empty()) logo = pdata["logoUrl"].asString();
+                    if (logo.empty()) logo = pdata["titleLogoUrl"].asString();
                     if (!logo.empty()) inoutTile->logoUrl = logo;
 
                     std::string ageCat = pdata["ageRating"]["categoryId"].asString();
@@ -912,6 +930,18 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
                     inoutTile->secondaryButtonText = "9,99 EUR/mes";
                 }
                 inoutTile->detailsLoaded = true;
+            }
+        }
+
+        if (inoutTile) {
+            if (!inoutTile->logoUrl.empty()) {
+                luna::util::ImageLoader::instance().requestImage(inoutTile->logoUrl, luna::util::ImagePreset::ProductLogo);
+            }
+            if (!inoutTile->backdropUrl.empty()) {
+                luna::util::ImageLoader::instance().requestImage(inoutTile->backdropUrl, luna::util::ImagePreset::PanoramicDetail);
+            }
+            for (const auto& sUrl : inoutTile->screenshotUrls) {
+                luna::util::ImageLoader::instance().requestImage(sUrl, luna::util::ImagePreset::ScreenshotThumbnail);
             }
         }
 

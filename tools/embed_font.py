@@ -1,10 +1,14 @@
-with open('apps/luna-ps5/assets/fonts/Inter-Bold.ttf', 'rb') as f:
+import shutil
+
+shutil.copy('docs/notes/scratch_archive/AmazonEmber_Bd.ttf', 'apps/luna-ps5/assets/fonts/AmazonEmber-Bold.ttf')
+
+with open('apps/luna-ps5/assets/fonts/AmazonEmber-Bold.ttf', 'rb') as f:
     data = f.read()
 
-print(f'Font size: {len(data)} bytes')
+print(f'Amazon Ember Bold size: {len(data)} bytes')
 
 with open('apps/luna-ps5/src/display/font_inter_bold.h', 'w') as out:
-    out.write('// Auto-generated Inter-Bold font data\n')
+    out.write('// Auto-generated Amazon Ember Bold font data\n')
     out.write('#pragma once\n\n')
     out.write('#include <cstddef>\n\n')
     out.write(f'constexpr size_t kInterBoldFontSize = {len(data)};\n')
@@ -18,4 +22,4 @@ with open('apps/luna-ps5/src/display/font_inter_bold.cpp', 'w') as out:
         out.write('  ' + ', '.join(f'0x{b:02x}' for b in chunk) + ',\n')
     out.write('};\n')
 
-print('Generated font_inter_bold.h and .cpp successfully')
+print('Generated font_inter_bold.h and font_inter_bold.cpp with Amazon Ember Bold successfully!')
