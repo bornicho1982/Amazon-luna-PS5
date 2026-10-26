@@ -124,6 +124,11 @@ public:
                               int similarSelectedIdx,
                               uint64_t frameCount);
 
+    void drawNativeEngineWaitingScreen(const std::string& localWebUrl,
+                                       const std::string& lanWebUrl,
+                                       const std::string& statusMsg,
+                                       uint64_t frameCount);
+
     void drawStreamingStatusScreen(const GameTile& game,
                                    const std::string& statusText,
                                    const std::string& statsText,

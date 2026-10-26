@@ -106,19 +106,19 @@ bool HttpClient::init() {
 
     sceNetInit();
 
-    g_netPoolId = sceNetPoolCreate("luna_net", 256 * 1024, 0);
+    g_netPoolId = sceNetPoolCreate("luna_net", 1024 * 1024, 0);
     if (g_netPoolId < 0) {
         char dynamicName[32];
         std::snprintf(dynamicName, sizeof(dynamicName), "luna_%u", static_cast<unsigned>(time(nullptr) & 0xFFFF));
-        g_netPoolId = sceNetPoolCreate(dynamicName, 256 * 1024, 0);
+        g_netPoolId = sceNetPoolCreate(dynamicName, 1024 * 1024, 0);
     }
 
-    g_sslCtxId = sceSslInit(512 * 1024);
+    g_sslCtxId = sceSslInit(1024 * 1024);
     if (g_sslCtxId < 0) {
-        g_sslCtxId = sceSslInit(256 * 1024);
+        g_sslCtxId = sceSslInit(512 * 1024);
     }
 
-    g_httpCtxId = sceHttpInit(g_netPoolId, g_sslCtxId, 512 * 1024);
+    g_httpCtxId = sceHttpInit(g_netPoolId, g_sslCtxId, 1024 * 1024);
 
     if (g_httpCtxId >= 0) {
         g_tmplId = sceHttpCreateTemplate(g_httpCtxId, "Luna-Client/1.0", SCE_HTTP_VERSION_1_1, 1);

@@ -35,6 +35,22 @@
 #include "util/image_loader.h"
 #include "util/image_loader.h"
 
+#if defined(LUNA_TARGET_PS5)
+extern "C" {
+    int sceSystemServiceLaunchWebBrowser(const char *uri, void *reserved);
+}
+#endif
+
+static void launchPs5WebBrowser(const std::string& url) {
+#if defined(LUNA_TARGET_PS5)
+    luna::util::CrashLogger::log("[Main] Lanzando navegador web de PS5: %s", url.c_str());
+    int rc = sceSystemServiceLaunchWebBrowser(url.c_str(), nullptr);
+    luna::util::CrashLogger::log("[Main] sceSystemServiceLaunchWebBrowser retorno: 0x%08X", rc);
+#else
+    (void)url;
+#endif
+}
+
 namespace {
 std::atomic<bool> g_running{true};
 
@@ -260,6 +276,34 @@ int main(int argc, char* argv[]) {
     } else {
         appState = AppState::LoginCBL;
     }
+
+    // Obtener IP LAN local para mostrarla en la pantalla de espera
+    std::string lanIp = "192.168.18.21";
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock >= 0) {
+        sockaddr_in serv;
+        std::memset(&serv, 0, sizeof(serv));
+        serv.sin_family = AF_INET;
+        serv.sin_addr.s_addr = inet_addr("8.8.8.8");
+        serv.sin_port = htons(53);
+        if (connect(sock, (const sockaddr*)&serv, sizeof(serv)) == 0) {
+            sockaddr_in name;
+            socklen_t namelen = sizeof(name);
+            if (getsockname(sock, (sockaddr*)&name, &namelen) == 0) {
+                char buf[INET_ADDRSTRLEN];
+                if (inet_ntop(AF_INET, &name.sin_addr, buf, sizeof(buf))) {
+                    lanIp = buf;
+                }
+            }
+        }
+#if defined(_WIN32)
+        closesocket(sock);
+#else
+        close(sock);
+#endif
+    }
+    std::string localWebUrl = "http://127.0.0.1:8080/luna";
+    std::string lanWebUrl = "http://" + lanIp + ":8080/luna";
 
     // 8. Servidor HTTP local Web Bridge (http://127.0.0.1:8080/luna)
     luna::auth::AuthServer authServer;
@@ -498,6 +542,7 @@ int main(int argc, char* argv[]) {
 
     if (cbl.isAuthenticated()) {
         loadCatalogIfAuthenticated();
+        launchPs5WebBrowser(localWebUrl);
     }
 
     luna::display::GameTile currentDetailGame = games[0];
@@ -560,6 +605,7 @@ int main(int argc, char* argv[]) {
         videoStreaming.store(false);
         g_lastStatusText = reason;
         appState = AppState::Catalog;
+        launchPs5WebBrowser(localWebUrl);
     };
 
     auto startCloudGameSession = [&](const luna::display::GameTile& targetTile) {
@@ -658,16 +704,17 @@ int main(int argc, char* argv[]) {
                 cbl.tick();
 
                 if (cbl.isAuthenticated()) {
-                    luna::util::CrashLogger::log("[Main] Usuario autenticado con exito. Cargando catalogo...");
+                    luna::util::CrashLogger::log("[Main] Usuario autenticado con exito. Abriendo Web...");
                     display.drawLoginScreen(
                         cbl.getPublicCode(),
                         cbl.getVerificationUri(),
                         cbl.getQrSize(),
                         [&cbl](int x, int y) { return cbl.getQrModule(x, y); },
-                        "Conectado a Amazon. Cargando tu catalogo de Luna...",
+                        "Conectado a Amazon. Abriendo interfaz Web de Luna...",
                         frameCount
                     );
                     loadCatalogIfAuthenticated();
+                    launchPs5WebBrowser(localWebUrl);
                     appState = AppState::Catalog;
                     break;
                 }
@@ -684,382 +731,34 @@ int main(int argc, char* argv[]) {
             }
 
             case AppState::Catalog: {
-                if (profileMenuOpen) {
-                    if (navElapsedMs > 155) {
-                        bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
-                        bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
-                        if (moveUp) {
-                            profileMenuIdx = (profileMenuIdx + 2) % 3;
-                            lastNavTime = now;
-                        } else if (moveDown) {
-                            profileMenuIdx = (profileMenuIdx + 1) % 3;
-                            lastNavTime = now;
-                        }
-                    }
+                if (pressedNow & luna::input::PAD_CROSS) {
+                    luna::util::CrashLogger::log("[Main] [X] pulsado: reabriendo Web de Amazon Luna en PS5");
+                    launchPs5WebBrowser(localWebUrl);
+                } else if (pressedNow & luna::input::PAD_SQUARE) {
+                    luna::util::CrashLogger::log("[Main] [CUADRADO] pulsado: desvinculando cuenta de Amazon Luna");
+                    cbl.logout();
+                    catalogFetched = false;
+                    g_catalogDiagnostic.clear();
+                    g_lastStatusText = "Cuenta desvinculada. Escanea el nuevo codigo QR para vincular.";
+                    appState = AppState::LoginCBL;
+                    break;
+                } else if (pressedNow & luna::input::PAD_OPTIONS) {
+                    luna::util::CrashLogger::log("[Main] [OPTIONS] pulsado: saliendo de la aplicacion");
+                    g_running = false;
+                    break;
+                }
 
-                    if (pressedNow & luna::input::PAD_CIRCLE) {
-                        profileMenuOpen = false;
-                    } else if (pressedNow & luna::input::PAD_CROSS) {
-                        if (profileMenuIdx == 0) {
-                            luna::util::CrashLogger::log("[Main] Recargando catalogo desde menu de perfil...");
-                            catalogFetched = false;
-                            loadCatalogIfAuthenticated();
-                            profileMenuOpen = false;
-                        } else if (profileMenuIdx == 1) {
-                            luna::util::CrashLogger::log("[Main] Cerrando sesion desde menu de perfil...");
-                            cbl.logout();
-                            catalogFetched = false;
-                            g_catalogDiagnostic.clear();
-                            g_lastStatusText.clear();
-                            appState = AppState::LoginCBL;
-                            profileMenuOpen = false;
-                            break;
-                        } else if (profileMenuIdx == 2) {
-                            profileMenuOpen = false;
-                        }
-                    }
-                } else if (searchOpen) {
-                    if (pressedNow & luna::input::PAD_CIRCLE) {
-                        if (searchZone == 1) {
-                            searchZone = 0;
-                        } else {
-                            searchOpen = false;
-                        }
-                    }
-
-                    if (searchZone == 0) {
-                        if (pressedNow & luna::input::PAD_L1) {
-                            searchLetterIdx = (searchLetterIdx + 28 - 5) % 28;
-                            updateFilteredGames();
-                            lastNavTime = now;
-                        } else if (pressedNow & luna::input::PAD_R1) {
-                            searchLetterIdx = (searchLetterIdx + 5) % 28;
-                            updateFilteredGames();
-                            lastNavTime = now;
-                        }
-
-                        if (navElapsedMs > 155) {
-                            bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
-                            bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
-                            bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
-
-                            if (moveLeft) {
-                                searchLetterIdx = (searchLetterIdx + 28 - 1) % 28;
-                                updateFilteredGames();
-                                lastNavTime = now;
-                            } else if (moveRight) {
-                                searchLetterIdx = (searchLetterIdx + 1) % 28;
-                                updateFilteredGames();
-                                lastNavTime = now;
-                            } else if (moveDown && !filteredGames.empty()) {
-                                searchZone = 1;
-                                searchGridIdx = 0;
-                                lastNavTime = now;
-                            }
-                        }
-
-                        if ((pressedNow & luna::input::PAD_CROSS) && !filteredGames.empty()) {
-                            searchZone = 1;
-                            searchGridIdx = 0;
-                        }
-                    } else if (searchZone == 1) {
-                        int numF = static_cast<int>(filteredGames.size());
-                        if (navElapsedMs > 155) {
-                            bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
-                            bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
-                            bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
-                            bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
-
-                            if (moveUp) {
-                                if (searchGridIdx < 6) {
-                                    searchZone = 0;
-                                } else {
-                                    searchGridIdx -= 6;
-                                }
-                                lastNavTime = now;
-                            } else if (moveDown) {
-                                if (searchGridIdx + 6 < numF) {
-                                    searchGridIdx += 6;
-                                    lastNavTime = now;
-                                }
-                            } else if (moveLeft) {
-                                if (searchGridIdx > 0) {
-                                    searchGridIdx--;
-                                    lastNavTime = now;
-                                }
-                            } else if (moveRight) {
-                                if (searchGridIdx + 1 < numF) {
-                                    searchGridIdx++;
-                                    lastNavTime = now;
-                                }
-                            }
-                        }
-
-                        if ((pressedNow & luna::input::PAD_CROSS) && searchGridIdx >= 0 && searchGridIdx < numF) {
-                            openGameDetail(filteredGames[searchGridIdx]);
-                            searchOpen = false;
-                            break;
-                        }
-                    }
-                } else {
-                    syncRowSelectionSize();
-
-                    // Cambio rapido de pestanas superiores con L2 / R2 desde cualquier zona
-                    if (pressedNow & luna::input::PAD_L2) {
-                        activeTabIdx = (activeTabIdx + static_cast<int>(kNavTabs.size()) - 1) % static_cast<int>(kNavTabs.size());
-                        navColIdx = activeTabIdx;
-                        selectedRowIdx = 0;
-                        heroBtnIdx = 0;
-                        rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
-                        lastNavTime = now;
-                    }
-                    if (pressedNow & luna::input::PAD_R2) {
-                        activeTabIdx = (activeTabIdx + 1) % static_cast<int>(kNavTabs.size());
-                        navColIdx = activeTabIdx;
-                        selectedRowIdx = 0;
-                        heroBtnIdx = 0;
-                        rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
-                        lastNavTime = now;
-                    }
-
-                    syncRowSelectionSize();
-                    auto& activeCols = tabCollections[activeTabIdx];
-                    bool onHeroRow = (!activeCols.empty() && selectedRowIdx == 0 && activeCols[0].isHeroRotator);
-
-                    // L1 / R1: En Hero Rotator cambia de diapositiva; en Swimlanes salta 5 tarjetas
-                    if (pressedNow & luna::input::PAD_L1) {
-                        if (!activeCols.empty() && selectedRowIdx < static_cast<int>(activeCols.size())) {
-                            int step = onHeroRow ? 1 : 5;
-                            int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
-                            if (total > 0) {
-                                if (onHeroRow) {
-                                    rowSelectedCol[0] = (rowSelectedCol[0] + total - 1) % total;
-                                } else {
-                                    rowSelectedCol[selectedRowIdx] = std::max(0, rowSelectedCol[selectedRowIdx] - step);
-                                }
-                            }
-                        }
-                        lastNavTime = now;
-                    }
-                    if (pressedNow & luna::input::PAD_R1) {
-                        if (!activeCols.empty() && selectedRowIdx < static_cast<int>(activeCols.size())) {
-                            int step = onHeroRow ? 1 : 5;
-                            int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
-                            if (total > 0) {
-                                if (onHeroRow) {
-                                    rowSelectedCol[0] = (rowSelectedCol[0] + 1) % total;
-                                } else {
-                                    rowSelectedCol[selectedRowIdx] = std::min(total - 1, rowSelectedCol[selectedRowIdx] + step);
-                                }
-                            }
-                        }
-                        lastNavTime = now;
-                    }
-
-                    // Navegacion 2D
-                    if (navElapsedMs > 155) {
-                        bool moved = false;
-                        bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
-                        bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
-                        bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
-                        bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
-
-                        if (moveUp) {
-                            if (focusZone == 1) {
-                                if (selectedRowIdx > 0) {
-                                    selectedRowIdx--;
-                                    moved = true;
-                                } else {
-                                    focusZone = 0; // Subir a la Barra de Navegacion Superior
-                                    navColIdx = activeTabIdx;
-                                    moved = true;
-                                }
-                            }
-                        } else if (moveDown) {
-                            if (focusZone == 0) {
-                                focusZone = 1;
-                                selectedRowIdx = 0;
-                                moved = true;
-                            } else if (selectedRowIdx + 1 < static_cast<int>(activeCols.size())) {
-                                selectedRowIdx++;
-                                moved = true;
-                            }
-                        } else if (moveLeft) {
-                            if (focusZone == 0) {
-                                navColIdx = (navColIdx + 7 - 1) % 7;
-                                if (navColIdx < static_cast<int>(kNavTabs.size())) {
-                                    activeTabIdx = navColIdx;
-                                    selectedRowIdx = 0;
-                                    rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
-                                }
-                                moved = true;
-                            } else if (onHeroRow) {
-                                if (heroBtnIdx > 0) {
-                                    heroBtnIdx = 0;
-                                    moved = true;
-                                } else {
-                                    int total = static_cast<int>(activeCols[0].items.size());
-                                    if (total > 0) {
-                                        rowSelectedCol[0] = (rowSelectedCol[0] + total - 1) % total;
-                                        moved = true;
-                                    }
-                                }
-                            } else if (!activeCols.empty()) {
-                                int& col = rowSelectedCol[selectedRowIdx];
-                                if (col > 0) {
-                                    col--;
-                                    moved = true;
-                                }
-                            }
-                        } else if (moveRight) {
-                            if (focusZone == 0) {
-                                navColIdx = (navColIdx + 1) % 7;
-                                if (navColIdx < static_cast<int>(kNavTabs.size())) {
-                                    activeTabIdx = navColIdx;
-                                    selectedRowIdx = 0;
-                                    rowSelectedCol.assign(tabCollections[activeTabIdx].size(), 0);
-                                }
-                                moved = true;
-                            } else if (onHeroRow) {
-                                if (heroBtnIdx < 1) {
-                                    heroBtnIdx = 1;
-                                    moved = true;
-                                } else {
-                                    int total = static_cast<int>(activeCols[0].items.size());
-                                    if (total > 0) {
-                                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % total;
-                                        heroBtnIdx = 0;
-                                        moved = true;
-                                    }
-                                }
-                            } else if (!activeCols.empty()) {
-                                int& col = rowSelectedCol[selectedRowIdx];
-                                int total = static_cast<int>(activeCols[selectedRowIdx].items.size());
-                                if (col + 1 < total) {
-                                    col++;
-                                    moved = true;
-                                }
-                            }
-                        }
-
-                        if (moved) {
-                            lastNavTime = now;
-                            if (g_lastStatusText.find("Error") == std::string::npos &&
-                                g_lastStatusText.find("Fallo") == std::string::npos) {
-                                g_lastStatusText.clear();
-                            }
-                        }
-                    }
-
-                    syncRowSelectionSize();
-                    auto& curCols = tabCollections[activeTabIdx];
-
-                    // Pre-cargar imagenes en background de tarjetas visibles
-                    int startR = std::max(0, selectedRowIdx - 1);
-                    int endR = std::min(static_cast<int>(curCols.size()), selectedRowIdx + 3);
-                    for (int r = startR; r < endR; ++r) {
-                        int selC = (r < static_cast<int>(rowSelectedCol.size())) ? rowSelectedCol[r] : 0;
-                        int startC = std::max(0, selC - 2);
-                        int endC = std::min(static_cast<int>(curCols[r].items.size()), selC + 6);
-                        for (int c = startC; c < endC; ++c) {
-                            requestTileImages(curCols[r].items[c]);
-                        }
-                    }
-
-                    // Determinar el juego actualmente enfocado
-                    const luna::display::GameTile* focusedGame = nullptr;
-                    if (!curCols.empty() && selectedRowIdx >= 0 && selectedRowIdx < static_cast<int>(curCols.size())) {
-                        const auto& rowItems = curCols[selectedRowIdx].items;
-                        int selC = rowSelectedCol[selectedRowIdx];
-                        if (!rowItems.empty() && selC >= 0 && selC < static_cast<int>(rowItems.size())) {
-                            focusedGame = &rowItems[selC];
-                        }
-                    }
-
-                    // Accion con (X):
-                    if (pressedNow & luna::input::PAD_CROSS) {
-                        if (focusZone == 0) {
-                            if (navColIdx < static_cast<int>(kNavTabs.size())) {
-                                activeTabIdx = navColIdx;
-                                focusZone = 1;
-                                selectedRowIdx = 0;
-                            } else if (navColIdx == 5) { // Buscar
-                                searchOpen = true;
-                                searchZone = 0;
-                                searchLetterIdx = 0;
-                                updateFilteredGames();
-                            } else if (navColIdx == 6) { // Perfil
-                                profileMenuOpen = true;
-                                profileMenuIdx = 0;
-                            }
-                        } else if (focusedGame) {
-                            bool isHeroPlayNow = (selectedRowIdx == 0 && curCols[0].isHeroRotator && heroBtnIdx == 0);
-                            if (isHeroPlayNow) {
-                                startCloudGameSession(*focusedGame);
-                            } else {
-                                openGameDetail(*focusedGame);
-                            }
-                            break;
-                        }
-                    }
-
-                    // Atajo directo con [CUADRADO]
-                    if ((pressedNow & luna::input::PAD_SQUARE) && focusedGame && focusZone == 1) {
-                        startCloudGameSession(*focusedGame);
-                        break;
-                    }
-
-                    // Triangulo -> Mostrar URL del Puente Web Oficial en LAN
-                    if (pressedNow & luna::input::PAD_TRIANGLE) {
-                        g_lastStatusText = "PUENTE WEB ACTIVO: Abre http://192.168.18.21:8080/luna en navegador PS5/PC/Movil";
-                        luna::util::CrashLogger::log("[Main] %s", g_lastStatusText.c_str());
-                    }
-                } // fin (!profileMenuOpen && !searchOpen)
-
-                syncRowSelectionSize();
-                auto& curCols = tabCollections[activeTabIdx];
-
-                const luna::display::GameTile* focusedGame = nullptr;
-                if (!curCols.empty() && selectedRowIdx >= 0 && selectedRowIdx < static_cast<int>(curCols.size())) {
-                    const auto& rowItems = curCols[selectedRowIdx].items;
-                    int selC = rowSelectedCol[selectedRowIdx];
-                    if (!rowItems.empty() && selC >= 0 && selC < static_cast<int>(rowItems.size())) {
-                        focusedGame = &rowItems[selC];
+                std::string statusMsg = g_lastStatusText;
+                if (statusMsg.empty()) {
+                    const auto& prof = sessionClient.getPlayerProfile();
+                    if (!prof.displayName.empty()) {
+                        statusMsg = "Conectado a Amazon como " + prof.displayName + " | Motor nativo en espera";
+                    } else {
+                        statusMsg = "Conectado a Amazon Luna | Motor nativo en espera";
                     }
                 }
 
-                std::string catalogStatus;
-                if (!g_lastStatusText.empty()) {
-                    catalogStatus = g_lastStatusText;
-                } else if (!g_catalogDiagnostic.empty()) {
-                    catalogStatus = g_catalogDiagnostic;
-                } else if (focusedGame) {
-                    catalogStatus = "Seleccionado: " + focusedGame->title + " (" + focusedGame->publisher +
-                                    " - " + focusedGame->pegiRating + ")";
-                } else {
-                    catalogStatus = "Explora tu catalogo de Amazon Luna";
-                }
-
-                display.drawLunaHomeScreen(
-                    curCols,
-                    kNavTabs,
-                    activeTabIdx,
-                    focusZone,
-                    navColIdx,
-                    selectedRowIdx,
-                    rowSelectedCol,
-                    heroBtnIdx,
-                    sessionClient.getPlayerProfile(),
-                    padMgr.isConnected(),
-                    catalogStatus,
-                    frameCount,
-                    profileMenuOpen,
-                    profileMenuIdx,
-                    searchOpen,
-                    searchLetterIdx,
-                    searchGridIdx,
-                    filteredGames
-                );
+                display.drawNativeEngineWaitingScreen(localWebUrl, lanWebUrl, statusMsg, frameCount);
                 break;
             }
 

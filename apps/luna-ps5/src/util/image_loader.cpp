@@ -265,12 +265,8 @@ ImageLoader::~ImageLoader() {
 }
 
 void ImageLoader::init() {
-    if (running_) return;
-    if (workerThread_.joinable()) {
-        workerThread_.join();
-    }
-    running_ = true;
-    workerThread_ = std::thread(&ImageLoader::workerLoop, this);
+    // Deactivated in direct web bridge mode: zero image threads in C++
+    running_ = false;
 }
 
 void ImageLoader::shutdown() {
