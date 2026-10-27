@@ -207,8 +207,9 @@ void PadManager::poll() {
     if ((b & 0x0100) || raw.l2 > 30) mapped |= PAD_L2;
     if ((b & 0x0200) || raw.r2 > 30) mapped |= PAD_R2;
 
-    auto applyDeadzone = [](int val) -> int16_t {
-        if (val > -1800 && val < 1800) return 0;
+    int dz = deadzoneThreshold_;
+    auto applyDeadzone = [dz](int val) -> int16_t {
+        if (val > -dz && val < dz) return 0;
         if (val < -32768) return -32768;
         if (val > 32767) return 32767;
         return static_cast<int16_t>(val);
@@ -236,6 +237,7 @@ bool PadManager::isExitComboPressed() const {
 }
 
 void PadManager::setVibration(uint8_t largeMotor, uint8_t smallMotor) {
+    if (!vibrationEnabled_) return;
 #if defined(LUNA_TARGET_PS5)
     if (padHandle_ >= 0) {
         ScePadVibrationParam param{largeMotor, smallMotor};

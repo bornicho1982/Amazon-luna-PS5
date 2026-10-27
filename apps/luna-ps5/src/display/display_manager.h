@@ -36,6 +36,7 @@ struct GameTile {
     std::string backdropUrl;
     std::string logoUrl;
     std::vector<std::string> screenshotUrls;
+    std::string videoUrl;
 
     std::vector<uint8_t> coverRgba;
     int coverWidth = 0;
@@ -129,6 +130,14 @@ public:
                                        const std::string& lanWebUrl,
                                        const std::string& statusMsg,
                                        uint64_t frameCount);
+
+    void drawSettingsScreen(int selectedItemIdx,
+                            const std::string& statusText,
+                            uint64_t frameCount);
+
+    void drawMediaViewerScreen(const GameTile& game,
+                               int currentMediaIdx,
+                               uint64_t frameCount);
 
     void drawStreamingStatusScreen(const GameTile& game,
                                    const std::string& statusText,

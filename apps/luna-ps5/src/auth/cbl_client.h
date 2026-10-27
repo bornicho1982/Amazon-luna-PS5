@@ -37,7 +37,8 @@ public:
     bool isAuthenticated() const { return m_state == CblState::Authenticated; }
 
     std::string getPublicCode() const { return m_publicCode; }
-    std::string getVerificationUri() const { return "amazon.com/code"; }
+    void setRegionDomain(const std::string& domain);
+    std::string getVerificationUri() const { return m_verificationUri; }
     std::string getAccessToken() const { return m_tokens.accessToken; }
     std::string getCustomerId() const { return m_tokens.customerId; }
     std::string getDeviceSerial() const { return m_deviceSerial; }
@@ -58,6 +59,8 @@ private:
     std::string m_storageDir;
     std::string m_storagePath;
     std::string m_deviceSerial;
+    std::string m_domain = "amazon.es";
+    std::string m_verificationUri = "amazon.es/code";
     CblState m_state = CblState::Uninitialized;
     AccountTokens m_tokens;
 

@@ -41,6 +41,7 @@ public:
     const std::vector<luna::display::LunaCollection>& getHomeCollections() const { return m_homeCollections; }
     const std::vector<luna::display::LunaCollection>& getGameNightCollections() const { return m_gameNightCollections; }
     const std::vector<luna::display::LunaCollection>& getLibraryCollections() const { return m_libraryCollections; }
+    const std::vector<luna::display::LunaCollection>& getRemotePlayCollections() const { return m_remotePlayCollections; }
     const luna::display::PlayerProfileInfo& getPlayerProfile() const { return m_playerProfile; }
 
     bool preloadGameDetails(luna::display::GameTile& tile,
@@ -64,6 +65,7 @@ public:
     SessionState getState() const { return m_state; }
     const GameSessionInfo& getSessionInfo() const { return m_info; }
     std::string getStatusMessage() const { return m_statusMessage; }
+    std::vector<luna::display::LunaCollection> fetchRemotePlayCollections(const std::string& accessToken, const std::string& deviceSerial = "");
 
 private:
     bool pollJob();
@@ -97,6 +99,7 @@ private:
     std::vector<luna::display::LunaCollection> m_homeCollections;
     std::vector<luna::display::LunaCollection> m_gameNightCollections;
     std::vector<luna::display::LunaCollection> m_libraryCollections;
+    std::vector<luna::display::LunaCollection> m_remotePlayCollections;
     luna::display::PlayerProfileInfo m_playerProfile;
 
     int m_pollAttempts = 0;

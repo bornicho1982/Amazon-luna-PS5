@@ -29,6 +29,8 @@
 #include "session/luna_session.h"
 #include "net/http_client.h"
 #include "display/display_manager.h"
+#include "util/settings.h"
+#include "util/i18n.h"
 #include "audio/audio_manager.h"
 #include "media/media_decoder.h"
 #include "util/crash_logger.h"
@@ -45,6 +47,8 @@ enum class AppState {
     LoginCBL,
     Catalog,
     GameDetail,
+    MediaViewer,
+    Settings,
     StartingSession,
     Streaming
 };
@@ -252,6 +256,15 @@ int main(int argc, char* argv[]) {
         storageDir = "/data/psbox";
     }
 #endif
+
+    std::string settingsFilePath = storageDir + "/settings.json";
+    luna::util::AppSettings::instance().load(settingsFilePath);
+    padMgr.setVibrationEnabled(luna::util::AppSettings::instance().vibrationEnabled);
+    padMgr.setDeadzonePercent(luna::util::AppSettings::instance().deadzonePercent);
+    cbl.setRegionDomain(luna::util::I18n::getCurrentRegion().amazonDomain);
+
+    int mediaViewerIdx = 0;
+    int settingsSelectedIdx = 0;
 
     cbl.init(storageDir);
     if (cbl.isAuthenticated()) {
@@ -528,30 +541,18 @@ int main(int argc, char* argv[]) {
             tabCollections[2].push_back(emptyCol);
         }
 
-        // Tab 3: Canales / Suscripciones / A-Z
-        tabCollections[3].clear();
-        for (const auto& col : tabCollections[0]) {
-            if (col.id.find("channel") != std::string::npos ||
-                col.id.find("subscription") != std::string::npos ||
-                col.id.find("prime") != std::string::npos ||
-                col.id.find("ubisoft") != std::string::npos ||
-                col.id.find("gog") != std::string::npos ||
-                col.id.find("luna_plus") != std::string::npos ||
-                col.title.find("Prime") != std::string::npos ||
-                col.title.find("Ubisoft") != std::string::npos ||
-                col.title.find("GOG") != std::string::npos ||
-                col.title.find("Luna+") != std::string::npos ||
-                col.title.find("Canal") != std::string::npos ||
-                col.title.find("Suscrip") != std::string::npos) {
-                tabCollections[3].push_back(col);
-            }
+        // Tab 2: Desactivar hero rotator en Mi espacio
+        for (auto& c : tabCollections[2]) {
+            c.isHeroRotator = false;
         }
+
+        // Tab 3: Remote Play oficial (Ubisoft Connect, GOG Galaxy, Electronic Arts)
+        tabCollections[3] = sessionClient.getRemotePlayCollections();
         if (tabCollections[3].empty()) {
-            luna::display::LunaCollection azRow;
-            azRow.id = "catalog_az";
-            azRow.title = "Todos los juegos (A - Z)";
-            azRow.items = games;
-            tabCollections[3].push_back(azRow);
+            tabCollections[3] = sessionClient.fetchRemotePlayCollections(cbl.getAccessToken(), cbl.getDeviceSerial());
+        }
+        for (auto& c : tabCollections[3]) {
+            c.isHeroRotator = false;
         }
 
 
@@ -641,7 +642,11 @@ int main(int argc, char* argv[]) {
 
         if (currentDetailGame.similarGames.empty()) {
             for (const auto& g : games) {
-                if (g.id != currentDetailGame.id) {
+                if (g.id != currentDetailGame.id &&
+                    g.title.find("Luna Premium") == std::string::npos &&
+                    g.id.find("luna_premium") == std::string::npos &&
+                    g.id.find("channel.") == std::string::npos &&
+                    g.id.find("promo_") == std::string::npos) {
                     currentDetailGame.similarGames.push_back(g);
                     if (currentDetailGame.similarGames.size() >= 10) break;
                 }
@@ -692,6 +697,17 @@ int main(int argc, char* argv[]) {
                                      activeGameForDetailAndStream.title.c_str(), targetGameId.c_str());
 
         cbl.refreshAccessToken();
+
+        luna::stream::StreamConfig stCfg;
+        if (luna::util::AppSettings::instance().videoQuality == luna::util::VideoQuality::P720_60) {
+            stCfg.targetWidth = 1280;
+            stCfg.targetHeight = 720;
+        } else {
+            stCfg.targetWidth = 1920;
+            stCfg.targetHeight = 1080;
+        }
+        stCfg.targetFps = 60;
+        rtcClient.init(stCfg);
 
         std::string sdpOffer = rtcClient.generateSdpOffer();
         bool ok = sessionClient.startSession(targetGameId, cbl.getAccessToken(), sdpOffer,
@@ -771,6 +787,13 @@ int main(int argc, char* argv[]) {
         switch (appState) {
             case AppState::LoginCBL: {
                 cbl.tick();
+
+                if (pressedNow & luna::input::PAD_TRIANGLE) {
+                    luna::util::AppSettings::instance().cycleRegion();
+                    cbl.setRegionDomain(luna::util::I18n::getCurrentRegion().amazonDomain);
+                    luna::util::AppSettings::instance().save(settingsFilePath);
+                    g_lastStatusText = "Region: " + std::string(luna::util::I18n::getCurrentRegion().name);
+                }
 
                 if (cbl.isAuthenticated()) {
                     luna::util::CrashLogger::log("[Main] Usuario autenticado con exito. Abriendo Web...");
@@ -913,6 +936,13 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 } else {
+                    // Triangulo (△) -> Abrir Menu de Configuracion
+                    if (pressedNow & luna::input::PAD_TRIANGLE) {
+                        appState = AppState::Settings;
+                        settingsSelectedIdx = 0;
+                        break;
+                    }
+
                     // L1 / R1 para cambiar de pestaña en cualquier momento
                     if (pressedNow & luna::input::PAD_L1) {
                         activeTabIdx = (activeTabIdx + static_cast<int>(kNavTabs.size()) - 1) % static_cast<int>(kNavTabs.size());
@@ -1029,8 +1059,9 @@ int main(int argc, char* argv[]) {
                                 searchLetterIdx = 0;
                                 updateFilteredGames();
                             } else if (navColIdx == static_cast<int>(kNavTabs.size()) + 1) {
-                                profileMenuOpen = true;
-                                profileMenuIdx = 0;
+                                appState = AppState::Settings;
+                                settingsSelectedIdx = 0;
+                                break;
                             }
                         } else if (focusedGame) {
                             bool isHeroSlide = (selectedRowIdx == 0 && curCols[0].isHeroRotator);
@@ -1211,6 +1242,10 @@ int main(int argc, char* argv[]) {
                             g_lastStatusText = isFavorite(currentDetailGame.id) ? "Juego anadido a Favoritos." : "Juego quitado de Favoritos.";
                         }
                         break;
+                    } else if (detailZone == 1 && numScreens > 0 && detailScreenshotIdx >= 0 && detailScreenshotIdx < static_cast<int>(numScreens)) {
+                        mediaViewerIdx = detailScreenshotIdx;
+                        appState = AppState::MediaViewer;
+                        break;
                     } else if (detailZone == simZone && detailSimilarIdx >= 0 && detailSimilarIdx < static_cast<int>(numSimilar)) {
                         openGameDetail(currentDetailGame.similarGames[detailSimilarIdx]);
                         break;
@@ -1234,6 +1269,100 @@ int main(int argc, char* argv[]) {
                 );
                 break;
             }
+
+            case AppState::MediaViewer: {
+                size_t numScreens = currentDetailGame.screenshotUrls.size();
+                if (pressedNow & luna::input::PAD_CIRCLE) {
+                    appState = AppState::GameDetail;
+                    break;
+                }
+                if (numScreens > 0) {
+                    if ((pressedNow & luna::input::PAD_LEFT) || (pressedNow & luna::input::PAD_L1)) {
+                        mediaViewerIdx = (mediaViewerIdx + static_cast<int>(numScreens) - 1) % static_cast<int>(numScreens);
+                    } else if ((pressedNow & luna::input::PAD_RIGHT) || (pressedNow & luna::input::PAD_R1)) {
+                        mediaViewerIdx = (mediaViewerIdx + 1) % static_cast<int>(numScreens);
+                    }
+                }
+                display.drawMediaViewerScreen(currentDetailGame, mediaViewerIdx, frameCount);
+                break;
+            }
+
+            case AppState::Settings: {
+                auto& settings = luna::util::AppSettings::instance();
+                if (pressedNow & luna::input::PAD_CIRCLE) {
+                    settings.save(settingsFilePath);
+                    appState = AppState::Catalog;
+                    break;
+                }
+
+                if (navElapsedMs > 155) {
+                    bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -16000);
+                    bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 16000);
+                    bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -16000);
+                    bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 16000);
+
+                    if (moveUp) {
+                        settingsSelectedIdx = (settingsSelectedIdx + 8 - 1) % 8;
+                        lastNavTime = now;
+                    } else if (moveDown) {
+                        settingsSelectedIdx = (settingsSelectedIdx + 1) % 8;
+                        lastNavTime = now;
+                    } else if (moveLeft || moveRight) {
+                        if (settingsSelectedIdx == 0) {
+                            settings.cycleVideoQuality();
+                        } else if (settingsSelectedIdx == 1) {
+                            settings.cycleHudMode();
+                        } else if (settingsSelectedIdx == 2) {
+                            settings.toggleVibration();
+                            padMgr.setVibrationEnabled(settings.vibrationEnabled);
+                        } else if (settingsSelectedIdx == 3) {
+                            settings.cycleDeadzone();
+                            padMgr.setDeadzonePercent(settings.deadzonePercent);
+                        } else if (settingsSelectedIdx == 4) {
+                            settings.cycleRegion();
+                            cbl.setRegionDomain(luna::util::I18n::getCurrentRegion().amazonDomain);
+                            rebuildTabCollections();
+                        }
+                        settings.save(settingsFilePath);
+                        lastNavTime = now;
+                    }
+                }
+
+                if (pressedNow & luna::input::PAD_CROSS) {
+                    if (settingsSelectedIdx == 0) {
+                        settings.cycleVideoQuality();
+                        settings.save(settingsFilePath);
+                    } else if (settingsSelectedIdx == 1) {
+                        settings.cycleHudMode();
+                        settings.save(settingsFilePath);
+                    } else if (settingsSelectedIdx == 2) {
+                        settings.toggleVibration();
+                        padMgr.setVibrationEnabled(settings.vibrationEnabled);
+                        settings.save(settingsFilePath);
+                    } else if (settingsSelectedIdx == 3) {
+                        settings.cycleDeadzone();
+                        padMgr.setDeadzonePercent(settings.deadzonePercent);
+                        settings.save(settingsFilePath);
+                    } else if (settingsSelectedIdx == 4) {
+                        settings.cycleRegion();
+                        cbl.setRegionDomain(luna::util::I18n::getCurrentRegion().amazonDomain);
+                        rebuildTabCollections();
+                        settings.save(settingsFilePath);
+                    } else if (settingsSelectedIdx == 6) {
+                        loadCatalogIfAuthenticated();
+                        g_lastStatusText = "Catalogo recargado con exito.";
+                    } else if (settingsSelectedIdx == 7) {
+                        cbl.logout();
+                        appState = AppState::LoginCBL;
+                        g_lastStatusText = "Sesion cerrada. Escanea el codigo QR para volver a vincular.";
+                        break;
+                    }
+                }
+
+                display.drawSettingsScreen(settingsSelectedIdx, g_lastStatusText, frameCount);
+                break;
+            }
+
 
             case AppState::StartingSession: {
                 sessionClient.tick();
@@ -1412,8 +1541,14 @@ int main(int argc, char* argv[]) {
                     );
                 } else {
                     streamingActiveFrames++;
-                    // Auto-ocultar la barra tecnica tras los primeros 3 segundos (180 frames a 60 FPS), salvo que este fijada
-                    bool showHudNow = (streamingActiveFrames <= 180) || hudPinned;
+                    bool showHudNow = false;
+                    if (luna::util::AppSettings::instance().hudMode == luna::util::HudMode::Always) {
+                        showHudNow = true;
+                    } else if (luna::util::AppSettings::instance().hudMode == luna::util::HudMode::Auto) {
+                        showHudNow = (streamingActiveFrames <= 180) || hudPinned;
+                    } else {
+                        showHudNow = hudPinned;
+                    }
 
                     std::string hudLine1 = "FPS: 60 | 1080p | RTP Video: " + std::to_string(stats.rtpPacketsReceived) +
                                            " (IDR:" + std::to_string(stats.idrCount) +

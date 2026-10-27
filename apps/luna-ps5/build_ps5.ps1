@@ -40,6 +40,7 @@ try {
         "main",
         "util/crash_logger",
         "util/image_loader",
+        "util/settings",
         "net/http_client",
         "auth/cbl_client",
         "auth/auth_server",

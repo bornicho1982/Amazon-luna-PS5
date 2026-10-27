@@ -53,6 +53,8 @@ public:
     bool isConnected() const { return state_.connected; }
 
     void setVibration(uint8_t largeMotor, uint8_t smallMotor);
+    void setVibrationEnabled(bool enabled) { vibrationEnabled_ = enabled; }
+    void setDeadzonePercent(int percent) { deadzoneThreshold_ = (percent * 32767) / 100; }
     void setLightBar(uint8_t r, uint8_t g, uint8_t b);
 
     void serializeReport(uint8_t* buffer, size_t maxLen, size_t& outLen, uint32_t seq, int padIndex = 0);
@@ -63,6 +65,8 @@ private:
     int32_t userId_ = -1;
     int32_t padHandle_ = -1;
     GamepadState state_{};
+    bool vibrationEnabled_ = true;
+    int deadzoneThreshold_ = 1966;
 };
 
 } // namespace luna::input

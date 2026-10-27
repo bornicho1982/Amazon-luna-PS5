@@ -435,8 +435,14 @@ bool CblClient::pollRegistration() {
     return true;
 }
 
+void CblClient::setRegionDomain(const std::string& domain) {
+    m_domain = domain;
+    m_verificationUri = domain + "/code";
+    generateQrCode();
+}
+
 void CblClient::generateQrCode() {
-    std::string qrText = "https://amazon.com/code";
+    std::string qrText = "https://" + m_verificationUri;
     std::vector<uint8_t> tempBuffer(qrcodegen_BUFFER_LEN_MAX, 0);
 
     bool ok = qrcodegen_encodeText(qrText.c_str(),
