@@ -619,18 +619,26 @@ std::vector<luna::display::GameTile> LunaSessionClient::fetchCatalog(const std::
     m_libraryCollections = fetchPageCollections("landing_library", "default", accessToken, deviceSerial, result);
     m_gameNightCollections = fetchPageCollections("multistate_game_night", "default", accessToken, deviceSerial, result);
 
-    // Pre-descargar las primeras 6 portadas del Hero y la primera fila para arranque visual instantáneo
-    // Encolar pre-carga asincrona en ImageLoader para arranque visual instantaneo
-    for (auto& col : m_homeCollections) {
-        for (auto& tile : col.items) {
-            if (!tile.coverUrl.empty()) {
-                luna::util::ImageLoader::instance().requestImage(tile.coverUrl, luna::util::ImagePreset::VerticalPoster);
-            }
-            if (!tile.backdropUrl.empty()) {
-                luna::util::ImageLoader::instance().requestImage(tile.backdropUrl, luna::util::ImagePreset::PanoramicHero);
-            }
-            if (!tile.logoUrl.empty()) {
-                luna::util::ImageLoader::instance().requestImage(tile.logoUrl, luna::util::ImagePreset::ProductLogo);
+    // Pre-descargar asincronamente SOLO las portadas de los juegos del Hero (primeros 6)
+    // y las portadas verticales visibles para no saturar memoria ni red
+    for (size_t cIdx = 0; cIdx < m_homeCollections.size() && cIdx < 3; ++cIdx) {
+        auto& col = m_homeCollections[cIdx];
+        bool isHero = (cIdx == 0 && col.isHeroRotator);
+        for (size_t tIdx = 0; tIdx < col.items.size() && tIdx < 8; ++tIdx) {
+            auto& tile = col.items[tIdx];
+            if (isHero && tIdx < 6) {
+                if (!tile.backdropUrl.empty()) {
+                    luna::util::ImageLoader::instance().requestImage(tile.backdropUrl, luna::util::ImagePreset::PanoramicHero);
+                } else if (!tile.coverUrl.empty()) {
+                    luna::util::ImageLoader::instance().requestImage(tile.coverUrl, luna::util::ImagePreset::PanoramicHero);
+                }
+                if (!tile.logoUrl.empty()) {
+                    luna::util::ImageLoader::instance().requestImage(tile.logoUrl, luna::util::ImagePreset::ProductLogo);
+                }
+            } else {
+                if (!tile.coverUrl.empty()) {
+                    luna::util::ImageLoader::instance().requestImage(tile.coverUrl, luna::util::ImagePreset::VerticalPoster);
+                }
             }
         }
     }

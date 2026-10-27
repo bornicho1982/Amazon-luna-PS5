@@ -8,14 +8,19 @@
 #include "util/crash_logger.h"
 #include <cmath>
 #include <algorithm>
+#include <cstring>
 
 namespace luna::util {
 
 bool decodeImageRgba(const uint8_t* data, size_t size, std::vector<uint8_t>& outRgba, int& outW, int& outH) {
-    if (!data || size == 0) return false;
+    if (!data || size == 0 || size > 4 * 1024 * 1024) return false;
     int w = 0, h = 0, comp = 0;
     unsigned char* decoded = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
     if (!decoded) return false;
+    if (w <= 0 || h <= 0 || w > 4096 || h > 4096) {
+        stbi_image_free(decoded);
+        return false;
+    }
     outW = w;
     outH = h;
     outRgba.assign(decoded, decoded + (static_cast<size_t>(w) * static_cast<size_t>(h) * 4));
@@ -26,42 +31,45 @@ bool decodeImageRgba(const uint8_t* data, size_t size, std::vector<uint8_t>& out
 namespace {
 
 inline void applyCornerMask(uint8_t* rgba, int w, int h, int r) {
-    if (r <= 0 || !rgba) return;
+    if (r <= 0 || !rgba || w <= 0 || h <= 0) return;
     float rf = static_cast<float>(r);
+    size_t totalBytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
     for (int y = 0; y < h; ++y) {
         int cy = -1;
         if (y < r) cy = r;
         else if (y >= h - r) cy = h - 1 - r;
-
         if (cy == -1) continue;
 
         for (int x = 0; x < w; ++x) {
             int cx = -1;
             if (x < r) cx = r;
             else if (x >= w - r) cx = w - 1 - r;
-
             if (cx == -1) continue;
 
             float dx = static_cast<float>(x - cx);
             float dy = static_cast<float>(y - cy);
             float dist = std::sqrt(dx * dx + dy * dy);
 
-            uint8_t* p = rgba + ((y * w + x) * 4);
-            if (dist > rf) {
-                p[3] = 0;
-            } else if (dist > rf - 1.0f) {
-                float factor = 1.0f - (dist - (rf - 1.0f));
-                p[3] = static_cast<uint8_t>(p[3] * factor);
+            size_t offset = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4;
+            if (offset + 3 < totalBytes) {
+                uint8_t* p = rgba + offset;
+                if (dist > rf) {
+                    p[3] = 0;
+                } else if (dist > rf - 1.0f) {
+                    float factor = 1.0f - (dist - (rf - 1.0f));
+                    p[3] = static_cast<uint8_t>(p[3] * factor);
+                }
             }
         }
     }
 }
 
 inline void applyDarkGradient(uint8_t* rgba, int w, int h, int leftFadeW, int bottomFadeH) {
-    if (!rgba) return;
+    if (!rgba || w <= 0 || h <= 0) return;
     const uint8_t bgR = 0x0E;
     const uint8_t bgG = 0x0B;
     const uint8_t bgB = 0x16;
+    size_t totalBytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
 
     for (int y = 0; y < h; ++y) {
         float bottomFactor = 1.0f;
@@ -79,11 +87,13 @@ inline void applyDarkGradient(uint8_t* rgba, int w, int h, int leftFadeW, int bo
             }
 
             float alphaFactor = std::min(leftFactor, bottomFactor);
-            uint8_t* p = rgba + ((y * w + x) * 4);
-
-            p[0] = static_cast<uint8_t>(p[0] * alphaFactor + bgR * (1.0f - alphaFactor));
-            p[1] = static_cast<uint8_t>(p[1] * alphaFactor + bgG * (1.0f - alphaFactor));
-            p[2] = static_cast<uint8_t>(p[2] * alphaFactor + bgB * (1.0f - alphaFactor));
+            size_t offset = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4;
+            if (offset + 3 < totalBytes) {
+                uint8_t* p = rgba + offset;
+                p[0] = static_cast<uint8_t>(p[0] * alphaFactor + bgR * (1.0f - alphaFactor));
+                p[1] = static_cast<uint8_t>(p[1] * alphaFactor + bgG * (1.0f - alphaFactor));
+                p[2] = static_cast<uint8_t>(p[2] * alphaFactor + bgB * (1.0f - alphaFactor));
+            }
         }
     }
 }
@@ -94,8 +104,10 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
                            std::vector<uint8_t>& dstRgba, int dstW, int dstH,
                            ImagePreset preset) {
     if (!srcRgba || srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return false;
+    if (srcW > 4096 || srcH > 4096 || dstW > 4096 || dstH > 4096) return false;
 
-    dstRgba.assign(static_cast<size_t>(dstW) * static_cast<size_t>(dstH) * 4, 0);
+    size_t totalDstBytes = static_cast<size_t>(dstW) * static_cast<size_t>(dstH) * 4;
+    dstRgba.assign(totalDstBytes, 0);
 
     const uint8_t bgR = 0x0E;
     const uint8_t bgG = 0x0B;
@@ -105,24 +117,23 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
 
     if (isPanoramic && srcW < srcH) {
         // IMAGEN VERTICAL (POSTER 3:4): NO estirar a 16:9 deformandola
-        // Llenar todo el fondo con #0E0B16
-        for (size_t i = 0; i < dstRgba.size(); i += 4) {
+        for (size_t i = 0; i + 3 < totalDstBytes; i += 4) {
             dstRgba[i + 0] = bgR;
             dstRgba[i + 1] = bgG;
             dstRgba[i + 2] = bgB;
             dstRgba[i + 3] = 255;
         }
 
-        // Escalar la imagen vertical a la derecha manteniendo su relacion de aspecto
         int fitH = static_cast<int>(dstH * 0.95f);
+        if (fitH <= 0) fitH = dstH;
         int fitW = static_cast<int>(fitH * (static_cast<float>(srcW) / srcH));
         if (fitW > dstW / 2) fitW = dstW / 2;
+        if (fitW <= 0) fitW = 1;
         int posX = dstW - fitW - 80;
         int posY = (dstH - fitH) / 2;
 
         float scaleX = static_cast<float>(srcW) / static_cast<float>(fitW);
         float scaleY = static_cast<float>(srcH) / static_cast<float>(fitH);
-
         int fadeBorder = 50;
 
         for (int dy = 0; dy < fitH; ++dy) {
@@ -134,9 +145,8 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
             int y1 = std::clamp(y0 + 1, 0, srcH - 1);
             float fy = std::clamp(sy - static_cast<float>(y0), 0.0f, 1.0f);
 
-            const uint8_t* row0 = srcRgba + (static_cast<size_t>(y0) * srcW * 4);
-            const uint8_t* row1 = srcRgba + (static_cast<size_t>(y1) * srcW * 4);
-            uint8_t* dstRow = dstRgba.data() + (static_cast<size_t>(targetY) * dstW * 4);
+            const uint8_t* row0 = srcRgba + (static_cast<size_t>(y0) * static_cast<size_t>(srcW) * 4);
+            const uint8_t* row1 = srcRgba + (static_cast<size_t>(y1) * static_cast<size_t>(srcW) * 4);
 
             float edgeFadeY = 1.0f;
             if (dy < fadeBorder) edgeFadeY = static_cast<float>(dy) / fadeBorder;
@@ -170,12 +180,13 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
                 else if (dx >= fitW - fadeBorder) edgeFadeX = static_cast<float>(fitW - 1 - dx) / fadeBorder;
 
                 float alphaFade = edgeFadeX * edgeFadeY;
-
-                uint8_t* out = dstRow + (targetX * 4);
-                out[0] = static_cast<uint8_t>(r * alphaFade + bgR * (1.0f - alphaFade));
-                out[1] = static_cast<uint8_t>(g * alphaFade + bgG * (1.0f - alphaFade));
-                out[2] = static_cast<uint8_t>(b * alphaFade + bgB * (1.0f - alphaFade));
-                out[3] = 255;
+                size_t outOffset = (static_cast<size_t>(targetY) * static_cast<size_t>(dstW) + static_cast<size_t>(targetX)) * 4;
+                if (outOffset + 3 < totalDstBytes) {
+                    dstRgba[outOffset + 0] = static_cast<uint8_t>(r * alphaFade + bgR * (1.0f - alphaFade));
+                    dstRgba[outOffset + 1] = static_cast<uint8_t>(g * alphaFade + bgG * (1.0f - alphaFade));
+                    dstRgba[outOffset + 2] = static_cast<uint8_t>(b * alphaFade + bgB * (1.0f - alphaFade));
+                    dstRgba[outOffset + 3] = 255;
+                }
             }
         }
         return true;
@@ -205,7 +216,6 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
 
         const uint8_t* row0 = srcRgba + (static_cast<size_t>(y0) * static_cast<size_t>(srcW) * 4);
         const uint8_t* row1 = srcRgba + (static_cast<size_t>(y1) * static_cast<size_t>(srcW) * 4);
-        uint8_t* dstRow = dstRgba.data() + (static_cast<size_t>(dy) * static_cast<size_t>(dstW) * 4);
 
         for (int dx = 0; dx < dstW; ++dx) {
             float sx = isPanoramic ? (cropX + (dx + 0.5f) * scaleX - 0.5f) : ((dx + 0.5f) * scaleX - 0.5f);
@@ -223,11 +233,13 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
             float w10 = (1.0f - fx) * fy;
             float w11 = fx * fy;
 
-            uint8_t* out = dstRow + (dx * 4);
-            out[0] = static_cast<uint8_t>(p00[0] * w00 + p01[0] * w01 + p10[0] * w10 + p11[0] * w11);
-            out[1] = static_cast<uint8_t>(p00[1] * w00 + p01[1] * w01 + p10[1] * w10 + p11[1] * w11);
-            out[2] = static_cast<uint8_t>(p00[2] * w00 + p01[2] * w01 + p10[2] * w10 + p11[2] * w11);
-            out[3] = static_cast<uint8_t>(p00[3] * w00 + p01[3] * w01 + p10[3] * w10 + p11[3] * w11);
+            size_t outOffset = (static_cast<size_t>(dy) * static_cast<size_t>(dstW) + static_cast<size_t>(dx)) * 4;
+            if (outOffset + 3 < totalDstBytes) {
+                dstRgba[outOffset + 0] = static_cast<uint8_t>(p00[0] * w00 + p01[0] * w01 + p10[0] * w10 + p11[0] * w11);
+                dstRgba[outOffset + 1] = static_cast<uint8_t>(p00[1] * w00 + p01[1] * w01 + p10[1] * w10 + p11[1] * w11);
+                dstRgba[outOffset + 2] = static_cast<uint8_t>(p00[2] * w00 + p01[2] * w01 + p10[2] * w10 + p11[2] * w11);
+                dstRgba[outOffset + 3] = static_cast<uint8_t>(p00[3] * w00 + p01[3] * w01 + p10[3] * w10 + p11[3] * w11);
+            }
         }
     }
 
@@ -316,7 +328,7 @@ void ImageLoader::init() {
 void ImageLoader::shutdown() {
     if (!running_) return;
     {
-        std::lock_guard<std::mutex> lk(mutex_);
+        std::lock_guard<std::mutex> lk(queueMutex_);
         running_ = false;
         queue_.clear();
     }
@@ -340,16 +352,22 @@ static inline std::string getCacheKey(const std::string& url, ImagePreset preset
 std::shared_ptr<const DecodedImage> ImageLoader::getImage(const std::string& url, ImagePreset preset) {
     if (url.empty()) return nullptr;
     std::string key = getCacheKey(url, preset);
-    std::lock_guard<std::mutex> lk(mutex_);
-    auto it = cache_.find(key);
-    if (it != cache_.end() && it->second && it->second->ready) {
-        return it->second;
+
+    // Búsqueda lock-free / acquire-read en la arena de ranuras fijas
+    for (size_t i = 0; i < MAX_IMAGE_SLOTS; ++i) {
+        if (slots_[i].state.load(std::memory_order_acquire) == 2) {
+            if (slots_[i].key == key) {
+                return slots_[i].image;
+            }
+        }
     }
-    // Solo permitir fallback si se pide Raw o preset identico
+
     if (preset == ImagePreset::Raw) {
-        for (const auto& kv : cache_) {
-            if (kv.first.rfind(url + "@", 0) == 0 && kv.second && kv.second->ready) {
-                return kv.second;
+        for (size_t i = 0; i < MAX_IMAGE_SLOTS; ++i) {
+            if (slots_[i].state.load(std::memory_order_acquire) == 2) {
+                if (slots_[i].key.rfind(url + "@", 0) == 0) {
+                    return slots_[i].image;
+                }
             }
         }
     }
@@ -359,19 +377,43 @@ std::shared_ptr<const DecodedImage> ImageLoader::getImage(const std::string& url
 void ImageLoader::requestImage(const std::string& url, ImagePreset preset) {
     if (url.empty() || url.rfind("http", 0) != 0) return;
     std::string key = getCacheKey(url, preset);
-    std::lock_guard<std::mutex> lk(mutex_);
-    if (cache_.find(key) != cache_.end()) return;
-    if (inFlight_[key]) return;
 
-    inFlight_[key] = true;
-    queue_.push_back(Request{url, preset});
+    std::unique_lock<std::mutex> lk(queueMutex_);
+    int freeSlotIdx = -1;
+    for (size_t i = 0; i < MAX_IMAGE_SLOTS; ++i) {
+        int st = slots_[i].state.load(std::memory_order_acquire);
+        if (st == 2 || st == 1) {
+            if (slots_[i].key == key) {
+                return; // Ya encolada, descargando o lista
+            }
+        } else if (st == 0 && freeSlotIdx < 0) {
+            freeSlotIdx = static_cast<int>(i);
+        }
+    }
+
+    if (freeSlotIdx < 0) {
+        // Todas las ranuras de la arena están ocupadas
+        return;
+    }
+
+    // Reservar ranura atómicamente antes de encolar
+    slots_[freeSlotIdx].key = key;
+    slots_[freeSlotIdx].image.reset();
+    slots_[freeSlotIdx].state.store(1, std::memory_order_release);
+
+    queue_.push_back(Request{url, preset, freeSlotIdx});
+    lk.unlock();
     cv_.notify_one();
 }
 
 void ImageLoader::clearCache() {
-    std::lock_guard<std::mutex> lk(mutex_);
-    cache_.clear();
-    inFlight_.clear();
+    std::lock_guard<std::mutex> lk(queueMutex_);
+    queue_.clear();
+    for (size_t i = 0; i < MAX_IMAGE_SLOTS; ++i) {
+        slots_[i].state.store(0, std::memory_order_release);
+        slots_[i].key.clear();
+        slots_[i].image.reset();
+    }
 }
 
 void ImageLoader::workerLoop() {
@@ -379,7 +421,7 @@ void ImageLoader::workerLoop() {
     while (running_) {
         Request req;
         {
-            std::unique_lock<std::mutex> lk(mutex_);
+            std::unique_lock<std::mutex> lk(queueMutex_);
             cv_.wait(lk, [&]() {
                 return !running_ || !queue_.empty();
             });
@@ -389,7 +431,9 @@ void ImageLoader::workerLoop() {
             queue_.pop_front();
         }
 
-        std::string reqKey = getCacheKey(req.url, req.preset);
+        // 1. Pausa de cortesía entre descargas (15 ms) para no saturar la red ni la CPU
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+
         auto resp = luna::net::HttpClient::get(req.url);
         int dlLog = s_downloadLogCount++;
         if (dlLog < 15 || !resp.ok()) {
@@ -397,11 +441,12 @@ void ImageLoader::workerLoop() {
                                          dlLog + 1, req.url.c_str(), resp.statusCode, resp.body.size(),
                                          resp.ok() ? "" : (", err: " + resp.error).c_str());
         }
-        if (!resp.ok() || resp.body.empty()) {
-            luna::util::CrashLogger::log("[ImageLoader FAIL] #%d descarga fallida (HTTP %d, %zu bytes, err: %s) para %s",
-                                         dlLog + 1, resp.statusCode, resp.body.size(), resp.error.c_str(), req.url.c_str());
-            std::lock_guard<std::mutex> lk(mutex_);
-            inFlight_.erase(reqKey);
+
+        // Validar tamaño máximo aceptado (<= 4 MB)
+        if (!resp.ok() || resp.body.empty() || resp.body.size() > 4 * 1024 * 1024) {
+            if (req.slotIdx >= 0 && req.slotIdx < static_cast<int>(MAX_IMAGE_SLOTS)) {
+                slots_[req.slotIdx].state.store(-1, std::memory_order_release);
+            }
             continue;
         }
 
@@ -409,47 +454,42 @@ void ImageLoader::workerLoop() {
         std::vector<uint8_t> rawRgba;
         if (!decodeImageRgba(reinterpret_cast<const uint8_t*>(resp.body.data()),
                              resp.body.size(), rawRgba, origW, origH)) {
-            luna::util::CrashLogger::log("[ImageLoader FAIL] #%d stbi_load_from_memory fallo para %s (%zu bytes)",
-                                         dlLog + 1, req.url.c_str(), resp.body.size());
-            std::lock_guard<std::mutex> lk(mutex_);
-            inFlight_.erase(reqKey);
+            if (dlLog < 15) {
+                luna::util::CrashLogger::log("[ImageLoader FAIL] #%d decode fallo para %s (%zu bytes)",
+                                             dlLog + 1, req.url.c_str(), resp.body.size());
+            }
+            if (req.slotIdx >= 0 && req.slotIdx < static_cast<int>(MAX_IMAGE_SLOTS)) {
+                slots_[req.slotIdx].state.store(-1, std::memory_order_release);
+            }
             continue;
         }
-        if (dlLog < 15) {
-            luna::util::CrashLogger::log("[ImageLoader OK] #%d decodificado OK (%dx%d) para preset %d",
-                                         dlLog + 1, origW, origH, static_cast<int>(req.preset));
+
+        // Validar dimensiones máximas de seguridad
+        if (origW <= 0 || origH <= 0 || origW > 4096 || origH > 4096) {
+            if (req.slotIdx >= 0 && req.slotIdx < static_cast<int>(MAX_IMAGE_SLOTS)) {
+                slots_[req.slotIdx].state.store(-1, std::memory_order_release);
+            }
+            continue;
         }
 
         int targetW = origW;
         int targetH = origH;
-
         switch (req.preset) {
             case ImagePreset::VerticalPoster:
-                targetW = 200;
-                targetH = 280;
-                break;
+                targetW = 200; targetH = 280; break;
             case ImagePreset::ScreenshotThumbnail:
-                targetW = 270;
-                targetH = 152;
-                break;
+                targetW = 270; targetH = 152; break;
             case ImagePreset::PanoramicHero:
-                targetW = 1920;
-                targetH = 540;
-                break;
+                targetW = 1920; targetH = 540; break;
             case ImagePreset::PanoramicDetail:
-                targetW = 1920;
-                targetH = 1080;
-                break;
+                targetW = 1920; targetH = 1080; break;
             case ImagePreset::ProductLogo: {
                 float aspect = static_cast<float>(origW) / static_cast<float>(origH);
-                int maxW = 420;
-                int maxH = 160;
+                int maxW = 420, maxH = 160;
                 if (maxW / aspect <= maxH) {
-                    targetW = maxW;
-                    targetH = static_cast<int>(maxW / aspect);
+                    targetW = maxW; targetH = static_cast<int>(maxW / aspect);
                 } else {
-                    targetH = maxH;
-                    targetW = static_cast<int>(maxH * aspect);
+                    targetH = maxH; targetW = static_cast<int>(maxH * aspect);
                 }
                 break;
             }
@@ -465,16 +505,15 @@ void ImageLoader::workerLoop() {
             resizeAndProcessImage(rawRgba.data(), origW, origH, processedRgba, targetW, targetH, req.preset);
         }
 
-        {
+        if (req.slotIdx >= 0 && req.slotIdx < static_cast<int>(MAX_IMAGE_SLOTS)) {
             auto dec = std::make_shared<DecodedImage>();
             dec->rgba = std::move(processedRgba);
             dec->width = targetW;
             dec->height = targetH;
             dec->ready = true;
 
-            std::lock_guard<std::mutex> lk(mutex_);
-            cache_[reqKey] = std::move(dec);
-            inFlight_.erase(reqKey);
+            slots_[req.slotIdx].image = std::move(dec);
+            slots_[req.slotIdx].state.store(2, std::memory_order_release);
         }
     }
 }

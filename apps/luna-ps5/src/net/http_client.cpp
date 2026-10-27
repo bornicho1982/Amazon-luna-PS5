@@ -287,8 +287,8 @@ HttpResponse HttpClient::post(const std::string& url,
 
     sceHttpsDisableOption(reqId, 0x01);
     sceHttpsDisableOption(reqId, 0x02);
-    sceHttpSetSendTimeOut(reqId, 30000000);
-    sceHttpSetRecvTimeOut(reqId, 60000000);
+    sceHttpSetSendTimeOut(reqId, 8000000);
+    sceHttpSetRecvTimeOut(reqId, 8000000);
 
     for (const auto& h : headers) {
         std::string k = trimString(h.first);
@@ -458,6 +458,10 @@ HttpResponse HttpClient::get(const std::string& url,
         int readBytes = 0;
         while ((readBytes = sceHttpReadData(reqId, buf, sizeof(buf))) > 0) {
             resp.body.append(buf, readBytes);
+            if (resp.body.size() > 4 * 1024 * 1024) {
+                resp.error = "Response exceeded 4 MB limit";
+                break;
+            }
         }
     } else {
         resp.error = "sceHttpSendRequest failed: " + std::to_string(sendRes);

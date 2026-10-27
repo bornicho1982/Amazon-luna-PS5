@@ -390,12 +390,6 @@ int main(int argc, char* argv[]) {
         if (!tile.coverUrl.empty()) {
             luna::util::ImageLoader::instance().requestImage(tile.coverUrl, luna::util::ImagePreset::VerticalPoster);
         }
-        if (!tile.backdropUrl.empty()) {
-            luna::util::ImageLoader::instance().requestImage(tile.backdropUrl, luna::util::ImagePreset::PanoramicHero);
-        }
-        if (!tile.logoUrl.empty()) {
-            luna::util::ImageLoader::instance().requestImage(tile.logoUrl, luna::util::ImagePreset::ProductLogo);
-        }
     };
 
     static const std::vector<std::string> kNavTabs = {
@@ -562,9 +556,7 @@ int main(int argc, char* argv[]) {
 
 
 
-        for (auto& g : games) {
-            requestTileImages(g);
-        }
+        // Las carátulas se descargan bajo demanda al renderizar cada fila visible
     };
 
     auto syncRowSelectionSize = [&]() {

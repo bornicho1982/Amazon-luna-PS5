@@ -353,22 +353,28 @@ void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int
     if (!isReady_ || !mappedMemory_ || !rgba || dstW <= 0 || dstH <= 0) return;
     if (srcW <= 0) srcW = dstW;
     if (srcH <= 0) srcH = dstH;
+    if (srcW > 4096 || srcH > 4096) return;
     uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
 
-    int x0 = std::max(0, rx);
-    int y0 = std::max(0, ry);
-    int x1 = std::min(width_, rx + dstW);
-    int y1 = std::min(height_, ry + dstH);
+    int x0 = std::clamp(rx, 0, width_);
+    int y0 = std::clamp(ry, 0, height_);
+    int x1 = std::clamp(rx + dstW, 0, width_);
+    int y1 = std::clamp(ry + dstH, 0, height_);
+    if (x0 >= x1 || y0 >= y1) return;
 
+    size_t totalSrcBytes = static_cast<size_t>(srcW) * static_cast<size_t>(srcH) * 4;
     float scaleX = static_cast<float>(srcW) / static_cast<float>(dstW);
     float scaleY = static_cast<float>(srcH) / static_cast<float>(dstH);
 
     for (int y = y0; y < y1; ++y) {
         int srcY = std::clamp(static_cast<int>((y - ry) * scaleY), 0, srcH - 1);
-        const uint8_t* row = rgba + (static_cast<size_t>(srcY) * static_cast<size_t>(srcW) * 4);
+        size_t rowOffset = static_cast<size_t>(srcY) * static_cast<size_t>(srcW) * 4;
         for (int x = x0; x < x1; ++x) {
             int srcX = std::clamp(static_cast<int>((x - rx) * scaleX), 0, srcW - 1);
-            const uint8_t* p = row + (srcX * 4);
+            size_t pixelOffset = rowOffset + (static_cast<size_t>(srcX) * 4);
+            if (pixelOffset + 3 >= totalSrcBytes) continue;
+
+            const uint8_t* p = rgba + pixelOffset;
             uint8_t a = p[3];
             if (a == 255) {
                 uint32_t argb = 0xFF000000U | (static_cast<uint32_t>(p[0]) << 16) | (static_cast<uint32_t>(p[1]) << 8) | p[2];
