@@ -71,7 +71,6 @@ std::string escapeJson(const std::string& str) {
 }
 
 static inline std::string base64UrlDecode(const std::string& input) {
-    static const std::string b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string in = input;
     for (char& c : in) {
         if (c == '-') c = '+';
@@ -81,6 +80,7 @@ static inline std::string base64UrlDecode(const std::string& input) {
         in += '=';
     }
 
+    static const char b64chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
     std::vector<int> T(256, -1);
     for (int i = 0; i < 64; i++) T[static_cast<unsigned char>(b64chars[i])] = i;
@@ -516,12 +516,17 @@ std::vector<luna::display::LunaCollection> LunaSessionClient::fetchPageCollectio
                     }
                 }
                 if (!exists) {
-                    masterCatalog.push_back(tile);
+                    if (tile.title.find("Luna Premium") == std::string::npos &&
+                        tile.id.find("luna_premium") == std::string::npos &&
+                        tile.id.find("channel.") == std::string::npos &&
+                        tile.id.find("promo_") == std::string::npos) {
+                        masterCatalog.push_back(tile);
+                    }
                 }
             }
         }
 
-        if (row.isRankings) {
+        if (!row.isHeroRotator) {
             auto it = std::remove_if(row.items.begin(), row.items.end(), [](const luna::display::GameTile& t) {
                 return t.title.find("Luna Premium") != std::string::npos ||
                        t.id.find("luna_premium") != std::string::npos ||

@@ -260,6 +260,63 @@ int main(int argc, char* argv[]) {
         appState = AppState::LoginCBL;
     }
 
+    // --- Favoritos del usuario (persistidos en favorites.json) ---
+    std::vector<std::string> favoriteIds;
+    std::string favoritesFilePath = storageDir + "/favorites.json";
+    auto saveFavorites = [&]() {
+        std::string json = "[";
+        for (size_t i = 0; i < favoriteIds.size(); ++i) {
+            if (i) json += ",";
+            json += "\"" + favoriteIds[i] + "\"";
+        }
+        json += "]";
+        FILE* f = std::fopen(favoritesFilePath.c_str(), "wb");
+        if (f) {
+            std::fwrite(json.data(), 1, json.size(), f);
+            std::fclose(f);
+        }
+        luna::util::CrashLogger::log("[Main] Favoritos guardados (%zu juegos).", favoriteIds.size());
+    };
+    auto loadFavorites = [&]() {
+        FILE* f = std::fopen(favoritesFilePath.c_str(), "rb");
+        if (!f) return;
+        std::fseek(f, 0, SEEK_END);
+        long sz = std::ftell(f);
+        std::fseek(f, 0, SEEK_SET);
+        if (sz <= 0 || sz > 65536) {
+            std::fclose(f);
+            return;
+        }
+        std::string json(static_cast<size_t>(sz), '\0');
+        std::fread(&json[0], 1, static_cast<size_t>(sz), f);
+        std::fclose(f);
+        size_t pos = 0;
+        while ((pos = json.find('"', pos)) != std::string::npos) {
+            size_t end = json.find('"', pos + 1);
+            if (end == std::string::npos) break;
+            favoriteIds.push_back(json.substr(pos + 1, end - pos - 1));
+            pos = end + 1;
+        }
+        luna::util::CrashLogger::log("[Main] Favoritos cargados: %zu juegos.", favoriteIds.size());
+    };
+    loadFavorites();
+    auto isFavorite = [&](const std::string& id) {
+        for (const auto& f : favoriteIds) if (f == id) return true;
+        return false;
+    };
+    auto toggleFavorite = [&](const std::string& id) {
+        for (auto it = favoriteIds.begin(); it != favoriteIds.end(); ++it) {
+            if (*it == id) {
+                favoriteIds.erase(it);
+                saveFavorites();
+                return false;
+            }
+        }
+        favoriteIds.push_back(id);
+        saveFavorites();
+        return true;
+    };
+
     // Obtener IP LAN local para mostrarla en la pantalla de espera
     std::string lanIp = "192.168.18.21";
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -391,6 +448,15 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+        // Filtrar tarjetas no jugables (Luna Premium / promos / canales)
+        filteredGames.erase(std::remove_if(filteredGames.begin(), filteredGames.end(),
+            [](const luna::display::GameTile& g) {
+                return g.title.find("Luna Premium") != std::string::npos ||
+                       g.id.find("luna_premium") != std::string::npos ||
+                       g.id.find("channel.") != std::string::npos ||
+                       g.id.find("promo_") != std::string::npos;
+            }),
+            filteredGames.end());
         searchGridIdx = 0;
     };
 
@@ -407,21 +473,36 @@ int main(int argc, char* argv[]) {
             tabCollections[0].push_back(fallbackRow);
         }
 
-        // Tab 1: GameNight (multistate_game_night real + colecciones multijugador)
+        // Tab 1: GameNight (multistate_game_night real + colecciones multijugador y fiesta)
         tabCollections[1] = sessionClient.getGameNightCollections();
         if (tabCollections[1].empty()) {
-            for (const auto& col : tabCollections[0]) {
-                if (col.id.find("home_2") != std::string::npos || col.title.find("Jugad") != std::string::npos || col.isHeroRotator) {
-                    tabCollections[1].push_back(col);
+            luna::display::LunaCollection partyCol;
+            partyCol.id = "gamenight_party";
+            partyCol.title = "Juegos de fiesta y multijugador";
+            for (const auto& g : games) {
+                std::string desc = g.synopsis;
+                for (auto& ch : desc) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                if (g.inputMethods.find("jugad") != std::string::npos ||
+                    desc.find("multijugador") != std::string::npos ||
+                    desc.find("multiplayer") != std::string::npos ||
+                    desc.find("party") != std::string::npos ||
+                    desc.find("coop") != std::string::npos ||
+                    desc.find("cooperativo") != std::string::npos ||
+                    g.title.find("Jackbox") != std::string::npos ||
+                    g.title.find("Party") != std::string::npos) {
+                    partyCol.items.push_back(g);
                 }
             }
-            if (tabCollections[1].empty()) tabCollections[1] = tabCollections[0];
+            if (!partyCol.items.empty()) tabCollections[1].push_back(partyCol);
         }
+        if (tabCollections[1].empty()) tabCollections[1] = tabCollections[0];
 
-        // Tab 2: Biblioteca (landing_library real + Seguir jugando)
+        // Tab 2: Mi espacio (Biblioteca personal + Mis Favoritos + Seguir jugando)
         tabCollections[2] = sessionClient.getLibraryCollections();
         for (const auto& col : tabCollections[0]) {
-            if (col.id.find("recently_played") != std::string::npos) {
+            if (col.id.find("recently_played") != std::string::npos ||
+                col.id.find("continue") != std::string::npos ||
+                col.title.find("Seguir jugando") != std::string::npos) {
                 bool found = false;
                 for (const auto& lc : tabCollections[2]) {
                     if (lc.id == col.id) { found = true; break; }
@@ -429,18 +510,55 @@ int main(int argc, char* argv[]) {
                 if (!found) tabCollections[2].push_back(col);
             }
         }
-        if (tabCollections[2].empty()) tabCollections[2] = tabCollections[0];
+        if (!favoriteIds.empty()) {
+            luna::display::LunaCollection favCol;
+            favCol.id = "user_favorites";
+            favCol.title = "Mis juegos favoritos";
+            for (const auto& favId : favoriteIds) {
+                for (const auto& g : games) {
+                    if (g.id == favId) {
+                        favCol.items.push_back(g);
+                        break;
+                    }
+                }
+            }
+            if (!favCol.items.empty()) {
+                tabCollections[2].insert(tabCollections[2].begin(), favCol);
+            }
+        }
+        if (tabCollections[2].empty()) {
+            luna::display::LunaCollection emptyCol;
+            emptyCol.id = "library_empty";
+            emptyCol.title = "Tu biblioteca personal";
+            emptyCol.items = games;
+            tabCollections[2].push_back(emptyCol);
+        }
 
-        // Tab 3: Luna+ (Selecciones del editor, Aventuras, Novedades)
+        // Tab 3: Canales / Suscripciones / A-Z
         tabCollections[3].clear();
         for (const auto& col : tabCollections[0]) {
-            if (col.isHeroRotator || col.id.find("editors_pick") != std::string::npos ||
-                col.id.find("adventure") != std::string::npos || col.id.find("popular") != std::string::npos ||
-                col.id.find("recently_added") != std::string::npos) {
+            if (col.id.find("channel") != std::string::npos ||
+                col.id.find("subscription") != std::string::npos ||
+                col.id.find("prime") != std::string::npos ||
+                col.id.find("ubisoft") != std::string::npos ||
+                col.id.find("gog") != std::string::npos ||
+                col.id.find("luna_plus") != std::string::npos ||
+                col.title.find("Prime") != std::string::npos ||
+                col.title.find("Ubisoft") != std::string::npos ||
+                col.title.find("GOG") != std::string::npos ||
+                col.title.find("Luna+") != std::string::npos ||
+                col.title.find("Canal") != std::string::npos ||
+                col.title.find("Suscrip") != std::string::npos) {
                 tabCollections[3].push_back(col);
             }
         }
-        if (tabCollections[3].empty()) tabCollections[3] = tabCollections[0];
+        if (tabCollections[3].empty()) {
+            luna::display::LunaCollection azRow;
+            azRow.id = "catalog_az";
+            azRow.title = "Todos los juegos (A - Z)";
+            azRow.items = games;
+            tabCollections[3].push_back(azRow);
+        }
 
 
 
@@ -860,7 +978,12 @@ int main(int argc, char* argv[]) {
                                 if (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) {
                                     int maxC = (selectedRowIdx < numRows) ? static_cast<int>(curCols[selectedRowIdx].items.size()) : 1;
                                     if (selectedRowIdx == 0 && curCols[0].isHeroRotator) {
-                                        rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % std::max(1, maxC);
+                                        if (heroBtnIdx == 1) {
+                                            heroBtnIdx = 0;
+                                        } else {
+                                            rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % std::max(1, maxC);
+                                            heroBtnIdx = 0;
+                                        }
                                     } else if (rowSelectedCol[selectedRowIdx] > 0) {
                                         rowSelectedCol[selectedRowIdx]--;
                                     }
@@ -870,7 +993,16 @@ int main(int argc, char* argv[]) {
                                 if (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) {
                                     int maxC = (selectedRowIdx < numRows) ? static_cast<int>(curCols[selectedRowIdx].items.size()) : 1;
                                     if (selectedRowIdx == 0 && curCols[0].isHeroRotator) {
-                                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
+                                        bool isLunaPrem = (rowSelectedCol[0] == 0);
+                                        if (!curCols.empty() && !curCols[0].items.empty() && rowSelectedCol[0] < static_cast<int>(curCols[0].items.size())) {
+                                            if (curCols[0].items[rowSelectedCol[0]].title == "Luna Premium") isLunaPrem = true;
+                                        }
+                                        if (heroBtnIdx == 0 && !isLunaPrem) {
+                                            heroBtnIdx = 1;
+                                        } else {
+                                            rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
+                                            heroBtnIdx = 0;
+                                        }
                                     } else if (rowSelectedCol[selectedRowIdx] + 1 < maxC) {
                                         rowSelectedCol[selectedRowIdx]++;
                                     }
@@ -910,8 +1042,19 @@ int main(int argc, char* argv[]) {
                             }
                         } else if (focusedGame) {
                             bool isHeroSlide = (selectedRowIdx == 0 && curCols[0].isHeroRotator);
-                            if (isHeroSlide && focusedGame->title == "Luna Premium") {
-                                if (!games.empty()) openGameDetail(games[0]);
+                            if (isHeroSlide) {
+                                if (focusedGame->title == "Luna Premium") {
+                                    // Mas informacion en Luna Premium: hacer scroll al catalogo
+                                    if (numRows > 1) {
+                                        selectedRowIdx = 1;
+                                    }
+                                } else {
+                                    if (heroBtnIdx == 0) {
+                                        startCloudGameSession(*focusedGame);
+                                    } else {
+                                        openGameDetail(*focusedGame);
+                                    }
+                                }
                             } else {
                                 openGameDetail(*focusedGame);
                             }
@@ -1050,6 +1193,14 @@ int main(int argc, char* argv[]) {
                     if (moved) lastNavTime = now;
                 }
 
+                // Triangulo (△) -> Alternar Favorito
+                if (pressedNow & luna::input::PAD_TRIANGLE) {
+                    toggleFavorite(currentDetailGame.id);
+                    saveFavorites();
+                    rebuildTabCollections();
+                    g_lastStatusText = isFavorite(currentDetailGame.id) ? "Juego anadido a Favoritos." : "Juego quitado de Favoritos.";
+                }
+
                 // Cruz (X) -> Ejecutar accion segun el elemento enfocado en GameDetail
                 if (pressedNow & luna::input::PAD_CROSS) {
                     if (detailZone == 0) {
@@ -1062,7 +1213,10 @@ int main(int argc, char* argv[]) {
                                 g_lastStatusText = "Este juego requiere suscripcion a Luna Premium (" + price + ").";
                             }
                         } else {
-                            g_lastStatusText = "Juego anadido a Favoritos de Amazon Luna.";
+                            toggleFavorite(currentDetailGame.id);
+                            saveFavorites();
+                            rebuildTabCollections();
+                            g_lastStatusText = isFavorite(currentDetailGame.id) ? "Juego anadido a Favoritos." : "Juego quitado de Favoritos.";
                         }
                         break;
                     } else if (detailZone == simZone && detailSimilarIdx >= 0 && detailSimilarIdx < static_cast<int>(numSimilar)) {
@@ -1083,7 +1237,8 @@ int main(int argc, char* argv[]) {
                     detailZone,
                     detailBtnIdx,
                     selectedCarouselIdx,
-                    frameCount
+                    frameCount,
+                    isFavorite(currentDetailGame.id)
                 );
                 break;
             }
@@ -1148,7 +1303,8 @@ int main(int argc, char* argv[]) {
                     detailZone,
                     detailBtnIdx,
                     (detailZone == 1 && !activeGameForDetailAndStream.screenshotUrls.empty()) ? detailScreenshotIdx : detailSimilarIdx,
-                    frameCount
+                    frameCount,
+                    isFavorite(activeGameForDetailAndStream.id)
                 );
                 break;
             }
@@ -1157,6 +1313,15 @@ int main(int argc, char* argv[]) {
                 const auto& curGame = activeGameForDetailAndStream;
                 uint64_t decFrames = videoDecoder.getDecodedFrameCount();
                 bool isLiveVideo = videoStreaming.load() && (decFrames > 0);
+
+                // Deteccion automatica de fin de sesion remota: si el usuario sale
+                // del juego desde el menu interno del propio juego, Amazon corta el
+                // stream (RTP + DataChannels) o se desconecta ICE/PeerConnection.
+                // Regresar inmediatamente al catalogo sin exigir L1+R1+OPTIONS.
+                if (rtcClient.hasRemoteSessionEnded()) {
+                    teardownStreamingSession("El juego ha finalizado en Amazon Luna.");
+                    break;
+                }
 
                 // Detectar combo de apertura del Overlay Oficial de Amazon Luna:
                 // [L1 + R1 + OPTIONS] o [OPTIONS + TOUCHPAD]

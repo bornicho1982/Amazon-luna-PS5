@@ -264,9 +264,53 @@ ImageLoader::~ImageLoader() {
     shutdown();
 }
 
+#if !defined(_WIN32)
+extern "C" {
+    int scePthreadAttrInit(void* attr);
+    int scePthreadAttrSetstacksize(void* attr, size_t stacksize);
+    int scePthreadAttrDestroy(void* attr);
+    int scePthreadCreate(void** thread, const void* attr, void* (*entry)(void*), void* arg, const char* name);
+    int scePthreadJoin(void* thread, void** value_ptr);
+}
+
+void* ImageLoader::pthreadEntry(void* arg) {
+    if (arg) {
+        static_cast<ImageLoader*>(arg)->workerLoop();
+    }
+    return nullptr;
+}
+#endif
+
 void ImageLoader::init() {
-    // Deactivated in direct web bridge mode: zero image threads in C++
-    running_ = false;
+    if (running_) return;
+    running_ = true;
+
+#if defined(_WIN32)
+    try {
+        workerThread_ = std::thread(&ImageLoader::workerLoop, this);
+    } catch (...) {
+        running_ = false;
+        luna::util::CrashLogger::log("[ImageLoader ERROR] No se pudo crear el hilo worker.");
+        return;
+    }
+    luna::util::CrashLogger::log("[ImageLoader] Hilo worker de descarga iniciado (Win32 std::thread).");
+#else
+    alignas(16) uint8_t attr[256];
+    std::memset(attr, 0, sizeof(attr));
+    int rcAttr = scePthreadAttrInit(attr);
+    if (rcAttr == 0) {
+        scePthreadAttrSetstacksize(attr, 2 * 1024 * 1024);
+    }
+    nativeThread_ = nullptr;
+    int rc = scePthreadCreate(&nativeThread_, attr, &ImageLoader::pthreadEntry, this, "image_worker");
+    scePthreadAttrDestroy(attr);
+    if (rc != 0 || !nativeThread_) {
+        running_ = false;
+        luna::util::CrashLogger::log("[ImageLoader ERROR] scePthreadCreate fallo: %d", rc);
+        return;
+    }
+    luna::util::CrashLogger::log("[ImageLoader] Hilo worker de descarga iniciado con stack dedicado de 2 MB (scePthreadCreate).");
+#endif
 }
 
 void ImageLoader::shutdown() {
@@ -277,9 +321,16 @@ void ImageLoader::shutdown() {
         queue_.clear();
     }
     cv_.notify_all();
+#if defined(_WIN32)
     if (workerThread_.joinable()) {
         workerThread_.join();
     }
+#else
+    if (nativeThread_) {
+        scePthreadJoin(nativeThread_, nullptr);
+        nativeThread_ = nullptr;
+    }
+#endif
 }
 
 static inline std::string getCacheKey(const std::string& url, ImagePreset preset) {
@@ -324,6 +375,7 @@ void ImageLoader::clearCache() {
 }
 
 void ImageLoader::workerLoop() {
+    static int s_downloadLogCount = 0;
     while (running_) {
         Request req;
         {
@@ -339,7 +391,15 @@ void ImageLoader::workerLoop() {
 
         std::string reqKey = getCacheKey(req.url, req.preset);
         auto resp = luna::net::HttpClient::get(req.url);
+        int dlLog = s_downloadLogCount++;
+        if (dlLog < 15 || !resp.ok()) {
+            luna::util::CrashLogger::log("[ImageLoader] #%d GET %s -> HTTP %d (%zu bytes)%s",
+                                         dlLog + 1, req.url.c_str(), resp.statusCode, resp.body.size(),
+                                         resp.ok() ? "" : (", err: " + resp.error).c_str());
+        }
         if (!resp.ok() || resp.body.empty()) {
+            luna::util::CrashLogger::log("[ImageLoader FAIL] #%d descarga fallida (HTTP %d, %zu bytes, err: %s) para %s",
+                                         dlLog + 1, resp.statusCode, resp.body.size(), resp.error.c_str(), req.url.c_str());
             std::lock_guard<std::mutex> lk(mutex_);
             inFlight_.erase(reqKey);
             continue;
@@ -349,9 +409,15 @@ void ImageLoader::workerLoop() {
         std::vector<uint8_t> rawRgba;
         if (!decodeImageRgba(reinterpret_cast<const uint8_t*>(resp.body.data()),
                              resp.body.size(), rawRgba, origW, origH)) {
+            luna::util::CrashLogger::log("[ImageLoader FAIL] #%d stbi_load_from_memory fallo para %s (%zu bytes)",
+                                         dlLog + 1, req.url.c_str(), resp.body.size());
             std::lock_guard<std::mutex> lk(mutex_);
             inFlight_.erase(reqKey);
             continue;
+        }
+        if (dlLog < 15) {
+            luna::util::CrashLogger::log("[ImageLoader OK] #%d decodificado OK (%dx%d) para preset %d",
+                                         dlLog + 1, origW, origH, static_cast<int>(req.preset));
         }
 
         int targetW = origW;

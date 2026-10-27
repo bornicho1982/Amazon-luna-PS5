@@ -122,7 +122,8 @@ public:
                               int detailZone,
                               int detailBtnIdx,
                               int similarSelectedIdx,
-                              uint64_t frameCount);
+                              uint64_t frameCount,
+                              bool isFavorite = false);
 
     void drawNativeEngineWaitingScreen(const std::string& localWebUrl,
                                        const std::string& lanWebUrl,

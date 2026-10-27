@@ -121,7 +121,7 @@ bool HttpClient::init() {
     g_httpCtxId = sceHttpInit(g_netPoolId, g_sslCtxId, 1024 * 1024);
 
     if (g_httpCtxId >= 0) {
-        g_tmplId = sceHttpCreateTemplate(g_httpCtxId, "Luna-Client/1.0", SCE_HTTP_VERSION_1_1, 1);
+        g_tmplId = sceHttpCreateTemplate(g_httpCtxId, "Mozilla/5.0 (PlayStation 5 1.0) AppleWebKit/605.1.15 (KHTML, like Gecko)", SCE_HTTP_VERSION_1_1, 1);
         if (g_tmplId >= 0) {
             sceHttpsDisableOption(g_tmplId, 0x01);
             sceHttpsDisableOption(g_tmplId, 0x02);
@@ -425,6 +425,7 @@ HttpResponse HttpClient::get(const std::string& url,
 
     sceHttpsDisableOption(connId, 0x01);
     sceHttpsDisableOption(connId, 0x02);
+    sceHttpSetAutoRedirect(connId, 1);
 
     int reqId = sceHttpCreateRequestWithURL(connId, SCE_HTTP_METHOD_GET, url.c_str(), 0);
     if (reqId < 0) {
@@ -435,6 +436,7 @@ HttpResponse HttpClient::get(const std::string& url,
 
     sceHttpsDisableOption(reqId, 0x01);
     sceHttpsDisableOption(reqId, 0x02);
+    sceHttpSetAutoRedirect(reqId, 1);
     sceHttpSetSendTimeOut(reqId, 30000000);
     sceHttpSetRecvTimeOut(reqId, 60000000);
 
@@ -452,7 +454,7 @@ HttpResponse HttpClient::get(const std::string& url,
         sceHttpGetStatusCode(reqId, &statusCode);
         resp.statusCode = statusCode;
 
-        char buf[2048];
+        char buf[16384];
         int readBytes = 0;
         while ((readBytes = sceHttpReadData(reqId, buf, sizeof(buf))) > 0) {
             resp.body.append(buf, readBytes);

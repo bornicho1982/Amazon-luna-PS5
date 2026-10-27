@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cctype>
 #include <chrono>
 #include <sstream>
 
@@ -190,6 +191,14 @@ void WebRtcClient::setupPeerConnection() {
         }
         iceStateStr_ = stateStr;
         luna::util::CrashLogger::log("[WebRTC] ICE state transition: %s (%d)", stateStr, static_cast<int>(state));
+        if (state == rtc::PeerConnection::IceState::Disconnected ||
+            state == rtc::PeerConnection::IceState::Failed ||
+            state == rtc::PeerConnection::IceState::Closed) {
+            if (everReceivedVideo_.load() || isConnected_.load()) {
+                remoteSessionEnded_.store(true);
+                luna::util::CrashLogger::log("[WebRTC] Sesion remota terminada por transicion ICE: %s", stateStr);
+            }
+        }
     });
 
     pc_->onStateChange([this](rtc::PeerConnection::State state) {
@@ -212,6 +221,8 @@ void WebRtcClient::setupPeerConnection() {
                    state == rtc::PeerConnection::State::Disconnected ||
                    state == rtc::PeerConnection::State::Closed) {
             isConnected_ = false;
+            remoteSessionEnded_.store(true);
+            luna::util::CrashLogger::log("[WebRTC] Sesion remota terminada (PeerConnection estado %s)", stStr);
         }
     });
 
@@ -275,6 +286,11 @@ void WebRtcClient::setupPeerConnection() {
             inputChannel_->send(reinterpret_cast<const std::byte*>(kGamepadConnectMsg), sizeof(kGamepadConnectMsg));
         }
     });
+    inputChannel_->onClosed([this]() {
+        if (m_stopping_.load()) return;
+        remoteSessionEnded_.store(true);
+        luna::util::CrashLogger::log("[WebRTC] DataChannel inputChannel cerrado por el servidor (juego finalizado).");
+    });
     inputChannel_->onMessage([](rtc::message_variant msg) {
         if (auto b = std::get_if<rtc::binary>(&msg)) {
             if (b->size() > 16) {
@@ -290,10 +306,26 @@ void WebRtcClient::setupPeerConnection() {
         sendLunaChannelHandshake();
         requestKeyframe();
     });
+    messageChannel_->onClosed([this]() {
+        if (m_stopping_.load()) return;
+        remoteSessionEnded_.store(true);
+        luna::util::CrashLogger::log("[WebRTC] DataChannel clientMessageChannel cerrado por el servidor (juego finalizado).");
+    });
     messageChannel_->onMessage([this](rtc::message_variant msg) {
         if (m_stopping_.load()) return;
         if (auto text = std::get_if<std::string>(&msg)) {
             luna::util::CrashLogger::log("[WebRTC clientMessageChannel RX TEXT] %s", text->c_str());
+            // Heurística: mensaje de terminación de sesión enviado por el servidor
+            std::string lower = text->c_str();
+            for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lower.find("session") != std::string::npos &&
+                (lower.find("end") != std::string::npos ||
+                 lower.find("stop") != std::string::npos ||
+                 lower.find("terminat") != std::string::npos ||
+                 lower.find("close") != std::string::npos)) {
+                remoteSessionEnded_.store(true);
+                luna::util::CrashLogger::log("[WebRTC] Mensaje de finalización de sesión recibido del servidor.");
+            }
         } else if (auto b = std::get_if<rtc::binary>(&msg)) {
             const uint8_t* raw = reinterpret_cast<const uint8_t*>(b->data());
             size_t len = b->size();
@@ -661,13 +693,28 @@ void WebRtcClient::addRemoteIceCandidate(const std::string& candidateLine, const
 }
 
 bool WebRtcClient::start() {
+    remoteSessionEnded_ = false;
+    lastVideoRtpTimeMs_ = 0;
+    everReceivedVideo_ = false;
     isConnected_ = true;
     return true;
+}
+
+bool WebRtcClient::hasRemoteSessionEnded() const {
+    if (remoteSessionEnded_.load()) return true;
+    if (!everReceivedVideo_.load()) return false;
+    uint64_t last = lastVideoRtpTimeMs_.load();
+    if (last == 0) return false;
+    uint64_t now = nowSteadyMs();
+    return (now > last) && ((now - last) > 2500);
 }
 
 void WebRtcClient::stop() {
     m_stopping_.store(true);
     isConnected_ = false;
+    remoteSessionEnded_ = false;
+    lastVideoRtpTimeMs_ = 0;
+    everReceivedVideo_ = false;
     iceStateStr_ = "Closed";
     peerStateStr_ = "Closed";
     localCandidateCount_ = 0;
@@ -793,6 +840,10 @@ void WebRtcClient::processVideoRtp(const uint8_t* pkt, size_t len) {
     if (payloadType == kAudioPayloadType || payloadType < 96) {
         return;
     }
+
+    // Registrar actividad de vídeo RTP para detectar el final remoto de sesión
+    lastVideoRtpTimeMs_.store(nowSteadyMs());
+    everReceivedVideo_.store(true);
 
     uint16_t seq = (static_cast<uint16_t>(pkt[2]) << 8) | static_cast<uint16_t>(pkt[3]);
 

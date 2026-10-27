@@ -71,6 +71,11 @@ public:
     bool isStopping() const { return m_stopping_.load(); }
     const StreamStats& getStats() const { return stats_; }
 
+    // Indica si la sesión remota de Amazon Luna terminó (juego cerrado en el
+    // propio menú del juego, canal cortado, o 3.5 s sin RTP de vídeo).
+    bool hasRemoteSessionEnded() const;
+    uint64_t getLastVideoRtpTimeMs() const { return lastVideoRtpTimeMs_.load(); }
+
     std::string getIceStateStr() const { return iceStateStr_; }
     std::string getPeerStateStr() const { return peerStateStr_; }
     size_t getLocalCandidateCount() const { return localCandidateCount_.load(); }
@@ -120,6 +125,10 @@ private:
     std::atomic<uint64_t> lastPingTimeMs_{0};
     std::atomic<uint64_t> lastIdleResetTimeMs_{0};
     std::atomic<uint32_t> pingsSentCount_{0};
+
+    std::atomic<bool> remoteSessionEnded_{false};
+    std::atomic<uint64_t> lastVideoRtpTimeMs_{0};
+    std::atomic<bool> everReceivedVideo_{false};
 
     std::mutex txMutex_;
     std::mutex videoRtpMutex_;

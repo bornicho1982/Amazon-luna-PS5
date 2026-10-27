@@ -936,7 +936,7 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                                         int searchGridIdx,
                                         const std::vector<GameTile>& filteredGames) {
     if (!isReady_ || !mappedMemory_) return;
-    (void)heroBtnIdx; (void)frameCount;
+    (void)frameCount;
 
     // 1. Fondo principal oficial de Amazon Luna (#0E0B16 Cosmic Deep)
     clear(0xFF0E0B16);
@@ -967,9 +967,9 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         int heroY = 0 - yOffset;
         if (heroY + 560 > 0) {
             // Fondo panoramico que ocupa todo el ancho superior con degradado suave a #0E0B16
-            std::string heroBackdrop = heroGame.backdropUrl;
+            std::string heroBackdrop = heroGame.backdropUrl.empty() ? heroGame.coverUrl : heroGame.backdropUrl;
             bool isFirstSlide = (heroIdx == 0 || heroGame.title == "Luna Premium");
-            if (isFirstSlide || heroBackdrop.empty()) {
+            if (isFirstSlide) {
                 if (!heroBannerRgba_.empty()) {
                     drawPreScaledImage(0, heroY, heroBannerRgba_.data(), 1920, 540, heroBannerWidth_, heroBannerHeight_);
                 } else {
@@ -979,11 +979,16 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                 auto heroImg = luna::util::ImageLoader::instance().getImage(heroBackdrop, luna::util::ImagePreset::PanoramicHero);
                 if (heroImg && heroImg->ready) {
                     drawPreScaledImage(0, heroY, heroImg->rgba.data(), 1920, 540, heroImg->width, heroImg->height);
-                } else if (!heroBannerRgba_.empty()) {
-                    drawPreScaledImage(0, heroY, heroBannerRgba_.data(), 1920, 540, heroBannerWidth_, heroBannerHeight_);
                 } else {
-                    luna::util::ImageLoader::instance().requestImage(heroBackdrop, luna::util::ImagePreset::PanoramicHero);
-                    fillRect(0, std::max(0, heroY), 1920, 540, 0xFF0E0B16);
+                    // Pedir SIEMPRE el fondo real en segundo plano
+                    if (!heroBackdrop.empty()) {
+                        luna::util::ImageLoader::instance().requestImage(heroBackdrop, luna::util::ImagePreset::PanoramicHero);
+                    }
+                    if (!heroBannerRgba_.empty()) {
+                        drawPreScaledImage(0, heroY, heroBannerRgba_.data(), 1920, 540, heroBannerWidth_, heroBannerHeight_);
+                    } else {
+                        fillRect(0, std::max(0, heroY), 1920, 540, 0xFF0E0B16);
+                    }
                 }
             }
 
@@ -1009,10 +1014,12 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
             }
 
             // Lado izquierdo del Hero (x = 68):
+            bool btn0Focused = (focusZone == 2) ? (heroBtnIdx == 0) : heroFocused;
+            bool btn1Focused = (focusZone == 2 && heroBtnIdx == 1);
             if (isFirstSlide) {
                 drawText(68, heroY + 140, 6, "Luna Premium", 0xFFFFFFFF);
                 drawText(68, heroY + 310, 2, "Mas de 100 juegos. Una suscripcion.", 0xFFE2E8F0);
-                drawPillButton(68, heroY + 365, 280, 58, "Mas informacion", heroFocused, "", false);
+                drawPillButton(68, heroY + 365, 280, 58, "Mas informacion", btn0Focused, "", false);
             } else {
                 bool drawnLogo = false;
                 if (!heroGame.logoUrl.empty()) {
@@ -1029,8 +1036,9 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                 }
                 std::string sub = heroGame.subtitle.empty() ? (heroGame.synopsis.empty() ? "Descubre grandes titulos para jugar en la nube." : heroGame.synopsis) : heroGame.subtitle;
                 drawText(68, heroY + 310, 2, utf8SafeTruncate(sub, 54), 0xFFE2E8F0);
-                std::string btnTxt = heroGame.buttonText.empty() ? "Jugar ahora" : heroGame.buttonText;
-                drawPillButton(68, heroY + 365, 280, 58, btnTxt, heroFocused, "", true);
+                // Dos botones oficiales: [▶ Jugar ahora] y [Más información]
+                drawPillButton(68, heroY + 365, 280, 58, "Jugar ahora", btn0Focused, "", true);
+                drawPillButton(364, heroY + 365, 280, 58, "Mas informacion", btn1Focused, "", false);
             }
 
             // D. Indicador de carrusel (dots)
@@ -1262,7 +1270,8 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
                                           int detailZone,
                                           int detailBtnIdx,
                                           int similarSelectedIdx,
-                                          uint64_t frameCount) {
+                                          uint64_t frameCount,
+                                          bool isFavorite) {
     if (!isReady_ || !mappedMemory_) return;
     (void)frameCount;
 
@@ -1346,7 +1355,8 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
     // Boton de favoritos con estrella vectorial
     bool favFocused = (detailZone == 0 && detailBtnIdx == 1);
     drawRoundedRect(425, 360, 64, 64, 14, favFocused ? 0xFFFFFFFF : 0xFF353047);
-    drawStarIcon(457, 392, 12, favFocused ? 0xFF0E0B16 : 0xFFFFFFFF);
+    uint32_t favStarColor = isFavorite ? 0xFFF59E0B : (favFocused ? 0xFF0E0B16 : 0xFFFFFFFF);
+    drawStarIcon(457, 392, 12, favStarColor);
 
     drawText(68, 448, 1, "Compartir    Anadir al escritorio    Informar de un problema", 0xFF94A3B8);
 

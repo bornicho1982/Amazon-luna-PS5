@@ -66,7 +66,12 @@ private:
     std::deque<Request> queue_;
     std::unordered_map<std::string, std::shared_ptr<const DecodedImage>> cache_;
     std::unordered_map<std::string, bool> inFlight_;
+#if defined(_WIN32)
     std::thread workerThread_;
+#else
+    void* nativeThread_ = nullptr;
+    static void* pthreadEntry(void* arg);
+#endif
     bool running_ = false;
 
     void workerLoop();
