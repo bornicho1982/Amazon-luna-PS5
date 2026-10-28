@@ -19,7 +19,7 @@ enum class HudMode {
 
 struct AppSettings {
     VideoQuality videoQuality = VideoQuality::P1080_60;
-    HudMode hudMode = HudMode::Auto;
+    HudMode hudMode = HudMode::Hidden;
     bool vibrationEnabled = true;
     int deadzonePercent = 6; // 4, 6, 10
     std::string language = "es-ES";

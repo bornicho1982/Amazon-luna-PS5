@@ -50,7 +50,9 @@ bool AppSettings::load(const std::string& customPath) {
     int vq = root["videoQuality"].asInt(0);
     videoQuality = (vq == 1) ? VideoQuality::P720_60 : VideoQuality::P1080_60;
 
-    int hm = root["hudMode"].asInt(0);
+    int hm = root["hudMode"].asInt(2);
+    // Legacy settings files (saved before the HUD default changed) are migrated to HUD hidden
+    if (root["hudDefaultV2"].asInt(0) == 0) hm = 2;
     if (hm == 1) hudMode = HudMode::Always;
     else if (hm == 2) hudMode = HudMode::Hidden;
     else hudMode = HudMode::Auto;
@@ -85,6 +87,7 @@ bool AppSettings::save(const std::string& customPath) const {
     std::string json = "{\n";
     json += "  \"videoQuality\": " + std::to_string(static_cast<int>(videoQuality)) + ",\n";
     json += "  \"hudMode\": " + std::to_string(static_cast<int>(hudMode)) + ",\n";
+    json += "  \"hudDefaultV2\": 1,\n";
     json += "  \"vibrationEnabled\": " + std::string(vibrationEnabled ? "true" : "false") + ",\n";
     json += "  \"deadzonePercent\": " + std::to_string(deadzonePercent) + ",\n";
     json += "  \"region\": \"" + region + "\",\n";

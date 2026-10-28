@@ -36,11 +36,19 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
                            std::vector<uint8_t>& dstRgba, int dstW, int dstH,
                            ImagePreset preset);
 
+// Normalizes Amazon image URLs: .webp -> .jpg and _FMwebp_ -> _FMjpg_ (stb_image cannot decode WebP)
+std::string sanitizeAmazonImageUrl(const std::string& url);
+
+// Asks the Amazon image CDN for a right-sized JPEG (._UX<w>_) instead of multi-MB PNGs. Logos/Raw are untouched.
+std::string optimizeAmazonImageUrl(const std::string& url, ImagePreset preset);
+
 static constexpr size_t MAX_IMAGE_SLOTS = 512;
 
 struct ImageSlot {
     std::atomic<int> state{0}; // 0 = libre, 1 = reservado/descargando, 2 = listo para pintar, -1 = fallo
     std::string key;           // escrito SOLO cuando state == 1 antes de pasar a state == 2
+    uint64_t lastUse = 0;      // LRU tick (guarded by queueMutex_)
+    uint64_t failMs = 0;       // time of last failure, used for retry back-off
     std::shared_ptr<const DecodedImage> image; // escrito SOLO cuando state == 1; INMUTABLE una vez que state == 2
 };
 
@@ -58,6 +66,10 @@ public:
     void requestImage(const std::string& url, ImagePreset preset);
 
     void clearCache();
+
+    // Drops every queued (not yet started) download so the screen the user is looking at gets bandwidth first.
+    // Dropped requests are simply re-issued by the draw code if their image is still needed.
+    void prioritizeOrClearPending();
 
 private:
     ImageLoader();
@@ -84,6 +96,7 @@ private:
     static void* pthreadEntry(void* arg);
 #endif
     bool running_ = false;
+    uint64_t tick_ = 0;
 
     void workerLoop();
 };
