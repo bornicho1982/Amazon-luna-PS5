@@ -18,7 +18,9 @@ enum class ImagePreset {
     ScreenshotThumbnail,  // 270 x 152, 10px rounded corners
     PanoramicHero,        // 1920 x 540, left & bottom dark gradient to #0E0B16
     PanoramicDetail,      // 1920 x 1080, left & bottom dark gradient to #0E0B16
-    ProductLogo           // fits up to 420 x 160 preserving aspect ratio with alpha
+    ProductLogo,          // fits up to 420 x 160 preserving aspect ratio with alpha
+    HorizontalCard16_9,   // 290 x 164 px, 12px rounded corners
+    SquareCategory        // 180 x 180 px, 14px rounded corners
 };
 
 struct DecodedImage {

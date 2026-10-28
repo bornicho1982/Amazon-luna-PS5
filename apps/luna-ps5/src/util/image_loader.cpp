@@ -250,6 +250,12 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
         case ImagePreset::ScreenshotThumbnail:
             applyCornerMask(dstRgba.data(), dstW, dstH, 10);
             break;
+        case ImagePreset::HorizontalCard16_9:
+            applyCornerMask(dstRgba.data(), dstW, dstH, 12);
+            break;
+        case ImagePreset::SquareCategory:
+            applyCornerMask(dstRgba.data(), dstW, dstH, 14);
+            break;
         case ImagePreset::PanoramicHero:
             applyDarkGradient(dstRgba.data(), dstW, dstH, 850, 160);
             break;
@@ -483,6 +489,10 @@ void ImageLoader::workerLoop() {
                 targetW = 1920; targetH = 540; break;
             case ImagePreset::PanoramicDetail:
                 targetW = 1920; targetH = 1080; break;
+            case ImagePreset::HorizontalCard16_9:
+                targetW = 290; targetH = 164; break;
+            case ImagePreset::SquareCategory:
+                targetW = 180; targetH = 180; break;
             case ImagePreset::ProductLogo: {
                 float aspect = static_cast<float>(origW) / static_cast<float>(origH);
                 int maxW = 420, maxH = 160;
