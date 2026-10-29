@@ -445,6 +445,10 @@ int main(int argc, char* argv[]) {
     std::vector<int> rowSelectedCol;
     int heroBtnIdx = 0; // 0 = Jugar ahora, 1 = Mas informacion
 
+    auto lastTileChangeTime = std::chrono::steady_clock::now();
+    int prevHoverRow = -1;
+    int prevHoverCol = -1;
+
     bool profileMenuOpen = false;
     int profileMenuIdx = 0;
 
@@ -1265,6 +1269,20 @@ int main(int argc, char* argv[]) {
                     catalogStatus = "Explora tu catalogo de Amazon Luna | (X) Ver detalles | ([ ]) Jugar directo";
                 }
 
+                int curHoverRow = selectedRowIdx;
+                int curHoverCol = (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) ? rowSelectedCol[selectedRowIdx] : 0;
+                if (focusZone == 1 && (curHoverRow != prevHoverRow || curHoverCol != prevHoverCol || dirHeldNow)) {
+                    lastTileChangeTime = now;
+                    prevHoverRow = curHoverRow;
+                    prevHoverCol = curHoverCol;
+                }
+
+                bool hoverCardOpen = false;
+                int hoverMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTileChangeTime).count();
+                if (focusZone == 1 && selectedRowIdx > 0 && hoverMs >= 600 && !profileMenuOpen && !searchOpen) {
+                    hoverCardOpen = true;
+                }
+
                 display.setSearchQuery(searchQuery);
                 display.drawLunaHomeScreen(
                     curCols,
@@ -1285,7 +1303,8 @@ int main(int argc, char* argv[]) {
                     searchZone,
                     searchLetterIdx,
                     searchGridIdx,
-                    filteredGames
+                    filteredGames,
+                    hoverCardOpen
                 );
                 break;
             }

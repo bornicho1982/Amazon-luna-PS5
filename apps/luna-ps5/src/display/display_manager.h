@@ -125,7 +125,8 @@ public:
                             int searchZone = 0,
                             int searchLetterIdx = 0,
                             int searchGridIdx = 0,
-                            const std::vector<GameTile>& filteredGames = {});
+                            const std::vector<GameTile>& filteredGames = {},
+                            bool hoverCardOpen = false);
 
     void drawGameDetailScreen(const GameTile& game,
                               const PlayerProfileInfo& profile,
@@ -213,15 +214,24 @@ public:
     bool isReady() const { return isReady_; }
 
 private:
-    void setPixelSwizzled(uint8_t* base, int x, int y, uint32_t colorArgb);
-    uint32_t getPixelSwizzled(const uint8_t* base, int x, int y) const;
-    void blendPixelSwizzled(uint8_t* base, int x, int y, uint32_t colorArgb, uint8_t alpha);
+    void putPixel(int x, int y, uint32_t colorArgb);
+    uint32_t getPixel(int x, int y) const;
+    void blendPixel(int x, int y, uint32_t colorArgb, uint8_t alpha);
+
+    void setPixelSwizzled(uint8_t*, int x, int y, uint32_t colorArgb) { putPixel(x, y, colorArgb); }
+    uint32_t getPixelSwizzled(const uint8_t*, int x, int y) const { return getPixel(x, y); }
+    void blendPixelSwizzled(uint8_t*, int x, int y, uint32_t colorArgb, uint8_t alpha) { blendPixel(x, y, colorArgb, alpha); }
+
+    void drawHoverPreviewCard(int anchorX, int anchorY, const GameTile& tile, uint64_t frameCount);
 
     FontRenderer fontRenderer_;
 
     int width_ = 1920;
     int height_ = 1080;
     bool isReady_ = false;
+
+    // Linear offscreen frame canvas in system RAM (ABGR word order for PS5/PC)
+    std::vector<uint32_t> canvas_;
 
     int videoHandle_ = -1;
     void* mappedMemory_ = nullptr;

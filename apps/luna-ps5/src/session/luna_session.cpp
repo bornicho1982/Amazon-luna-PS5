@@ -603,6 +603,7 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     outTile.backdropUrl = backdropUrl;
 
     outTile.logoUrl = logoUrl;
+    outTile.videoUrl = hover["trailerUrl"].asString();
 
     outTile.subtitle = subtitle;
 
@@ -992,7 +993,7 @@ std::vector<luna::display::LunaCollection> LunaSessionClient::fetchPageCollectio
 
         // Fila de Banner Promocional de Partners (PARTNER_UPSELL_ROW)
 
-        if (colType == "PARTNER_UPSELL_ROW" || colId.find("content_highlight_row") != std::string::npos) {
+        if (colType == "PARTNER_UPSELL_ROW" || colId.find("content_highlight_row") != std::string::npos || colId.find("promo_banner") != std::string::npos) {
 
             luna::display::LunaCollection partnerRow;
 

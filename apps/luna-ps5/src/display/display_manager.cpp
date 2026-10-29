@@ -202,6 +202,7 @@ bool DisplayManager::init(int width, int height) {
 #endif
 
     isReady_ = true;
+    canvas_.assign(width_ * height_, 0xFF000000U);
     fontRenderer_.init();
     loadStaticHeroBanner();
     return true;
@@ -238,44 +239,34 @@ void DisplayManager::loadStaticHeroBanner() {
     }
 }
 
-void DisplayManager::setPixelSwizzled(uint8_t* base, int x, int y, uint32_t colorArgb) {
-    if (x < 0 || y < 0 || x >= width_ || y >= height_) return;
-    uint32_t abgr = argbToAbgr(colorArgb);
-#if defined(LUNA_TARGET_PS5)
-    size_t offset = fastOffset(getFastTile(), static_cast<unsigned>(x), static_cast<unsigned>(y));
-    *reinterpret_cast<uint32_t*>(base + offset) = abgr;
-#else
-    reinterpret_cast<uint32_t*>(base)[y * width_ + x] = abgr;
-#endif
+void DisplayManager::putPixel(int x, int y, uint32_t colorArgb) {
+    if (static_cast<unsigned>(x) < static_cast<unsigned>(width_) &&
+        static_cast<unsigned>(y) < static_cast<unsigned>(height_)) {
+        canvas_[y * width_ + x] = argbToAbgr(colorArgb);
+    }
 }
 
-uint32_t DisplayManager::getPixelSwizzled(const uint8_t* base, int x, int y) const {
-    if (x < 0 || y < 0 || x >= width_ || y >= height_) return 0;
-#if defined(LUNA_TARGET_PS5)
-    size_t offset = fastOffset(getFastTile(), static_cast<unsigned>(x), static_cast<unsigned>(y));
-    return *reinterpret_cast<const uint32_t*>(base + offset);
-#else
-    return reinterpret_cast<const uint32_t*>(base)[y * width_ + x];
-#endif
+uint32_t DisplayManager::getPixel(int x, int y) const {
+    if (static_cast<unsigned>(x) < static_cast<unsigned>(width_) &&
+        static_cast<unsigned>(y) < static_cast<unsigned>(height_)) {
+        return canvas_[y * width_ + x];
+    }
+    return 0;
 }
 
-void DisplayManager::blendPixelSwizzled(uint8_t* base, int x, int y, uint32_t colorArgb, uint8_t alpha) {
-    if (x < 0 || y < 0 || x >= width_ || y >= height_ || alpha == 0) return;
+void DisplayManager::blendPixel(int x, int y, uint32_t colorArgb, uint8_t alpha) {
+    if (static_cast<unsigned>(x) >= static_cast<unsigned>(width_) ||
+        static_cast<unsigned>(y) >= static_cast<unsigned>(height_) || alpha == 0) return;
 
     uint32_t srcA = (((colorArgb >> 24) & 0xFF) * alpha) / 255;
     if (srcA == 0) return;
+    size_t idx = static_cast<size_t>(y) * width_ + x;
     if (srcA >= 255) {
-        setPixelSwizzled(base, x, y, colorArgb);
+        canvas_[idx] = argbToAbgr(colorArgb);
         return;
     }
 
-#if defined(LUNA_TARGET_PS5)
-    size_t offset = fastOffset(getFastTile(), static_cast<unsigned>(x), static_cast<unsigned>(y));
-    uint32_t dstAbgr = *reinterpret_cast<uint32_t*>(base + offset);
-#else
-    uint32_t dstAbgr = reinterpret_cast<uint32_t*>(base)[y * width_ + x];
-#endif
-
+    uint32_t dstAbgr = canvas_[idx];
     uint32_t dstR = dstAbgr & 0xFF;
     uint32_t dstG = (dstAbgr >> 8) & 0xFF;
     uint32_t dstB = (dstAbgr >> 16) & 0xFF;
@@ -288,120 +279,39 @@ void DisplayManager::blendPixelSwizzled(uint8_t* base, int x, int y, uint32_t co
     uint32_t outR = (srcR * srcA + dstR * invA) / 255;
     uint32_t outG = (srcG * srcA + dstG * invA) / 255;
     uint32_t outB = (srcB * srcA + dstB * invA) / 255;
-    uint32_t outAbgr = 0xFF000000U | (outB << 16) | (outG << 8) | outR;
-
-#if defined(LUNA_TARGET_PS5)
-    *reinterpret_cast<uint32_t*>(base + offset) = outAbgr;
-#else
-    reinterpret_cast<uint32_t*>(base)[y * width_ + x] = outAbgr;
-#endif
+    canvas_[idx] = 0xFF000000U | (outB << 16) | (outG << 8) | outR;
 }
 
 void DisplayManager::clear(uint32_t colorArgb) {
-    if (!isReady_ || !mappedMemory_) return;
-
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    if (!isReady_ || canvas_.empty()) return;
     uint32_t abgr = argbToAbgr(colorArgb);
-
-#if defined(LUNA_TARGET_PS5)
-    // Fast path: one memcpy of a pre-swizzled background snapshot
-    if (!bgCache_.empty() && bgCacheColor_ == abgr) {
-        std::memcpy(base, bgCache_.data(), kUsedBytes);
-        return;
-    }
-    const TileOrder& order = getTileOrder();
-    constexpr unsigned kTotalTiles = kTilesX * kTilesY;
-    for (unsigned t = 0; t < kTotalTiles; ++t) {
-        unsigned tx = t % kTilesX;
-        unsigned ty = t / kTilesX;
-        auto* out = reinterpret_cast<uint32_t*>(base + static_cast<size_t>(t) * 0x10000);
-        for (unsigned i = 0; i < 16384; ++i) {
-            unsigned x = tx * 128 + order.dx[i];
-            unsigned y = ty * 128 + order.dy[i];
-            out[i] = (x < kWidth && y < kHeight) ? abgr : 0xFF000000U;
-        }
-    }
-    bgCache_.assign(base, base + kUsedBytes);
-    bgCacheColor_ = abgr;
-#else
-    auto* buf = reinterpret_cast<uint32_t*>(base);
-    for (int i = 0; i < width_ * height_; ++i) {
-        buf[i] = abgr;
-    }
-#endif
+    std::fill_n(canvas_.data(), width_ * height_, abgr);
 }
 
 void DisplayManager::fillRect(int rx, int ry, int rw, int rh, uint32_t colorArgb) {
-    if (!isReady_ || !mappedMemory_) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
-    int x0 = rx < 0 ? 0 : rx;
-    int y0 = ry < 0 ? 0 : ry;
-    int x1 = (rx + rw) > width_ ? width_ : (rx + rw);
-    int y1 = (ry + rh) > height_ ? height_ : (ry + rh);
+    if (!isReady_ || rw <= 0 || rh <= 0) return;
+    int x0 = std::max(0, rx);
+    int y0 = std::max(0, ry);
+    int x1 = std::min(width_, rx + rw);
+    int y1 = std::min(height_, ry + rh);
     if (x0 >= x1 || y0 >= y1) return;
 
-#if defined(LUNA_TARGET_PS5)
-    const FastTile& ft = getFastTile();
-    const uint32_t abgr = argbToAbgr(colorArgb);
-    constexpr unsigned kBlocksPerRow = (kWidth + 127U) >> 7;
+    uint32_t abgr = argbToAbgr(colorArgb);
+    int count = x1 - x0;
     for (int y = y0; y < y1; ++y) {
-        const size_t rowBlk = static_cast<size_t>(static_cast<unsigned>(y) >> 7) * kBlocksPerRow;
-        const uint32_t yt = ft.yt[y];
-        for (int x = x0; x < x1; ++x) {
-            const size_t off = ((rowBlk + (static_cast<unsigned>(x) >> 7)) << 16) + (yt ^ ft.xt[x]);
-            *reinterpret_cast<uint32_t*>(base + off) = abgr;
-        }
+        std::fill_n(&canvas_[y * width_ + x0], count, abgr);
     }
-#else
-    for (int y = y0; y < y1; ++y) {
-        for (int x = x0; x < x1; ++x) {
-            setPixelSwizzled(base, x, y, colorArgb);
-        }
-    }
-#endif
 }
 
 void DisplayManager::drawImage(int rx, int ry, int rw, int rh, const uint8_t* rgba, int imgW, int imgH) {
-    if (!isReady_ || !mappedMemory_ || !rgba || imgW <= 0 || imgH <= 0 || rw <= 0 || rh <= 0) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
-
-    int x0 = rx < 0 ? 0 : rx;
-    int y0 = ry < 0 ? 0 : ry;
-    int x1 = (rx + rw) > width_ ? width_ : (rx + rw);
-    int y1 = (ry + rh) > height_ ? height_ : (ry + rh);
-
-    for (int y = y0; y < y1; ++y) {
-        int srcY = ((y - ry) * imgH) / rh;
-        if (srcY >= imgH) srcY = imgH - 1;
-        const uint8_t* row = rgba + (static_cast<size_t>(srcY) * static_cast<size_t>(imgW) * 4);
-        for (int x = x0; x < x1; ++x) {
-            int srcX = ((x - rx) * imgW) / rw;
-            if (srcX >= imgW) srcX = imgW - 1;
-            const uint8_t* p = row + (srcX * 4);
-            uint8_t r = p[0];
-            uint8_t g = p[1];
-            uint8_t b = p[2];
-            uint8_t a = p[3];
-            uint32_t argb = (static_cast<uint32_t>(a) << 24) |
-                            (static_cast<uint32_t>(r) << 16) |
-                            (static_cast<uint32_t>(g) << 8)  |
-                            static_cast<uint32_t>(b);
-            if (a == 255) {
-                setPixelSwizzled(base, x, y, argb);
-            } else if (a > 0) {
-                blendPixelSwizzled(base, x, y, argb, a);
-            }
-        }
-    }
+    drawPreScaledImage(rx, ry, rgba, rw, rh, imgW, imgH);
 }
 
-
 void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int dstW, int dstH, int srcW, int srcH) {
-    if (!isReady_ || !mappedMemory_ || !rgba || dstW <= 0 || dstH <= 0) return;
+    if (!isReady_ || !rgba || dstW <= 0 || dstH <= 0) return;
     if (srcW <= 0) srcW = dstW;
     if (srcH <= 0) srcH = dstH;
     if (srcW > 4096 || srcH > 4096) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
 
     int x0 = std::clamp(rx, 0, width_);
     int y0 = std::clamp(ry, 0, height_);
@@ -409,135 +319,95 @@ void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int
     int y1 = std::clamp(ry + dstH, 0, height_);
     if (x0 >= x1 || y0 >= y1) return;
 
-#if defined(LUNA_TARGET_PS5)
-    const FastTile& ft = getFastTile();
-    constexpr unsigned kBlocksPerRow = (kWidth + 127U) >> 7;
     const bool oneToOne = (srcW == dstW && srcH == dstH);
-    static int xmap[kWidth + 128];
+    static int xmap[1920 + 128];
     if (!oneToOne) {
         for (int x = x0; x < x1; ++x) {
             int sx = static_cast<int>((static_cast<int64_t>(x - rx) * srcW) / dstW);
-            xmap[x] = sx >= srcW ? srcW - 1 : sx;
+            xmap[x] = (sx >= srcW) ? (srcW - 1) : sx;
         }
     }
+
     for (int y = y0; y < y1; ++y) {
         int srcY = oneToOne ? (y - ry) : static_cast<int>((static_cast<int64_t>(y - ry) * srcH) / dstH);
         if (srcY >= srcH) srcY = srcH - 1;
         const uint8_t* rowSrc = rgba + static_cast<size_t>(srcY) * static_cast<size_t>(srcW) * 4;
-        const size_t rowBlk = static_cast<size_t>(static_cast<unsigned>(y) >> 7) * kBlocksPerRow;
-        const uint32_t yt = ft.yt[y];
+        uint32_t* dstRow = &canvas_[y * width_];
+
         for (int x = x0; x < x1; ++x) {
             const int sx = oneToOne ? (x - rx) : xmap[x];
             const uint8_t* p = rowSrc + static_cast<size_t>(sx) * 4;
             const uint8_t a = p[3];
             if (a == 0) continue;
-            const size_t off = ((rowBlk + (static_cast<unsigned>(x) >> 7)) << 16) + (yt ^ ft.xt[x]);
-            uint32_t* dst = reinterpret_cast<uint32_t*>(base + off);
             if (a == 255) {
                 uint32_t px;
-                std::memcpy(&px, p, 4); // RGBA bytes == little-endian ABGR word expected by the framebuffer
-                *dst = px;
+                std::memcpy(&px, p, 4); // RGBA bytes on little endian = ABGR word expected by the PS5 VideoOut framebuffer
+                dstRow[x] = px;
             } else {
                 const uint32_t inv = 255U - a;
-                const uint32_t d = *dst;
+                const uint32_t d = dstRow[x];
                 const uint32_t r = (p[0] * a + (d & 0xFF) * inv) / 255U;
                 const uint32_t g = (p[1] * a + ((d >> 8) & 0xFF) * inv) / 255U;
                 const uint32_t b = (p[2] * a + ((d >> 16) & 0xFF) * inv) / 255U;
-                *dst = 0xFF000000U | (b << 16) | (g << 8) | r;
+                dstRow[x] = 0xFF000000U | (b << 16) | (g << 8) | r;
             }
         }
     }
-#else
-    size_t totalSrcBytes = static_cast<size_t>(srcW) * static_cast<size_t>(srcH) * 4;
-    float scaleX = static_cast<float>(srcW) / static_cast<float>(dstW);
-    float scaleY = static_cast<float>(srcH) / static_cast<float>(dstH);
-    for (int y = y0; y < y1; ++y) {
-        int srcY = std::clamp(static_cast<int>((y - ry) * scaleY), 0, srcH - 1);
-        size_t rowOffset = static_cast<size_t>(srcY) * static_cast<size_t>(srcW) * 4;
-        for (int x = x0; x < x1; ++x) {
-            int srcX = std::clamp(static_cast<int>((x - rx) * scaleX), 0, srcW - 1);
-            size_t pixelOffset = rowOffset + (static_cast<size_t>(srcX) * 4);
-            if (pixelOffset + 3 >= totalSrcBytes) continue;
-            const uint8_t* p = rgba + pixelOffset;
-            uint8_t a = p[3];
-            uint32_t argb = (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(p[0]) << 16) | (static_cast<uint32_t>(p[1]) << 8) | p[2];
-            if (a == 255) setPixelSwizzled(base, x, y, argb);
-            else if (a > 0) blendPixelSwizzled(base, x, y, argb, a);
-        }
-    }
-#endif
 }
 
 void DisplayManager::blendRectUniform(int rx, int ry, int rw, int rh, uint32_t colorArgb, uint8_t alpha) {
-    if (!isReady_ || !mappedMemory_ || alpha == 0) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    if (!isReady_ || alpha == 0) return;
     int x0 = std::max(0, rx);
     int y0 = std::max(0, ry);
     int x1 = std::min(width_, rx + rw);
     int y1 = std::min(height_, ry + rh);
     if (x0 >= x1 || y0 >= y1) return;
-#if defined(LUNA_TARGET_PS5)
-    const FastTile& ft = getFastTile();
-    constexpr unsigned kBlocksPerRow = (kWidth + 127U) >> 7;
+
     const uint32_t pr = ((colorArgb >> 16) & 0xFF) * alpha;
     const uint32_t pg = ((colorArgb >> 8) & 0xFF) * alpha;
     const uint32_t pb = (colorArgb & 0xFF) * alpha;
     const uint32_t inv = 255U - alpha;
+
     for (int y = y0; y < y1; ++y) {
-        const size_t rowBlk = static_cast<size_t>(static_cast<unsigned>(y) >> 7) * kBlocksPerRow;
-        const uint32_t yt = ft.yt[y];
+        uint32_t* row = &canvas_[y * width_];
         for (int x = x0; x < x1; ++x) {
-            const size_t off = ((rowBlk + (static_cast<unsigned>(x) >> 7)) << 16) + (yt ^ ft.xt[x]);
-            uint32_t* p = reinterpret_cast<uint32_t*>(base + off);
-            const uint32_t d = *p;
-            const uint32_t r = (pr + (d & 0xFF) * inv) / 255U;
-            const uint32_t g = (pg + ((d >> 8) & 0xFF) * inv) / 255U;
-            const uint32_t b = (pb + ((d >> 16) & 0xFF) * inv) / 255U;
-            *p = 0xFF000000U | (b << 16) | (g << 8) | r;
+            uint32_t d = row[x];
+            uint32_t r = (pr + (d & 0xFF) * inv) / 255U;
+            uint32_t g = (pg + ((d >> 8) & 0xFF) * inv) / 255U;
+            uint32_t b = (pb + ((d >> 16) & 0xFF) * inv) / 255U;
+            row[x] = 0xFF000000U | (b << 16) | (g << 8) | r;
         }
     }
-#else
-    for (int y = y0; y < y1; ++y) {
-        for (int x = x0; x < x1; ++x) blendPixelSwizzled(base, x, y, colorArgb, alpha);
-    }
-#endif
 }
 
 void DisplayManager::applyAlphaMask(const std::vector<uint8_t>& mask, int maskW, int maskH,
                                     const std::vector<int>& rowStart, const std::vector<int>& rowEnd,
                                     int destX, int destY, uint32_t colorArgb) {
-    if (!isReady_ || !mappedMemory_ || mask.empty()) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    if (!isReady_ || mask.empty() || maskW <= 0 || maskH <= 0) return;
     const uint32_t sr = (colorArgb >> 16) & 0xFF;
     const uint32_t sg = (colorArgb >> 8) & 0xFF;
     const uint32_t sb = colorArgb & 0xFF;
-#if defined(LUNA_TARGET_PS5)
-    const FastTile& ft = getFastTile();
-    constexpr unsigned kBlocksPerRow = (kWidth + 127U) >> 7;
-#endif
+
     for (int my = 0; my < maskH; ++my) {
         const int y = destY + my;
         if (y < 0 || y >= height_) continue;
         int xs = std::max(0, rowStart[my]);
         int xe = std::min(maskW, rowEnd[my]);
         const uint8_t* mrow = mask.data() + static_cast<size_t>(my) * maskW;
+        uint32_t* row = &canvas_[y * width_];
+
         for (int mx = xs; mx < xe; ++mx) {
             const uint32_t a = mrow[mx];
             if (a == 0) continue;
             const int x = destX + mx;
             if (x < 0 || x >= width_) continue;
-#if defined(LUNA_TARGET_PS5)
-            const size_t off = ((static_cast<size_t>(static_cast<unsigned>(y) >> 7) * kBlocksPerRow + (static_cast<unsigned>(x) >> 7)) << 16) + (ft.yt[y] ^ ft.xt[x]);
-            uint32_t* p = reinterpret_cast<uint32_t*>(base + off);
-            const uint32_t d = *p;
+
+            const uint32_t d = row[x];
             const uint32_t inv = 255U - a;
             const uint32_t r = (sr * a + (d & 0xFF) * inv) / 255U;
             const uint32_t g = (sg * a + ((d >> 8) & 0xFF) * inv) / 255U;
             const uint32_t b = (sb * a + ((d >> 16) & 0xFF) * inv) / 255U;
-            *p = 0xFF000000U | (b << 16) | (g << 8) | r;
-#else
-            blendPixelSwizzled(base, x, y, colorArgb, static_cast<uint8_t>(a));
-#endif
+            row[x] = 0xFF000000U | (b << 16) | (g << 8) | r;
         }
     }
 }
@@ -596,8 +466,7 @@ void DisplayManager::ensureMasks() {
 }
 
 void DisplayManager::drawPlayTriangleIcon(int cx, int cy, int size, uint32_t color) {
-    if (!isReady_ || !mappedMemory_ || size <= 0) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    if (!isReady_ || size <= 0) return;
     int left = cx - size * 2 / 3;
     int right = cx + size * 4 / 3;
     int span = right - left;
@@ -610,14 +479,13 @@ void DisplayManager::drawPlayTriangleIcon(int cx, int cy, int size, uint32_t col
         int y0 = std::max(0, cy - halfH);
         int y1 = std::min(height_ - 1, cy + halfH);
         for (int y = y0; y <= y1; ++y) {
-            setPixelSwizzled(base, x, y, color);
+            putPixel(x, y, color);
         }
     }
 }
 
 void DisplayManager::drawStarIcon(int cx, int cy, int size, uint32_t color) {
-    if (!isReady_ || !mappedMemory_ || size <= 0) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    if (!isReady_ || size <= 0) return;
     float rOuter = static_cast<float>(size);
     float rInner = rOuter * 0.45f;
     int minX = std::max(0, static_cast<int>(cx - rOuter - 1));
@@ -645,21 +513,21 @@ void DisplayManager::drawStarIcon(int cx, int cy, int size, uint32_t color) {
                 }
             }
             if (inside) {
-                setPixelSwizzled(base, x, y, color);
+                putPixel(x, y, color);
             }
         }
     }
 }
 
 void DisplayManager::drawLunaLogoIcon(int x, int y, int size) {
-    if (!isReady_ || !mappedMemory_ || size <= 0) return;
+    if (!isReady_ || size <= 0) return;
     int s2 = size * 2 / 3;
     drawRoundedRect(x, y + 4, s2, s2, 5, 0xFF02FDDB);
     drawRoundedRect(x + size / 3, y, s2, s2, 5, 0xFF9146FF);
 }
 
 void DisplayManager::drawRoundedRect(int x, int y, int w, int h, int r, uint32_t colorArgb) {
-    if (!isReady_ || !mappedMemory_ || w <= 0 || h <= 0) return;
+    if (!isReady_ || w <= 0 || h <= 0) return;
     if (r <= 0) {
         fillRect(x, y, w, h, colorArgb);
         return;
@@ -669,7 +537,6 @@ void DisplayManager::drawRoundedRect(int x, int y, int w, int h, int r, uint32_t
     fillRect(x + r, y, w - (2 * r), r, colorArgb);
     fillRect(x + r, y + h - r, w - (2 * r), r, colorArgb);
 
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
     float rf = static_cast<float>(r);
     for (int cy = 0; cy < r; ++cy) {
         float dy = rf - 0.5f - static_cast<float>(cy);
@@ -681,18 +548,17 @@ void DisplayManager::drawRoundedRect(int x, int y, int w, int h, int r, uint32_t
                 if (dist > rf - 1.0f) {
                     a = static_cast<uint8_t>(255 * (1.0f - (dist - (rf - 1.0f))));
                 }
-                blendPixelSwizzled(base, x + cx, y + cy, colorArgb, a);
-                blendPixelSwizzled(base, x + w - 1 - cx, y + cy, colorArgb, a);
-                blendPixelSwizzled(base, x + cx, y + h - 1 - cy, colorArgb, a);
-                blendPixelSwizzled(base, x + w - 1 - cx, y + h - 1 - cy, colorArgb, a);
+                blendPixel(x + cx, y + cy, colorArgb, a);
+                blendPixel(x + w - 1 - cx, y + cy, colorArgb, a);
+                blendPixel(x + cx, y + h - 1 - cy, colorArgb, a);
+                blendPixel(x + w - 1 - cx, y + h - 1 - cy, colorArgb, a);
             }
         }
     }
 }
 
 void DisplayManager::drawRoundedBorder(int x, int y, int w, int h, int r, int thickness, uint32_t colorArgb) {
-    if (!isReady_ || !mappedMemory_ || thickness <= 0 || w <= 0 || h <= 0) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    if (!isReady_ || thickness <= 0 || w <= 0 || h <= 0) return;
     r = std::min(r, std::min(w / 2, h / 2));
     float rOuter = static_cast<float>(r);
     float rInner = std::max(0.0f, rOuter - static_cast<float>(thickness));
@@ -714,10 +580,10 @@ void DisplayManager::drawRoundedBorder(int x, int y, int w, int h, int r, int th
                 } else if (dist < rInner + 1.0f && rInner > 0.0f) {
                     a = static_cast<uint8_t>(255 * (dist - rInner));
                 }
-                blendPixelSwizzled(base, x + cx, y + cy, colorArgb, a);
-                blendPixelSwizzled(base, x + w - 1 - cx, y + cy, colorArgb, a);
-                blendPixelSwizzled(base, x + cx, y + h - 1 - cy, colorArgb, a);
-                blendPixelSwizzled(base, x + w - 1 - cx, y + h - 1 - cy, colorArgb, a);
+                blendPixel(x + cx, y + cy, colorArgb, a);
+                blendPixel(x + w - 1 - cx, y + cy, colorArgb, a);
+                blendPixel(x + cx, y + h - 1 - cy, colorArgb, a);
+                blendPixel(x + w - 1 - cx, y + h - 1 - cy, colorArgb, a);
             }
         }
     }
@@ -774,8 +640,7 @@ void drawCheckGlyph(DisplayManager& d, int x, int y, int s, uint32_t c) {
 } // namespace
 
 void DisplayManager::drawText(int x, int y, int scale, const std::string& text, uint32_t colorArgb) {
-    if (!isReady_ || !mappedMemory_ || scale <= 0 || text.empty()) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    if (!isReady_ || scale <= 0 || text.empty()) return;
 
     int fontSize = 24;
     switch (scale) {
@@ -825,7 +690,6 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
             continue;
         }
 
-        // Simbolos especiales de marca registrada con fallback si la fuente no los incluye
         if (codepoint == 0x2122) { // ™
             const auto& gT = fontRenderer_.getGlyph('T', fontSize * 3 / 4);
             const auto& gM = fontRenderer_.getGlyph('M', fontSize * 3 / 4);
@@ -834,14 +698,14 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
                 for (int r = 0; r < gT.height; ++r) {
                     for (int c = 0; c < gT.width; ++c) {
                         uint8_t a = gT.bitmap[r * gT.width + c];
-                        if (a > 0) blendPixelSwizzled(base, cursorX + gT.xoff + c, gy + gT.yoff + r, colorArgb, a);
+                        if (a > 0) blendPixel(cursorX + gT.xoff + c, gy + gT.yoff + r, colorArgb, a);
                     }
                 }
                 cursorX += gT.advance;
                 for (int r = 0; r < gM.height; ++r) {
                     for (int c = 0; c < gM.width; ++c) {
                         uint8_t a = gM.bitmap[r * gM.width + c];
-                        if (a > 0) blendPixelSwizzled(base, cursorX + gM.xoff + c, gy + gM.yoff + r, colorArgb, a);
+                        if (a > 0) blendPixel(cursorX + gM.xoff + c, gy + gM.yoff + r, colorArgb, a);
                     }
                 }
                 cursorX += gM.advance + 2;
@@ -850,7 +714,6 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
         }
 
         const auto& glyph = fontRenderer_.getGlyph(codepoint, fontSize);
-
         int gx = cursorX + glyph.xoff;
         int gy = cursorY + baseline + glyph.yoff;
 
@@ -858,11 +721,15 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
             for (int c = 0; c < glyph.width; ++c) {
                 uint8_t a = glyph.bitmap[r * glyph.width + c];
                 if (a > 0) {
-                    blendPixelSwizzled(base, gx + c, gy + r, colorArgb, a);
+                    if (a == 255) {
+                        putPixel(gx + c, gy + r, colorArgb);
+                    } else {
+                        blendPixel(gx + c, gy + r, colorArgb, a);
+                    }
                 }
             }
         }
-        cursorX += (glyph.advance > 0) ? glyph.advance : (fontSize / 2);
+        cursorX += glyph.advance;
     }
 }
 
@@ -1137,6 +1004,73 @@ std::vector<std::string> utf8WrapLines(const std::string& text, size_t maxCharsP
 
 } // namespace
 
+void DisplayManager::drawHoverPreviewCard(int anchorX, int anchorY, const GameTile& tile, uint64_t frameCount) {
+    (void)frameCount;
+    int cardW = 460;
+    int cardH = 430;
+
+    int hx = anchorX + 100 - (cardW / 2);
+    hx = std::clamp(hx, 48, 1920 - cardW - 48);
+    int hy = anchorY - 30;
+    if (hy + cardH > 1030) hy = 1030 - cardH;
+    if (hy < 76) hy = 76;
+
+    // Sombra exterior oscura suave
+    drawRoundedRect(hx - 4, hy - 4, cardW + 8, cardH + 8, 18, 0xB0000000);
+
+    // Fondo oficial #181226 y borde purpura Luna
+    drawRoundedRect(hx, hy, cardW, cardH, 16, 0xFF181226);
+    drawRoundedBorder(hx, hy, cardW, cardH, 16, 2, 0xFF9146FF);
+
+    // 1. Banner preview panorámico 16:9
+    int bannerH = 210;
+    std::string prevUrl = tile.backdropUrl.empty() ? tile.coverUrl : tile.backdropUrl;
+    auto prevImg = luna::util::ImageLoader::instance().getImage(prevUrl, luna::util::ImagePreset::HorizontalCard16_9);
+    if (prevImg && prevImg->ready) {
+        drawPreScaledImage(hx + 2, hy + 2, prevImg->rgba.data(), cardW - 4, bannerH, prevImg->width, prevImg->height);
+    } else {
+        if (!prevUrl.empty()) luna::util::ImageLoader::instance().requestImage(prevUrl, luna::util::ImagePreset::HorizontalCard16_9);
+        drawRoundedRect(hx + 2, hy + 2, cardW - 4, bannerH, 14, 0xFF241B3B);
+    }
+
+    // Degradado en la base de la imagen hacia el fondo de la tarjeta
+    blendRectUniform(hx + 2, hy + bannerH - 40, cardW - 4, 42, 0xFF181226, 220);
+
+    // Distintivo oficial de edad PEGI (arriba a la izquierda)
+    std::string pegiNum = "12";
+    if (tile.pegiRating.find("18") != std::string::npos) pegiNum = "18";
+    else if (tile.pegiRating.find("16") != std::string::npos) pegiNum = "16";
+    else if (tile.pegiRating.find("7") != std::string::npos) pegiNum = "7";
+    else if (tile.pegiRating.find("3") != std::string::npos) pegiNum = "3";
+
+    uint32_t pegiBg = (pegiNum == "18") ? 0xFFDC2626 : ((pegiNum == "16") ? 0xFFEA580C : 0xFFF59E0B);
+    drawRoundedRect(hx + 14, hy + 14, 46, 42, 6, pegiBg);
+    drawText(hx + 17, hy + 18, 1, "PEGI", 0xFF0E0B16);
+    drawText(hx + (pegiNum.size() > 1 ? 21 : 26), hy + 32, 2, pegiNum, 0xFF0E0B16);
+
+    // Titulo del juego
+    int textY = hy + bannerH + 8;
+    drawText(hx + 18, textY, 3, utf8SafeTruncate(tile.title, 26), 0xFFFFFFFF);
+
+    // Generos y numero de jugadores
+    textY += 32;
+    std::string metaStr = tile.genres;
+    if (!tile.playerCount.empty()) metaStr += " • " + tile.playerCount;
+    drawText(hx + 18, textY, 1, utf8SafeTruncate(metaStr, 40), 0xFFCBD5E1);
+
+    // Compatibilidad de mandos
+    textY += 24;
+    drawText(hx + 18, textY, 1, "Jugar con: " + utf8SafeTruncate(tile.inputMethods, 32), 0xFF94A3B8);
+
+    // Botones de accion oficiales
+    textY += 32;
+    drawPillButton(hx + 18, textY, 240, 48, "Jugar ahora", true, "", true);
+    drawPillButton(hx + 270, textY, 170, 48, "Ficha (X)", false, "", false);
+
+    // Indicacion de juego instantaneo
+    drawText(hx + 18, hy + cardH - 24, 1, "[□] Jugar de inmediato", 0xFFFCD34D);
+}
+
 void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& collections,
                                         const std::vector<std::string>& navTabs,
                                         int activeTabIdx,
@@ -1155,9 +1089,15 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                                         int searchZone,
                                         int searchLetterIdx,
                                         int searchGridIdx,
-                                        const std::vector<GameTile>& filteredGames) {
-    if (!isReady_ || !mappedMemory_) return;
+                                        const std::vector<GameTile>& filteredGames,
+                                        bool hoverCardOpen) {
+    if (!isReady_) return;
     (void)frameCount;
+
+    int focusedCardX = 0;
+    int focusedCardY = 0;
+    bool hasFocusedCard = false;
+    const GameTile* focusedTilePtr = nullptr;
 
     // 1. Fondo principal oficial de Amazon Luna (#0E0B16 Cosmic Deep)
     clear(0xFF0E0B16);
@@ -1448,6 +1388,12 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                     int cx = 68 + static_cast<int>(c) * (sqSize + sqGap) - scrollOff;
                     if (cx + sqSize < 0 || cx > 1920) continue;
                     bool isSel = isFocusedRow && (static_cast<int>(c) == selectedCol);
+                    if (isSel) {
+                        focusedCardX = cx;
+                        focusedCardY = rowY + 50;
+                        hasFocusedCard = true;
+                        focusedTilePtr = &row.items[c];
+                    }
 
                     drawRoundedRect(cx, rowY + 50, sqSize, sqSize, 14, isSel ? 0xFF9146FF : 0xFF1C152E);
                     drawRoundedBorder(cx, rowY + 50, sqSize, sqSize, 14, isSel ? 3 : 1, isSel ? 0xFFFFFFFF : 0xFF2D2248);
@@ -1471,6 +1417,12 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                     if (cardX + c16W < 0 || cardX > 1920) continue;
                     bool isSel = isFocusedRow && (static_cast<int>(i) == selectedCol);
                     int cardY = rowY + 50;
+                    if (isSel) {
+                        focusedCardX = cardX;
+                        focusedCardY = cardY;
+                        hasFocusedCard = true;
+                        focusedTilePtr = &row.items[i];
+                    }
 
                     const auto& item = row.items[i];
                     std::string imgUrl = item.backdropUrl.empty() ? item.coverUrl : item.backdropUrl;
@@ -1526,10 +1478,16 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
 
                 bool isSelectedCard = isFocusedRow && (static_cast<int>(i) == selectedCol);
                 int cardY = rowY + 50;
+                if (isSelectedCard) {
+                    focusedCardX = cardX;
+                    focusedCardY = cardY;
+                    hasFocusedCard = true;
+                    focusedTilePtr = &item;
+                }
 
                 if (row.isRankings) {
                     std::string rankStr = std::to_string(rankNumberIndex);
-                    drawText(numberX, cardY + cardH - 95, 8, rankStr, 0x35FFFFFF);
+                    drawText(numberX, cardY + cardH - 80, 8, rankStr, 0x4AFFFFFF);
                 }
 
                 auto coverImg = luna::util::ImageLoader::instance().getImage(item.coverUrl, luna::util::ImagePreset::VerticalPoster);
@@ -1639,6 +1597,11 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                 drawText(px + 32, by + 12, 2, kOfficialProfileOpts[m], 0xFFCBD5E1);
             }
         }
+    }
+
+    // 5. TARJETA FLOTANTE DE PREVISUALIZACION (HOVER PREVIEW CARD TRAS 600 MS)
+    if (hoverCardOpen && hasFocusedCard && focusedTilePtr && !profileMenuOpen && !searchOpen) {
+        drawHoverPreviewCard(focusedCardX, focusedCardY, *focusedTilePtr, frameCount);
     }
 
     present();
@@ -2058,46 +2021,13 @@ bool DisplayManager::presentYuv420WithHud(const uint8_t* y, const uint8_t* u, co
                                           int overlaySelectedIdx,
                                           bool hudPinned,
                                           const std::string& gameTitle) {
-    if (!isReady_ || !mappedMemory_ || !y || !u || !v) return false;
+    if (!isReady_ || !y || !u || !v) return false;
 
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
-
-#if defined(LUNA_TARGET_PS5)
-    const TileOrder& order = getTileOrder();
-    constexpr unsigned kTotalTiles = kTilesX * kTilesY;
-
-    for (unsigned t = 0; t < kTotalTiles; ++t) {
-        unsigned tx = t % kTilesX;
-        unsigned ty = t / kTilesX;
-        auto* out = reinterpret_cast<uint32_t*>(base + static_cast<size_t>(t) * 0x10000);
-
-        for (unsigned i = 0; i < 16384; ++i) {
-            unsigned px = tx * 128 + order.dx[i];
-            unsigned py = ty * 128 + order.dy[i];
-            if (px >= kWidth || py >= kHeight || static_cast<int>(px) >= width || static_cast<int>(py) >= height) {
-                out[i] = 0xFF000000U;
-                continue;
-            }
-
-            int yVal = y[py * strideY + px];
-            int uVal = u[(py / 2) * strideU + (px / 2)] - 128;
-            int vVal = v[(py / 2) * strideV + (px / 2)] - 128;
-
-            int c = (yVal - 16) * 1192;
-            uint32_t r = clamp8((c + 1836 * vVal + 512) >> 10);
-            uint32_t g = clamp8((c - 218 * uVal - 546 * vVal + 512) >> 10);
-            uint32_t b = clamp8((c + 2163 * uVal + 512) >> 10);
-
-            out[i] = 0xFF000000U | (b << 16) | (g << 8) | r;
-        }
-    }
-#else
-    auto* dst = reinterpret_cast<uint32_t*>(base);
     for (int j = 0; j < height_ && j < height; ++j) {
         const uint8_t* yRow = y + (j * strideY);
         const uint8_t* uRow = u + ((j / 2) * strideU);
         const uint8_t* vRow = v + ((j / 2) * strideV);
-        uint32_t* outRow = dst + (j * width_);
+        uint32_t* outRow = &canvas_[j * width_];
 
         for (int i = 0; i < width_ && i < width; ++i) {
             int yVal = yRow[i];
@@ -2112,7 +2042,6 @@ bool DisplayManager::presentYuv420WithHud(const uint8_t* y, const uint8_t* u, co
             outRow[i] = 0xFF000000U | (b << 16) | (g << 8) | r;
         }
     }
-#endif
 
     if (showHud && !overlayOpen && !hudLine1.empty()) {
         int hudH = hudLine2.empty() ? 38 : 66;
@@ -2537,8 +2466,7 @@ void DisplayManager::drawStartingSession(const GameTile& game,
                                          uint64_t frameCount,
                                          bool cancelModalOpen,
                                          int cancelModalBtnIdx) {
-    if (!isReady_ || !mappedMemory_) return;
-    uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+    if (!isReady_) return;
 
     auto bgImg = luna::util::ImageLoader::instance().getImage(game.backdropUrl, luna::util::ImagePreset::PanoramicDetail);
     if (!bgImg || !bgImg->ready) {
@@ -2557,7 +2485,6 @@ void DisplayManager::drawStartingSession(const GameTile& game,
             logoImg.reset();
         }
     }
-    const std::string key = game.id + (bgReady ? "|B" : "|b") + (logoImg ? "L" : "l");
 
     auto drawStaticScene = [&]() {
         clear(0xFF07050A);
@@ -2585,17 +2512,7 @@ void DisplayManager::drawStartingSession(const GameTile& game,
         }
     };
 
-#if defined(LUNA_TARGET_PS5)
-    if (!sceneCache_.empty() && sceneKey_ == key) {
-        std::memcpy(base, sceneCache_.data(), kUsedBytes);
-    } else {
-        drawStaticScene();
-        sceneCache_.assign(base, base + kUsedBytes);
-        sceneKey_ = key;
-    }
-#else
     drawStaticScene();
-#endif
 
     // Dynamic part: 3 orbiting white dots + status message
     int spinX = 1480;
@@ -2724,10 +2641,39 @@ void DisplayManager::present() {
     }
 
 #if defined(LUNA_TARGET_PS5)
+    if (!mappedMemory_) return;
     uint8_t* base = static_cast<uint8_t*>(mappedMemory_) + (currentBuffer_ * kFrameBytes);
+
+    const TileOrder& order = getTileOrder();
+    constexpr unsigned kTotalTiles = kTilesX * kTilesY;
+
+    for (unsigned t = 0; t < kTotalTiles; ++t) {
+        unsigned tx = (t % kTilesX) * 128;
+        unsigned ty = (t / kTilesX) * 128;
+        auto* out = reinterpret_cast<uint32_t*>(base + static_cast<size_t>(t) * 0x10000);
+
+        if (tx + 128 <= kWidth && ty + 128 <= kHeight) {
+            for (unsigned i = 0; i < 16384; ++i) {
+                unsigned x = tx + order.dx[i];
+                unsigned y = ty + order.dy[i];
+                out[i] = canvas_[y * kWidth + x];
+            }
+        } else {
+            for (unsigned i = 0; i < 16384; ++i) {
+                unsigned x = tx + order.dx[i];
+                unsigned y = ty + order.dy[i];
+                out[i] = (x < kWidth && y < kHeight) ? canvas_[y * kWidth + x] : 0xFF000000U;
+            }
+        }
+    }
+
     flushCacheRange(base, kUsedBytes);
     flipMarker_++;
     sceVideoOutSubmitFlip(videoHandle_, currentBuffer_, 1, flipMarker_);
+#else
+    if (mappedMemory_) {
+        std::memcpy(mappedMemory_, canvas_.data(), width_ * height_ * sizeof(uint32_t));
+    }
 #endif
 
     currentBuffer_ = (currentBuffer_ + 1) % kBuffers;

@@ -34,6 +34,7 @@ device_id.txt
 tools/luna_probe/chrome_profile/
 tools/luna_probe/session.json
 tools/luna_probe/*.jsonl
+tools/luna_probe/captures/
 tools/ps5_browser_bridge/*.pem
 tools/ps5_browser_bridge/*.key
 
@@ -52,5 +53,8 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Private notes
+# Private notes and sniffer dumps
 notes/private/
+docs/notes/test_*
+docs/notes/scratch_archive/
+docs/notes/tools_scratch/
