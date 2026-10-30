@@ -52,7 +52,8 @@ try {
         "display/display_manager",
         "display/hero_banner_asset",
         "audio/audio_manager",
-        "media/media_decoder"
+        "media/media_decoder",
+        "media/mp4_preview_player"
     )
 
     & clang -target x86_64-sie-ps5 -isysroot "$sdkDir" -isystem "$sdkDir\target\include" `

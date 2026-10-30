@@ -91,6 +91,10 @@ public:
     void drawPlayTriangleIcon(int cx, int cy, int size, uint32_t color);
     void drawStarIcon(int cx, int cy, int size, uint32_t color);
     void drawLunaLogoIcon(int x, int y, int size);
+    void drawMutedSpeakerIcon(int cx, int cy, int size, uint32_t color);
+    void drawCategoryIcon(int cx, int cy, int size, const std::string& catName, uint32_t color);
+    void drawCategoryIconTinted(int dx, int dy, const uint8_t* rgba, int dstW, int dstH, int srcW, int srcH, uint32_t color);
+    void drawPegiBadge(int x, int y, int w, int h, const std::string& rating);
     void drawPillButton(int x, int y, int w, int h, const std::string& text, bool focused, const std::string& subtext = "", bool hasPlayIcon = false);
 
     void drawLoginScreen(const std::string& publicCode,

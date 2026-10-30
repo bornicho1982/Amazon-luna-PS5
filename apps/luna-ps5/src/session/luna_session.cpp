@@ -992,55 +992,59 @@ std::vector<luna::display::LunaCollection> LunaSessionClient::fetchPageCollectio
 
 
         // Fila de Banner Promocional de Partners (PARTNER_UPSELL_ROW)
-
-        if (colType == "PARTNER_UPSELL_ROW" || colId.find("content_highlight_row") != std::string::npos || colId.find("promo_banner") != std::string::npos) {
-
+        if (colType == "PARTNER_UPSELL_ROW" || colId.find("content_highlight_row") != std::string::npos) {
             luna::display::LunaCollection partnerRow;
-
             partnerRow.id = colId;
-
-            partnerRow.title = colTitle.empty() ? "Jugad juntos esteis donde esteis" : colTitle;
-
-            partnerRow.subtitle = colSubtitle.empty() ? "Juega con amigos y familiares, aunque no esteis en la misma habitacion." : colSubtitle;
-
+            bool isHome1 = (colId.find("home_1") != std::string::npos);
+            partnerRow.title = colTitle.empty() ? (isHome1 ? "Personajes emblemáticos. Nuevas aventuras." : "Jugad juntos estéis donde estéis") : colTitle;
+            partnerRow.subtitle = colSubtitle.empty() ? (isHome1 ? "Hay leyendas que no dejan de mejorar. Adéntrate en mundos inolvidables..." : "Juega con amigos y familiares, aunque no estéis en la misma habitación.") : colSubtitle;
             partnerRow.isPartnerRow = true;
-
             partnerRow.partnerTitle = partnerRow.title;
-
             partnerRow.partnerDescription = partnerRow.subtitle;
-
             partnerRow.partnerButtonText = colPdata["buttonText"].asString();
-
             if (partnerRow.partnerButtonText.empty()) partnerRow.partnerButtonText = "Ver todos los juegos";
-
             partnerRow.partnerPromoImage = colPdata["partnerPromoImage"].asString();
-
             if (partnerRow.partnerPromoImage.empty()) {
-
-                partnerRow.partnerPromoImage = "https://m.media-amazon.com/images/G/01/T/TC05316421/Evergreen/LunaClient/ContentHighlightRows/RemotePlay_Background_Desktop_2560x695.jpg";
-
-            }
-
-            if (subWidgets.isArray()) {
-
-                for (size_t j = 0; j < subWidgets.size(); ++j) {
-
-                    luna::display::GameTile tile;
-
-                    if (parseGameTileFromWidget(subWidgets[j], colId, masterCatalog.size() + j, tile)) {
-
-                        partnerRow.items.push_back(tile);
-
-                    }
-
+                if (isHome1) {
+                    partnerRow.partnerPromoImage = "https://m.media-amazon.com/images/G/01/T/TC05316421/Evergreen/LunaClient/ContentHighlightRows/GarfieldKart2_Background_Desktop_2560x695.jpg";
+                } else {
+                    partnerRow.partnerPromoImage = "https://m.media-amazon.com/images/G/01/T/TC05316421/Evergreen/LunaClient/ContentHighlightRows/RemotePlay_Background_Desktop_2560x695.jpg";
                 }
-
             }
-
+            if (subWidgets.isArray()) {
+                for (size_t j = 0; j < subWidgets.size(); ++j) {
+                    luna::display::GameTile tile;
+                    if (parseGameTileFromWidget(subWidgets[j], colId, masterCatalog.size() + j, tile)) {
+                        partnerRow.items.push_back(tile);
+                    }
+                }
+            }
             collections.push_back(partnerRow);
-
             continue;
+        }
 
+        // Banner Promocional Prime Gaming (collection_promo_banner_claims)
+        if (colId.find("promo_banner") != std::string::npos || colId.find("claims") != std::string::npos) {
+            luna::display::LunaCollection promoRow;
+            promoRow.id = colId;
+            promoRow.title = "Reclama tus juegos";
+            promoRow.subtitle = "Juegos gratis incluidos este mes con Amazon Prime";
+            promoRow.partnerPromoImage = "https://m.media-amazon.com/images/G/01/T/TC05316421/MonthlyPrime/LunaClientFGWPBannerOverride/Desktop_3532x380_esES.jpg";
+            if (subWidgets.isArray() && subWidgets.size() > 0) {
+                JsonValue scratchClaims;
+                const auto* cp = getPresentationDataPtr(subWidgets[0], scratchClaims);
+                if (cp && !(*cp)["promotionBackgroundImage"].asString().empty()) {
+                    promoRow.partnerPromoImage = (*cp)["promotionBackgroundImage"].asString();
+                }
+            }
+            luna::display::GameTile claimTile;
+            claimTile.id = "promo_claims_tile";
+            claimTile.title = "Reclama tus juegos con Prime";
+            claimTile.coverUrl = promoRow.partnerPromoImage;
+            claimTile.backdropUrl = promoRow.partnerPromoImage;
+            promoRow.items.push_back(claimTile);
+            collections.push_back(promoRow);
+            continue;
         }
 
 

@@ -33,6 +33,7 @@
 #include "util/i18n.h"
 #include "audio/audio_manager.h"
 #include "media/media_decoder.h"
+#include "media/mp4_preview_player.h"
 #include "util/crash_logger.h"
 #include "util/image_loader.h" 
 
@@ -645,6 +646,7 @@ int main(int argc, char* argv[]) {
     luna::display::GameTile currentDetailGame = games[0];
 
     auto openGameDetail = [&](const luna::display::GameTile& selectedTile) {
+        luna::media::Mp4PreviewPlayer::instance().stop();
         luna::util::ImageLoader::instance().prioritizeOrClearPending();
         currentDetailGame = selectedTile;
         sessionClient.preloadGameDetails(currentDetailGame, cbl.getAccessToken(), cbl.getDeviceSerial());
@@ -731,6 +733,7 @@ int main(int argc, char* argv[]) {
     };
 
     auto startCloudGameSession = [&](const luna::display::GameTile& targetTile) {
+        luna::media::Mp4PreviewPlayer::instance().stop();
         if (!targetTile.isEntitled) {
             std::string price = targetTile.secondaryButtonText.empty() ? "9,99 EUR/mes" : targetTile.secondaryButtonText;
             g_lastStatusText = "Este juego requiere suscripcion a Luna Premium (" + price + ").";
@@ -1281,6 +1284,25 @@ int main(int argc, char* argv[]) {
                 int hoverMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTileChangeTime).count();
                 if (focusZone == 1 && selectedRowIdx > 0 && hoverMs >= 600 && !profileMenuOpen && !searchOpen) {
                     hoverCardOpen = true;
+                }
+
+                const luna::display::GameTile* hoveredTile = nullptr;
+                if (!curCols.empty() && curHoverRow >= 0 && curHoverRow < static_cast<int>(curCols.size())) {
+                    const auto& rItems = curCols[curHoverRow].items;
+                    if (curHoverCol >= 0 && curHoverCol < static_cast<int>(rItems.size())) {
+                        hoveredTile = &rItems[curHoverCol];
+                    }
+                }
+
+                if (hoverCardOpen && hoveredTile != nullptr) {
+                    if (!hoveredTile->videoUrl.empty()) {
+                        luna::media::Mp4PreviewPlayer::instance().setVideoUrl(hoveredTile->videoUrl);
+                        luna::media::Mp4PreviewPlayer::instance().update(&videoDecoder);
+                    } else {
+                        luna::media::Mp4PreviewPlayer::instance().stop();
+                    }
+                } else {
+                    luna::media::Mp4PreviewPlayer::instance().stop();
                 }
 
                 display.setSearchQuery(searchQuery);
