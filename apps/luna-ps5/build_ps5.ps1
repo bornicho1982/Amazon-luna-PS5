@@ -50,8 +50,6 @@ try {
         "display/font_inter_bold",
         "display/font_renderer",
         "display/display_manager",
-        "display/clay_renderer",
-        "display/luna_clay_ui",
         "display/hero_banner_asset",
         "audio/audio_manager",
         "media/media_decoder",
