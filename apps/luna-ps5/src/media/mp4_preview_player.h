@@ -44,11 +44,13 @@ private:
     std::atomic<bool> isDownloading_{false};
     std::atomic<bool> isReady_{false};
     std::atomic<bool> hasDecodedFrame_{false};
+    std::atomic<bool> cancelDownload_{false};
 
     std::thread downloadThread_;
     std::mutex downloadMutex_;
 
-    std::vector<uint8_t> mp4Data_;
+    const uint8_t* mp4DataPtr_ = nullptr;
+    size_t mp4DataSize_ = 0;
     std::vector<uint8_t> spsPpsAnnexB_;
     std::vector<Mp4Sample> samples_;
     size_t currentSampleIdx_ = 0;
@@ -59,7 +61,6 @@ private:
     mutable std::mutex frameMutex_;
     int frameWidth_ = 960;
     int frameHeight_ = 540;
-    std::vector<uint32_t> frameRgba_; // 960 x 540 in ABGR format
 
     std::vector<uint8_t> annexBBuffer_;
 };

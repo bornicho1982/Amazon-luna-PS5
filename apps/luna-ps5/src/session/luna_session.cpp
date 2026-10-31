@@ -1,5 +1,6 @@
 #include "session/luna_session.h"
 #include "session/luna_catalog_metadata_db.h"
+#include "media/mp4_preview_player.h"
 #include "net/http_client.h"
 
 #include "util/crash_logger.h"
@@ -596,6 +597,12 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
 
     outTile.logoUrl = logoUrl;
     outTile.videoUrl = hover["trailerUrl"].asString();
+    if (outTile.videoUrl.empty()) outTile.videoUrl = hover["videoUrl"].asString();
+    if (outTile.videoUrl.empty()) outTile.videoUrl = hover["previewVideoUrl"].asString();
+    if (outTile.videoUrl.empty()) outTile.videoUrl = pdata["trailerUrl"].asString();
+    if (outTile.videoUrl.empty()) outTile.videoUrl = pdata["videoUrl"].asString();
+    if (outTile.videoUrl.empty()) outTile.videoUrl = pdata["previewVideoUrl"].asString();
+    if (outTile.backdropUrl.empty()) outTile.backdropUrl = hover["imageLandscape"].asString();
 
     outTile.subtitle = subtitle;
 
@@ -651,9 +658,56 @@ static const luna::util::JsonValue* getPresentationDataPtr(const luna::util::Jso
 
 
 
-LunaSessionClient::LunaSessionClient() = default;
+LunaSessionClient::LunaSessionClient() {
+    m_detailThread = std::thread([this]() {
+        while (!m_stopDetailThread.load()) {
+            luna::display::GameTile* tileToResolve = nullptr;
+            std::string token;
+            std::string serial;
+            {
+                std::unique_lock<std::mutex> lock(m_detailMutex);
+                m_detailCv.wait(lock, [this]() {
+                    return m_stopDetailThread.load() || m_pendingDetailTile != nullptr;
+                });
+                if (m_stopDetailThread.load()) break;
+                tileToResolve = m_pendingDetailTile;
+                m_pendingDetailTile = nullptr;
+                token = m_asyncAccessToken;
+                serial = m_asyncDeviceSerial;
+            }
 
-LunaSessionClient::~LunaSessionClient() = default;
+            if (tileToResolve) {
+                std::string playToken, buildId, profileId;
+                resolveGameDetails(tileToResolve->id, token, serial, playToken, buildId, profileId, tileToResolve);
+                tileToResolve->detailsLoaded = true;
+                if (!tileToResolve->videoUrl.empty()) {
+                    luna::media::Mp4PreviewPlayer::instance().setVideoUrl(tileToResolve->videoUrl);
+                }
+            }
+        }
+    });
+}
+
+LunaSessionClient::~LunaSessionClient() {
+    m_stopDetailThread.store(true);
+    m_detailCv.notify_all();
+    if (m_detailThread.joinable()) {
+        m_detailThread.join();
+    }
+}
+
+void LunaSessionClient::requestAsyncGameDetails(luna::display::GameTile* tile,
+                                               const std::string& accessToken,
+                                               const std::string& deviceSerial) {
+    if (!tile || tile->detailsLoaded) return;
+    {
+        std::lock_guard<std::mutex> lock(m_detailMutex);
+        m_pendingDetailTile = tile;
+        m_asyncAccessToken = accessToken;
+        m_asyncDeviceSerial = deviceSerial;
+    }
+    m_detailCv.notify_one();
+}
 
 
 

@@ -1302,7 +1302,7 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                const auto& curCols = tabCollections[activeTabIdx];
+                auto& curCols = tabCollections[activeTabIdx];
                 std::string catalogStatus;
                 if (!g_lastStatusText.empty()) {
                     catalogStatus = g_lastStatusText;
@@ -1321,10 +1321,10 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Determinar el juego activo para el Hero Stage estilo PS5 y reproducción del tráiler
-                const luna::display::GameTile* activeHeroTile = nullptr;
+                luna::display::GameTile* activeHeroTile = nullptr;
                 if (!curCols.empty()) {
                     if (selectedRowIdx >= 0 && selectedRowIdx < static_cast<int>(curCols.size())) {
-                        const auto& rItems = curCols[selectedRowIdx].items;
+                        auto& rItems = curCols[selectedRowIdx].items;
                         int cCol = (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) ? rowSelectedCol[selectedRowIdx] : 0;
                         if (cCol >= 0 && cCol < static_cast<int>(rItems.size())) {
                             activeHeroTile = &rItems[cCol];
@@ -1340,7 +1340,12 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Reproducir el tráiler oficial en la mitad derecha del Banner Superior
+                // Si el juego enfocado aún no tiene tráiler o metadatos completos, resolver dinámicamente en segundo plano
+                if (activeHeroTile != nullptr && (!activeHeroTile->detailsLoaded || activeHeroTile->videoUrl.empty())) {
+                    sessionClient.requestAsyncGameDetails(activeHeroTile, cbl.getAccessToken(), cbl.getDeviceSerial());
+                }
+
+                // Reproducir el tráiler oficial en la mitad derecha del Banner Superior (100% streaming HTTP RAM)
                 if (activeHeroTile != nullptr && !activeHeroTile->videoUrl.empty() && !profileMenuOpen && !searchOpen) {
                     luna::media::Mp4PreviewPlayer::instance().setVideoUrl(activeHeroTile->videoUrl);
                     luna::media::Mp4PreviewPlayer::instance().update(&videoDecoder);

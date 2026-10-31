@@ -23,13 +23,16 @@ static uint16_t readBigU16(const uint8_t* p) {
     return (static_cast<uint16_t>(p[0]) << 8) | static_cast<uint16_t>(p[1]);
 }
 
+alignas(64) static uint8_t g_mp4DownloadBuffer[20 * 1024 * 1024]; // 20 MB static buffer in .bss (0 bytes heap malloc)
+alignas(64) static uint32_t g_frameRgbaBuffer[960 * 540];         // 2 MB static frame buffer in .bss
+
 Mp4PreviewPlayer& Mp4PreviewPlayer::instance() {
     static Mp4PreviewPlayer s_instance;
     return s_instance;
 }
 
 Mp4PreviewPlayer::Mp4PreviewPlayer() {
-    frameRgba_.resize(frameWidth_ * frameHeight_, 0xFF1C1A24);
+    std::fill_n(g_frameRgbaBuffer, frameWidth_ * frameHeight_, 0xFF1C1A24);
 }
 
 Mp4PreviewPlayer::~Mp4PreviewPlayer() {
@@ -37,6 +40,7 @@ Mp4PreviewPlayer::~Mp4PreviewPlayer() {
 }
 
 void Mp4PreviewPlayer::stop() {
+    cancelDownload_.store(true);
     isReady_.store(false);
     hasDecodedFrame_.store(false);
 
@@ -49,7 +53,8 @@ void Mp4PreviewPlayer::stop() {
 }
 
 void Mp4PreviewPlayer::reset() {
-    mp4Data_.clear();
+    mp4DataPtr_ = nullptr;
+    mp4DataSize_ = 0;
     spsPpsAnnexB_.clear();
     samples_.clear();
     currentSampleIdx_ = 0;
@@ -58,12 +63,12 @@ void Mp4PreviewPlayer::reset() {
 
 const uint32_t* Mp4PreviewPlayer::getFrameRgba() const {
     std::lock_guard<std::mutex> lock(frameMutex_);
-    if (!hasDecodedFrame_.load() || frameRgba_.empty()) return nullptr;
-    return frameRgba_.data();
+    if (!hasDecodedFrame_.load()) return nullptr;
+    return g_frameRgbaBuffer;
 }
 
 void Mp4PreviewPlayer::setVideoUrl(const std::string& url) {
-    if (url.empty()) {
+    if (url.empty() || (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0)) {
         stop();
         return;
     }
@@ -72,75 +77,46 @@ void Mp4PreviewPlayer::setVideoUrl(const std::string& url) {
         return;
     }
 
-    // Stop current playback cleanly
+    // Stop current playback cleanly and signal abort on active download
     stop();
+
     currentUrl_ = url;
     downloadingUrl_ = url;
+    cancelDownload_.store(false);
     isDownloading_.store(true);
 
     downloadThread_ = std::thread([this, url]() {
-        std::vector<uint8_t> buffer;
+        size_t downloadedSize = 0;
+        luna::util::CrashLogger::log("[Mp4PreviewPlayer] Streaming trailer HTTP RAM: %s", url.c_str());
 
-        // 1. Check local file cache first (by extracting the filename from URL)
-        std::string filename;
-        size_t lastSlash = url.find_last_of('/');
-        if (lastSlash != std::string::npos && lastSlash + 1 < url.size()) {
-            filename = url.substr(lastSlash + 1);
-            size_t queryPos = filename.find('?');
-            if (queryPos != std::string::npos) {
-                filename = filename.substr(0, queryPos);
-            }
-        }
-
-        std::vector<std::string> localPaths;
-        if (!filename.empty()) {
-            localPaths.push_back("videos/" + filename);
-            localPaths.push_back("/app0/videos/" + filename);
-            localPaths.push_back("/user/app/PPSA99825/videos/" + filename);
-            localPaths.push_back("/data/homebrew/PPSA99825/videos/" + filename);
-            localPaths.push_back("PPSA99825/videos/" + filename);
-            localPaths.push_back("tools/luna_probe/captures/captura_pagina_1_inicio/assets/videos/" + filename);
-        }
-
-        for (const auto& path : localPaths) {
-            std::ifstream file(path, std::ios::binary | std::ios::ate);
-            if (file.is_open()) {
-                std::streamsize sz = file.tellg();
-                if (sz > 1024) {
-                    file.seekg(0, std::ios::beg);
-                    buffer.resize(static_cast<size_t>(sz));
-                    if (file.read(reinterpret_cast<char*>(buffer.data()), sz)) {
-                        luna::util::CrashLogger::log("[Mp4PreviewPlayer] Loaded video from local path: %s (%zu bytes)",
-                                                     path.c_str(), buffer.size());
-                        break;
-                    }
-                }
-            }
-        }
-
-        // 2. If not found locally, download over HTTP
-        if (buffer.empty()) {
-            luna::util::CrashLogger::log("[Mp4PreviewPlayer] Downloading preview video from: %s", url.c_str());
-            auto resp = luna::net::HttpClient::get(url);
-            if (resp.ok() && resp.body.size() > 1024) {
-                buffer.assign(resp.body.begin(), resp.body.end());
-                luna::util::CrashLogger::log("[Mp4PreviewPlayer] Downloaded %zu bytes", buffer.size());
-            } else {
-                luna::util::CrashLogger::log("[Mp4PreviewPlayer] Failed to download video (%d: %s)",
-                                             resp.statusCode, resp.error.c_str());
-            }
-        }
+        auto resp = luna::net::HttpClient::getIntoBuffer(url,
+                                                        g_mp4DownloadBuffer,
+                                                        sizeof(g_mp4DownloadBuffer),
+                                                        downloadedSize,
+                                                        &cancelDownload_);
 
         isDownloading_.store(false);
 
-        if (!buffer.empty()) {
-            if (parseMp4(buffer.data(), buffer.size())) {
-                mp4Data_ = std::move(buffer);
+        if (cancelDownload_.load()) {
+            luna::util::CrashLogger::log("[Mp4PreviewPlayer] Video download aborted by user navigation");
+            return;
+        }
+
+        if (resp.ok() && downloadedSize > 1024) {
+            luna::util::CrashLogger::log("[Mp4PreviewPlayer] Downloaded %zu bytes into RAM (.bss)", downloadedSize);
+            if (parseMp4(g_mp4DownloadBuffer, downloadedSize)) {
+                mp4DataPtr_ = g_mp4DownloadBuffer;
+                mp4DataSize_ = downloadedSize;
                 currentSampleIdx_ = 0;
                 lastFrameTime_ = std::chrono::steady_clock::now();
                 isReady_.store(true);
                 luna::util::CrashLogger::log("[Mp4PreviewPlayer] Ready to play %zu samples", samples_.size());
+            } else {
+                luna::util::CrashLogger::log("[Mp4PreviewPlayer] Failed to parse MP4 atoms");
             }
+        } else {
+            luna::util::CrashLogger::log("[Mp4PreviewPlayer] Failed to stream video (%d: %s)",
+                                         resp.statusCode, resp.error.c_str());
         }
     });
 }
@@ -371,7 +347,7 @@ bool Mp4PreviewPlayer::parseMp4(const uint8_t* data, size_t size) {
 }
 
 void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
-    if (!isReady_.load() || !decoder || samples_.empty() || mp4Data_.empty()) return;
+    if (!isReady_.load() || !decoder || samples_.empty() || !mp4DataPtr_ || mp4DataSize_ == 0) return;
 
     auto now = std::chrono::steady_clock::now();
     auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFrameTime_).count();
@@ -385,7 +361,7 @@ void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
     }
 
     const auto& sample = samples_[currentSampleIdx_];
-    if (sample.offset + sample.size > mp4Data_.size()) {
+    if (sample.offset + sample.size > mp4DataSize_) {
         currentSampleIdx_ = (currentSampleIdx_ + 1) % samples_.size();
         return;
     }
@@ -397,7 +373,7 @@ void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
         annexBBuffer_.insert(annexBBuffer_.end(), spsPpsAnnexB_.begin(), spsPpsAnnexB_.end());
     }
 
-    const uint8_t* sampleBytes = mp4Data_.data() + sample.offset;
+    const uint8_t* sampleBytes = mp4DataPtr_ + sample.offset;
     size_t cur = 0;
     while (cur + 4 < sample.size) {
         uint32_t nalSize = readBigU32(sampleBytes + cur);
@@ -424,17 +400,13 @@ void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
                 const int sh = outFrame.height;
 
                 std::lock_guard<std::mutex> lock(frameMutex_);
-                if (frameRgba_.size() != static_cast<size_t>(dw * dh)) {
-                    frameRgba_.resize(dw * dh);
-                }
-
                 for (int y = 0; y < dh; ++y) {
                     int srcY = (y * sh) / dh;
                     int uvY = srcY / 2;
                     const uint8_t* yRow = outFrame.y + srcY * outFrame.strideY;
                     const uint8_t* uRow = outFrame.u + uvY * outFrame.strideU;
                     const uint8_t* vRow = outFrame.v + uvY * outFrame.strideV;
-                    uint32_t* dstRow = &frameRgba_[y * dw];
+                    uint32_t* dstRow = &g_frameRgbaBuffer[y * dw];
 
                     for (int x = 0; x < dw; ++x) {
                         int srcX = (x * sw) / dw;

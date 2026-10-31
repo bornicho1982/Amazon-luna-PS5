@@ -3,6 +3,9 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <atomic>
+#include <cstdint>
+#include <cstddef>
 
 namespace luna::net {
 
@@ -25,6 +28,14 @@ public:
 
     static HttpResponse get(const std::string& url,
                             const std::vector<std::pair<std::string, std::string>>& headers = {});
+
+    // Zero-heap direct streaming download into preallocated static/stack buffer
+    static HttpResponse getIntoBuffer(const std::string& url,
+                                      uint8_t* outBuf,
+                                      size_t maxCap,
+                                      size_t& outSize,
+                                      std::atomic<bool>* cancelFlag = nullptr,
+                                      const std::vector<std::pair<std::string, std::string>>& headers = {});
 };
 
 } // namespace luna::net

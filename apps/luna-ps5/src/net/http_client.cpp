@@ -319,6 +319,183 @@ HttpResponse HttpClient::post(const std::string& url,
 #endif
 }
 
+HttpResponse HttpClient::getIntoBuffer(const std::string& url,
+                                      uint8_t* outBuf,
+                                      size_t maxCap,
+                                      size_t& outSize,
+                                      std::atomic<bool>* cancelFlag,
+                                      const std::vector<std::pair<std::string, std::string>>& headers) {
+    HttpResponse resp;
+    outSize = 0;
+    if (!outBuf || maxCap == 0) {
+        resp.error = "Invalid output buffer";
+        return resp;
+    }
+
+#if defined(_WIN32)
+    HINTERNET hSession = WinHttpOpen(L"Luna-Client/1.0",
+                                     WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                     WINHTTP_NO_PROXY_NAME,
+                                     WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) {
+        resp.error = "WinHttpOpen failed";
+        return resp;
+    }
+
+    URL_COMPONENTS urlComp{};
+    urlComp.dwStructSize = sizeof(urlComp);
+    wchar_t hostName[256]{};
+    wchar_t urlPath[1024]{};
+    urlComp.lpszHostName = hostName;
+    urlComp.dwHostNameLength = sizeof(hostName) / sizeof(wchar_t);
+    urlComp.lpszUrlPath = urlPath;
+    urlComp.dwUrlPathLength = sizeof(urlPath) / sizeof(wchar_t);
+
+    std::wstring wUrl = toWString(url);
+    if (!WinHttpCrackUrl(wUrl.c_str(), (DWORD)wUrl.length(), 0, &urlComp)) {
+        WinHttpCloseHandle(hSession);
+        resp.error = "Invalid URL";
+        return resp;
+    }
+
+    HINTERNET hConnect = WinHttpConnect(hSession, hostName, urlComp.nPort, 0);
+    if (!hConnect) {
+        WinHttpCloseHandle(hSession);
+        resp.error = "WinHttpConnect failed";
+        return resp;
+    }
+
+    DWORD reqFlags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", urlPath,
+                                            nullptr, WINHTTP_NO_REFERER,
+                                            WINHTTP_DEFAULT_ACCEPT_TYPES, reqFlags);
+    if (!hRequest) {
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        resp.error = "WinHttpOpenRequest failed";
+        return resp;
+    }
+
+    DWORD secFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
+                     SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                     SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
+                     SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
+    WinHttpSetOption(hRequest, WINHTTP_OPTION_SECURITY_FLAGS, &secFlags, sizeof(secFlags));
+
+    std::wstring headerStr;
+    for (const auto& h : headers) {
+        std::string k = trimString(h.first);
+        std::string v = trimString(h.second);
+        if (!k.empty() && !v.empty()) {
+            headerStr += toWString(k) + L": " + toWString(v) + L"\r\n";
+        }
+    }
+
+    BOOL sent = WinHttpSendRequest(hRequest,
+                                   headerStr.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headerStr.c_str(),
+                                   (DWORD)headerStr.length(),
+                                   WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
+    if (sent && WinHttpReceiveResponse(hRequest, nullptr)) {
+        DWORD statusCode = 0;
+        DWORD size = sizeof(statusCode);
+        WinHttpQueryHeaders(hRequest,
+                            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                            WINHTTP_HEADER_NAME_BY_INDEX,
+                            &statusCode, &size, WINHTTP_NO_HEADER_INDEX);
+        resp.statusCode = (int)statusCode;
+
+        while (outSize < maxCap) {
+            if (cancelFlag && cancelFlag->load()) {
+                resp.error = "Cancelled by user";
+                break;
+            }
+            DWORD dwSize = 0;
+            if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) break;
+            if (dwSize == 0) break;
+            DWORD toRead = std::min(dwSize, static_cast<DWORD>(maxCap - outSize));
+            DWORD dwDownloaded = 0;
+            if (WinHttpReadData(hRequest, outBuf + outSize, toRead, &dwDownloaded)) {
+                outSize += dwDownloaded;
+                if (dwDownloaded == 0) break;
+            } else {
+                break;
+            }
+        }
+    } else {
+        resp.error = "WinHttpSendRequest or ReceiveResponse failed";
+    }
+
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return resp;
+
+#else
+    if (!init()) {
+        char errBuf[128];
+        std::snprintf(errBuf, sizeof(errBuf), "HttpClient init error (pool=%d, ssl=%d, http=%d, tmpl=%d)",
+                      g_netPoolId, g_sslCtxId, g_httpCtxId, g_tmplId);
+        resp.error = errBuf;
+        return resp;
+    }
+
+    int connId = sceHttpCreateConnectionWithURL(g_tmplId, url.c_str(), 0);
+    if (connId < 0) {
+        resp.error = "sceHttpCreateConnectionWithURL failed: " + std::to_string(connId);
+        return resp;
+    }
+
+    sceHttpsDisableOption(connId, 0x01);
+    sceHttpsDisableOption(connId, 0x02);
+    sceHttpSetAutoRedirect(connId, 1);
+
+    int reqId = sceHttpCreateRequestWithURL(connId, SCE_HTTP_METHOD_GET, url.c_str(), 0);
+    if (reqId < 0) {
+        sceHttpDeleteConnection(connId);
+        resp.error = "sceHttpCreateRequestWithURL failed: " + std::to_string(reqId);
+        return resp;
+    }
+
+    sceHttpsDisableOption(reqId, 0x01);
+    sceHttpsDisableOption(reqId, 0x02);
+    sceHttpSetAutoRedirect(reqId, 1);
+    sceHttpSetSendTimeOut(reqId, 10000000);
+    sceHttpSetRecvTimeOut(reqId, 20000000);
+
+    for (const auto& h : headers) {
+        std::string k = trimString(h.first);
+        std::string v = trimString(h.second);
+        if (!k.empty() && !v.empty()) {
+            sceHttpAddRequestHeader(reqId, k.c_str(), v.c_str(), SCE_HTTP_HEADER_OVERWRITE);
+        }
+    }
+
+    int sendRes = sceHttpSendRequest(reqId, nullptr, 0);
+    if (sendRes >= 0) {
+        int statusCode = 0;
+        sceHttpGetStatusCode(reqId, &statusCode);
+        resp.statusCode = statusCode;
+
+        while (outSize < maxCap) {
+            if (cancelFlag && cancelFlag->load()) {
+                resp.error = "Cancelled by user";
+                break;
+            }
+            size_t toRead = std::min(maxCap - outSize, static_cast<size_t>(32768));
+            int readBytes = sceHttpReadData(reqId, outBuf + outSize, toRead);
+            if (readBytes <= 0) break;
+            outSize += static_cast<size_t>(readBytes);
+        }
+    } else {
+        resp.error = "sceHttpSendRequest failed: " + std::to_string(sendRes);
+    }
+
+    sceHttpDeleteRequest(reqId);
+    sceHttpDeleteConnection(connId);
+    return resp;
+#endif
+}
+
 HttpResponse HttpClient::get(const std::string& url,
                             const std::vector<std::pair<std::string, std::string>>& headers) {
     AtomicRecursiveGuard lock(g_httpLock);
