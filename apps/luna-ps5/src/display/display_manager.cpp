@@ -1,4 +1,6 @@
 #include "display/display_manager.h"
+#include "display/clay_renderer.h"
+#include "display/luna_clay_ui.h"
 #include "media/mp4_preview_player.h"
 #include "util/settings.h"
 #include "util/i18n.h"
@@ -55,6 +57,9 @@ constexpr size_t kMemoryAlignment = 0x200000;
 constexpr int kMemoryTypeGarlic = 3;
 constexpr int kMapProtection = 0x33;
 constexpr uint64_t kPixelFormatRGBA8 = 0x8000000022000000ULL;
+
+// Linear canvas buffer in .bss (8.29 MB, 0 bytes in malloc heap)
+alignas(64) static uint32_t g_canvasBuffer[kWidth * kHeight];
 
 struct VideoBufferDesc {
     void* data;
@@ -203,9 +208,11 @@ bool DisplayManager::init(int width, int height) {
 #endif
 
     isReady_ = true;
-    canvas_.assign(width_ * height_, 0xFF000000U);
+    canvas_ = g_canvasBuffer;
+    std::fill_n(canvas_, width_ * height_, 0xFF000000U);
     fontRenderer_.init();
     loadStaticHeroBanner();
+    ClayRenderer::instance().init(this, width_, height_);
     return true;
 }
 
@@ -241,7 +248,9 @@ void DisplayManager::loadStaticHeroBanner() {
 }
 
 void DisplayManager::putPixel(int x, int y, uint32_t colorArgb) {
-    if (static_cast<unsigned>(x) < static_cast<unsigned>(width_) &&
+    if (x >= clipRect_.x0 && x < clipRect_.x1 &&
+        y >= clipRect_.y0 && y < clipRect_.y1 &&
+        static_cast<unsigned>(x) < static_cast<unsigned>(width_) &&
         static_cast<unsigned>(y) < static_cast<unsigned>(height_)) {
         canvas_[y * width_ + x] = argbToAbgr(colorArgb);
     }
@@ -256,7 +265,9 @@ uint32_t DisplayManager::getPixel(int x, int y) const {
 }
 
 void DisplayManager::blendPixel(int x, int y, uint32_t colorArgb, uint8_t alpha) {
-    if (static_cast<unsigned>(x) >= static_cast<unsigned>(width_) ||
+    if (x < clipRect_.x0 || x >= clipRect_.x1 ||
+        y < clipRect_.y0 || y >= clipRect_.y1 ||
+        static_cast<unsigned>(x) >= static_cast<unsigned>(width_) ||
         static_cast<unsigned>(y) >= static_cast<unsigned>(height_) || alpha == 0) return;
 
     uint32_t srcA = (((colorArgb >> 24) & 0xFF) * alpha) / 255;
@@ -283,18 +294,41 @@ void DisplayManager::blendPixel(int x, int y, uint32_t colorArgb, uint8_t alpha)
     canvas_[idx] = 0xFF000000U | (outB << 16) | (outG << 8) | outR;
 }
 
+void DisplayManager::pushScissor(int x, int y, int w, int h) {
+    clipStack_.push_back(clipRect_);
+    int nx0 = std::max(clipRect_.x0, x);
+    int ny0 = std::max(clipRect_.y0, y);
+    int nx1 = std::min(clipRect_.x1, x + w);
+    int ny1 = std::min(clipRect_.y1, y + h);
+    clipRect_ = { nx0, ny0, std::max(nx0, nx1), std::max(ny0, ny1) };
+}
+
+void DisplayManager::popScissor() {
+    if (!clipStack_.empty()) {
+        clipRect_ = clipStack_.back();
+        clipStack_.pop_back();
+    } else {
+        clipRect_ = { 0, 0, width_, height_ };
+    }
+}
+
+void DisplayManager::resetScissor() {
+    clipStack_.clear();
+    clipRect_ = { 0, 0, width_, height_ };
+}
+
 void DisplayManager::clear(uint32_t colorArgb) {
-    if (!isReady_ || canvas_.empty()) return;
+    if (!isReady_ || !canvas_) return;
     uint32_t abgr = argbToAbgr(colorArgb);
-    std::fill_n(canvas_.data(), width_ * height_, abgr);
+    std::fill_n(canvas_, width_ * height_, abgr);
 }
 
 void DisplayManager::fillRect(int rx, int ry, int rw, int rh, uint32_t colorArgb) {
     if (!isReady_ || rw <= 0 || rh <= 0) return;
-    int x0 = std::max(0, rx);
-    int y0 = std::max(0, ry);
-    int x1 = std::min(width_, rx + rw);
-    int y1 = std::min(height_, ry + rh);
+    int x0 = std::max({0, rx, clipRect_.x0});
+    int y0 = std::max({0, ry, clipRect_.y0});
+    int x1 = std::min({width_, rx + rw, clipRect_.x1});
+    int y1 = std::min({height_, ry + rh, clipRect_.y1});
     if (x0 >= x1 || y0 >= y1) return;
 
     uint32_t abgr = argbToAbgr(colorArgb);
@@ -314,10 +348,10 @@ void DisplayManager::drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int
     if (srcH <= 0) srcH = dstH;
     if (srcW > 4096 || srcH > 4096) return;
 
-    int x0 = std::clamp(rx, 0, width_);
-    int y0 = std::clamp(ry, 0, height_);
-    int x1 = std::clamp(rx + dstW, 0, width_);
-    int y1 = std::clamp(ry + dstH, 0, height_);
+    int x0 = std::clamp(rx, std::max(0, clipRect_.x0), std::min(width_, clipRect_.x1));
+    int y0 = std::clamp(ry, std::max(0, clipRect_.y0), std::min(height_, clipRect_.y1));
+    int x1 = std::clamp(rx + dstW, std::max(0, clipRect_.x0), std::min(width_, clipRect_.x1));
+    int y1 = std::clamp(ry + dstH, std::max(0, clipRect_.y0), std::min(height_, clipRect_.y1));
     if (x0 >= x1 || y0 >= y1) return;
 
     const bool oneToOne = (srcW == dstW && srcH == dstH);
@@ -381,90 +415,7 @@ void DisplayManager::blendRectUniform(int rx, int ry, int rw, int rh, uint32_t c
     }
 }
 
-void DisplayManager::applyAlphaMask(const std::vector<uint8_t>& mask, int maskW, int maskH,
-                                    const std::vector<int>& rowStart, const std::vector<int>& rowEnd,
-                                    int destX, int destY, uint32_t colorArgb) {
-    if (!isReady_ || mask.empty() || maskW <= 0 || maskH <= 0) return;
-    const uint32_t sr = (colorArgb >> 16) & 0xFF;
-    const uint32_t sg = (colorArgb >> 8) & 0xFF;
-    const uint32_t sb = colorArgb & 0xFF;
 
-    for (int my = 0; my < maskH; ++my) {
-        const int y = destY + my;
-        if (y < 0 || y >= height_) continue;
-        int xs = std::max(0, rowStart[my]);
-        int xe = std::min(maskW, rowEnd[my]);
-        const uint8_t* mrow = mask.data() + static_cast<size_t>(my) * maskW;
-        uint32_t* row = &canvas_[y * width_];
-
-        for (int mx = xs; mx < xe; ++mx) {
-            const uint32_t a = mrow[mx];
-            if (a == 0) continue;
-            const int x = destX + mx;
-            if (x < 0 || x >= width_) continue;
-
-            const uint32_t d = row[x];
-            const uint32_t inv = 255U - a;
-            const uint32_t r = (sr * a + (d & 0xFF) * inv) / 255U;
-            const uint32_t g = (sg * a + ((d >> 8) & 0xFF) * inv) / 255U;
-            const uint32_t b = (sb * a + ((d >> 16) & 0xFF) * inv) / 255U;
-            row[x] = 0xFF000000U | (b << 16) | (g << 8) | r;
-        }
-    }
-}
-
-void DisplayManager::ensureMasks() {
-    if (masksReady_) return;
-    masksReady_ = true;
-
-    // Hero banner mask (1920x540): dark fade on the left side and bottom edge
-    heroMask_.assign(static_cast<size_t>(1920) * 540, 0);
-    heroRowStart_.assign(540, 1920);
-    heroRowEnd_.assign(540, 0);
-    for (int y = 0; y < 540; ++y) {
-        float yAlpha = (y > 350) ? std::min(1.0f, static_cast<float>(y - 350) / 190.0f) : 0.0f;
-        uint8_t* row = heroMask_.data() + static_cast<size_t>(y) * 1920;
-        for (int x = 0; x < 950; ++x) {
-            float xAlpha = (x < 700) ? 1.0f - static_cast<float>(x) / 700.0f : 0.0f;
-            float t = std::min(1.0f, xAlpha * 0.95f + yAlpha * 0.95f);
-            if (t > 0.01f) row[x] = static_cast<uint8_t>(t * 255.0f);
-        }
-        if (y > 400) {
-            float b = std::min(1.0f, static_cast<float>(y - 400) / 140.0f);
-            for (int x = 950; x < 1920; ++x) row[x] = static_cast<uint8_t>(b * 255.0f);
-        }
-        for (int x = 0; x < 1920; ++x) {
-            if (row[x]) { heroRowStart_[y] = x; break; }
-        }
-        for (int x = 1919; x >= 0; --x) {
-            if (row[x]) { heroRowEnd_[y] = x + 1; break; }
-        }
-    }
-
-    // Game detail mask (1920x1080): dark fade left + bottom
-    detailMask_.assign(static_cast<size_t>(1920) * 1080, 0);
-    detailRowStart_.assign(1080, 1920);
-    detailRowEnd_.assign(1080, 0);
-    for (int y = 0; y < 1080; ++y) {
-        float yAlpha = (y > 480) ? std::min(1.0f, static_cast<float>(y - 480) / 380.0f) : 0.0f;
-        uint8_t* row = detailMask_.data() + static_cast<size_t>(y) * 1920;
-        for (int x = 0; x < 1050; ++x) {
-            float xAlpha = (x < 850) ? 1.0f - static_cast<float>(x) / 850.0f : 0.0f;
-            float t = std::min(1.0f, xAlpha * 0.95f + yAlpha * 0.95f);
-            if (t > 0.01f) row[x] = static_cast<uint8_t>(t * 255.0f);
-        }
-        if (y > 520) {
-            float b = std::min(0.92f, static_cast<float>(y - 520) / 340.0f);
-            for (int x = 1050; x < 1920; ++x) row[x] = static_cast<uint8_t>(b * 255.0f);
-        }
-        for (int x = 0; x < 1920; ++x) {
-            if (row[x]) { detailRowStart_[y] = x; break; }
-        }
-        for (int x = 1919; x >= 0; --x) {
-            if (row[x]) { detailRowEnd_[y] = x + 1; break; }
-        }
-    }
-}
 
 void DisplayManager::drawPlayTriangleIcon(int cx, int cy, int size, uint32_t color) {
     if (!isReady_ || size <= 0) return;
@@ -820,11 +771,16 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
         case 8: fontSize = 110; break;
         default: fontSize = scale * 9; break;
     }
+    drawTextPx(x, y, fontSize, text, colorArgb);
+}
+
+void DisplayManager::drawTextPx(int x, int y, int fontSizePx, const std::string& text, uint32_t colorArgb) {
+    if (!isReady_ || fontSizePx <= 0 || text.empty()) return;
 
     int cursorX = x;
     int cursorY = y;
-    int lineHeight = fontSize + (fontSize / 3);
-    int baseline = static_cast<int>(fontSize * 0.82f);
+    int lineHeight = fontSizePx + (fontSizePx / 3);
+    int baseline = static_cast<int>(fontSizePx * 0.82f);
 
     size_t i = 0;
     while (i < text.size()) {
@@ -856,9 +812,9 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
             continue;
         }
 
-        if (codepoint == 0x2122) { // ™
-            const auto& gT = fontRenderer_.getGlyph('T', fontSize * 3 / 4);
-            const auto& gM = fontRenderer_.getGlyph('M', fontSize * 3 / 4);
+        if (codepoint == 0x2122) { // TM
+            const auto& gT = fontRenderer_.getGlyph('T', fontSizePx * 3 / 4);
+            const auto& gM = fontRenderer_.getGlyph('M', fontSizePx * 3 / 4);
             if (gT.advance > 0) {
                 int gy = cursorY + (baseline / 2);
                 for (int r = 0; r < gT.height; ++r) {
@@ -879,7 +835,7 @@ void DisplayManager::drawText(int x, int y, int scale, const std::string& text, 
             }
         }
 
-        const auto& glyph = fontRenderer_.getGlyph(codepoint, fontSize);
+        const auto& glyph = fontRenderer_.getGlyph(codepoint, fontSizePx);
         int gx = cursorX + glyph.xoff;
         int gy = cursorY + baseline + glyph.yoff;
 
@@ -1304,630 +1260,29 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                                         const std::vector<GameTile>& filteredGames,
                                         bool hoverCardOpen) {
     if (!isReady_) return;
-    (void)frameCount;
-
-    int focusedCardX = 0;
-    int focusedCardY = 0;
-    bool hasFocusedCard = false;
-    const GameTile* focusedTilePtr = nullptr;
-
-    // 1. Fondo principal oficial de Amazon Luna (#0E0B16 Cosmic Deep)
-    clear(0xFF0E0B16);
-
-    // VISTA DE BUSQUEDA OFICIAL: barra "Buscar" + teclado compacto + cuadricula 5 columnas 16:9
-    if (searchOpen) {
-        clear(0xFF0E0B16);
-        const bool barFoc = (searchZone == 0);
-        drawRoundedRect(72, 36, 1776, 58, 12, 0xFF1C152E);
-        drawRoundedBorder(72, 36, 1776, 58, 12, barFoc ? 3 : 1, barFoc ? 0xFFFFFFFF : 0xFF2D2248);
-        if (searchQuery_.empty()) {
-            drawText(100, 50, 2, "Buscar", 0xFF94A3B8);
-        } else {
-            drawText(100, 50, 2, searchQuery_ + (((frameCount / 30) % 2 == 0) ? "|" : ""), 0xFFFFFFFF);
-        }
-        {
-            int mgx = 1806, mgy = 64, mgr = 9;
-            drawRoundedBorder(mgx - mgr, mgy - mgr, mgr * 2, mgr * 2, mgr, 2, 0xFFCBD5E1);
-            for (int d = 0; d < 7; ++d) fillRect(mgx + mgr - 3 + d, mgy + mgr - 3 + d, 2, 2, 0xFFCBD5E1);
-        }
-
-        static const char* kKeys[28] = {
-            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
-            "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ESPACIO", "BORRAR"
-        };
-        for (int k = 0; k < 28; ++k) {
-            int kx = 72 + (k % 14) * 126;
-            int ky = 112 + (k / 14) * 50;
-            bool kf = (searchZone == 0 && searchLetterIdx == k);
-            drawRoundedRect(kx, ky, 118, 42, 8, kf ? 0xFF9146FF : 0xFF1C152E);
-            int tw = fontRenderer_.measureText(kKeys[k], 16);
-            drawText(kx + (118 - tw) / 2, ky + 10, 1, kKeys[k], kf ? 0xFFFFFFFF : 0xFFCBD5E1);
-        }
-
-        const int numF = static_cast<int>(filteredGames.size());
-        drawText(72, 222, 1, std::to_string(numF) + " resultados", 0xFF94A3B8);
-
-        const int gCardW = 310, gCardH = 174, gGapX = 56, gPitchY = 236, gBaseY = 252;
-        int firstRow = (searchZone == 1) ? std::max(0, searchGridIdx / 5 - 2) : 0;
-        for (int g = firstRow * 5; g < numF && g < firstRow * 5 + 15; ++g) {
-            int col = g % 5;
-            int row = (g / 5) - firstRow;
-            int gx = 72 + col * (gCardW + gGapX);
-            int gy = gBaseY + row * gPitchY;
-            const auto& tile = filteredGames[g];
-            std::string imgUrl = tile.backdropUrl.empty() ? tile.coverUrl : tile.backdropUrl;
-            auto cImg = luna::util::ImageLoader::instance().getImage(imgUrl, luna::util::ImagePreset::HorizontalCard16_9);
-            if (cImg && cImg->ready) {
-                drawPreScaledImage(gx, gy, cImg->rgba.data(), gCardW, gCardH, cImg->width, cImg->height);
-            } else {
-                if (!imgUrl.empty()) luna::util::ImageLoader::instance().requestImage(imgUrl, luna::util::ImagePreset::HorizontalCard16_9);
-                drawRoundedRect(gx, gy, gCardW, gCardH, 12, 0xFF241B3B);
-            }
-            if (searchZone == 1 && searchGridIdx == g) {
-                drawRoundedBorder(gx - 3, gy - 3, gCardW + 6, gCardH + 6, 14, 3, 0xFFFFFFFF);
-            }
-            drawText(gx, gy + gCardH + 8, 2, utf8SafeTruncate(tile.title, 26), 0xFFFFFFFF);
-        }
-        if (!statusText.empty()) {
-            fillRect(0, 1046, 1920, 34, 0xEE0B0912);
-            drawText(44, 1054, 1, statusText, 0xFF94A3B8);
-        }
-        present();
-        return;
-    }
-
-
-    if (collections.empty() && activeTabIdx != 3) {
-        drawText(68, 500, 3, "Cargando catalogo oficial de Amazon Luna...", 0xFF94A3B8);
-        present();
-        return;
-    }
-
-    // PESTANA 3: REMOTE PLAY
-    if (activeTabIdx == 3) {
-        // Fondo tematico Remote Play
-        fillRect(0, 0, 1920, 1080, 0xFF0E0B16);
-        drawRoundedRect(68, 100, 1784, 110, 16, 0xFF181226);
-        drawRoundedBorder(68, 100, 1784, 110, 16, 1, 0xFF2D2248);
-
-        drawText(100, 118, 5, "Remote Play", 0xFFFFFFFF);
-        drawText(100, 168, 2, "Juega con tus amigos esteis donde esteis. Compartid partidas multijugador y cooperativas al instante sin coste adicional.", 0xFF94A3B8);
-
-        int cardY = 240;
-        int cardW = 860;
-        int cardH = 500;
-
-        // Tarjeta 1: Anfitrion (Crear una partida)
-        int hostX = 68;
-        bool hostFoc = (focusZone != 0 && (selectedRowIdx == 0 || selectedRowIdx == 1) && (!rowSelectedCol.empty() && rowSelectedCol[0] == 0));
-        drawRoundedRect(hostX, cardY, cardW, cardH, 20, 0xFF140F22);
-        drawRoundedBorder(hostX, cardY, cardW, cardH, 20, hostFoc ? 3 : 1, hostFoc ? 0xFFFFFFFF : 0xFF2D2248);
-
-        drawRoundedRect(hostX + 40, cardY + 36, 140, 36, 8, 0xFF3B1B68);
-        drawText(hostX + 56, cardY + 44, 2, "ANFITRION", 0xFFE9D5FF);
-        drawText(hostX + 40, cardY + 92, 4, "Crear una partida", 0xFFFFFFFF);
-        drawText(hostX + 40, cardY + 140, 2, "1. Genera un codigo unico de acceso de 6 digitos.", 0xFFCBD5E1);
-        drawText(hostX + 40, cardY + 175, 2, "2. Enviaselo a tus amigos (hasta 8 jugadores).", 0xFFCBD5E1);
-        drawText(hostX + 40, cardY + 210, 2, "3. Inicia cualquier juego compatible de tu biblioteca.", 0xFFCBD5E1);
-
-        // Caja de codigo generado
-        drawRoundedRect(hostX + 40, cardY + 265, cardW - 80, 90, 12, 0xFF22173B);
-        drawRoundedBorder(hostX + 40, cardY + 265, cardW - 80, 90, 12, 1, 0xFF4C1D95);
-        drawText(hostX + 60, cardY + 285, 2, "CODIGO DE ACCESO ACTUAL:", 0xFFA78BFA);
-        drawText(hostX + 60, cardY + 312, 5, "2 9 9 9 8 3", 0xFFFCD34D);
-        drawText(hostX + 380, cardY + 318, 2, "Sala activa lista para jugar", 0xFF10B981);
-
-        drawPillButton(hostX + 40, cardY + 390, 380, 64, "Generar nuevo codigo", hostFoc, "", false);
-
-        // Tarjeta 2: Invitado (Unirse a una partida)
-        int guestX = 992;
-        bool guestFoc = (focusZone != 0 && (selectedRowIdx == 0 || selectedRowIdx == 1) && (!rowSelectedCol.empty() && rowSelectedCol[0] == 1));
-        drawRoundedRect(guestX, cardY, cardW, cardH, 20, 0xFF140F22);
-        drawRoundedBorder(guestX, cardY, cardW, cardH, 20, guestFoc ? 3 : 1, guestFoc ? 0xFFFFFFFF : 0xFF2D2248);
-
-        drawRoundedRect(guestX + 40, cardY + 36, 130, 36, 8, 0xFF064E3B);
-        drawText(guestX + 56, cardY + 44, 2, "INVITADO", 0xFFA7F3D0);
-        drawText(guestX + 40, cardY + 92, 4, "Unirse a una partida", 0xFFFFFFFF);
-        drawText(guestX + 40, cardY + 140, 2, "Introduce el codigo de 6 digitos facilitado por el anfitrion:", 0xFFCBD5E1);
-
-        // Cajas de digitos interactivos [ • ] [ • ] [ • ] [ • ] [ • ] [ • ]
-        int pinBoxX = guestX + 40;
-        int pinBoxY = cardY + 195;
-        static const char* kDemoPinDigits[] = {"2", "9", "9", "9", "8", "3"};
-        for (int p = 0; p < 6; ++p) {
-            drawRoundedRect(pinBoxX, pinBoxY, 68, 76, 10, 0xFF22173B);
-            drawRoundedBorder(pinBoxX, pinBoxY, 68, 76, 10, 2, guestFoc ? 0xFF9146FF : 0xFF374151);
-            drawText(pinBoxX + 24, pinBoxY + 20, 4, kDemoPinDigits[p], 0xFFFFFFFF);
-            pinBoxX += 82;
-        }
-
-        drawText(guestX + 40, cardY + 300, 2, "Pulsa (X) para validar el codigo e incorporarte a la sesion", 0xFF94A3B8);
-        drawPillButton(guestX + 40, cardY + 390, 380, 64, "Unirme a la partida", guestFoc, "", true);
-
-        // Barra inferior y navegacion
-        drawText(68, 780, 3, "Juegos compatibles con Remote Play en tu suscripcion:", 0xFFFFFFFF);
-        int rpGidY = 825;
-        static const char* kRpTitles[] = {"The Game of Life 2", "Goat Simulator 3", "Cluedo", "Overcooked! 2", "Moving Out"};
-        for (int rg = 0; rg < 5; ++rg) {
-            int rx = 68 + rg * 350;
-            drawRoundedRect(rx, rpGidY, 320, 90, 12, 0xFF1E1633);
-            drawRoundedBorder(rx, rpGidY, 320, 90, 12, 1, 0xFF352654);
-            drawText(rx + 20, rpGidY + 20, 2, kRpTitles[rg], 0xFFFFFFFF);
-            drawText(rx + 20, rpGidY + 50, 1, "Multijugador local en nube", 0xFF10B981);
-        }
-    } else {
-        int clampedRow = std::clamp(selectedRowIdx, 0, static_cast<int>(collections.size()) - 1);
-        bool hasHero = (activeTabIdx != 2) && !collections.empty() && collections[0].isHeroRotator && !collections[0].items.empty();
-
-        int firstRowIdx = hasHero ? 1 : 0;
-        std::vector<int> rowOffsets(collections.size(), 0);
-        int curAccY = (hasHero ? 515 : 180);
-        for (size_t r = firstRowIdx; r < collections.size(); ++r) {
-            rowOffsets[r] = curAccY;
-            if (collections[r].isPartnerRow) {
-                curAccY += 570;
-            } else if (collections[r].isCategoryCarousel) {
-                curAccY += 240;
-            } else if (collections[r].id.find("promo_banner") != std::string::npos || collections[r].id.find("claims") != std::string::npos) {
-                curAccY += 210;
-            } else {
-                curAccY += 370;
-            }
-        }
-
-        // Desplazamiento vertical de filas cuando se navega hacia abajo
-        int yOffset = 0;
-        if (clampedRow > 1 && clampedRow < static_cast<int>(rowOffsets.size())) {
-            yOffset = rowOffsets[clampedRow] - (hasHero ? 480 : 160);
-            if (yOffset < 0) yOffset = 0;
-        }
-
-        // PESTANA 2: MI ESPACIO (SIN HERO BANNER, TITULO OFICIAL EN GRANDE)
-        if (activeTabIdx == 2) {
-            int titleY = 100 - yOffset;
-            if (titleY > -40) {
-                drawText(68, titleY, 6, "Mi espacio", 0xFFFFFFFF);
-            }
-        }
-
-        // 2. HERO BANNER PANORAMICO 16:9 (PARA INICIO Y GAMENIGHT)
-        if (hasHero) {
-            const auto& heroCol = collections[0];
-            int heroIdx = (!rowSelectedCol.empty()) ? rowSelectedCol[0] : 0;
-            if (heroIdx < 0 || heroIdx >= static_cast<int>(heroCol.items.size())) heroIdx = 0;
-            const auto& heroGame = heroCol.items[heroIdx];
-            bool heroFocused = (focusZone != 0 && clampedRow == 0);
-
-            int heroY = 0 - yOffset;
-            if (heroY + 560 > 0) {
-                std::string heroBackdrop = heroGame.backdropUrl.empty() ? heroGame.coverUrl : heroGame.backdropUrl;
-                bool isFirstSlide = (heroCol.isHeroRotator && heroIdx == 0 && heroGame.title == "Luna Premium");
-                if (isFirstSlide) {
-                    if (!heroBannerRgba_.empty()) {
-                        drawPreScaledImage(0, heroY, heroBannerRgba_.data(), 1920, 540, heroBannerWidth_, heroBannerHeight_);
-                    } else {
-                        fillRect(0, std::max(0, heroY), 1920, 540, 0xFF0E0B16);
-                    }
-                } else {
-                    auto heroImg = luna::util::ImageLoader::instance().getImage(heroBackdrop, luna::util::ImagePreset::PanoramicHero);
-                    if (heroImg && heroImg->ready) {
-                        drawPreScaledImage(0, heroY, heroImg->rgba.data(), 1920, 540, heroImg->width, heroImg->height);
-                    } else {
-                        if (!heroBackdrop.empty()) {
-                            luna::util::ImageLoader::instance().requestImage(heroBackdrop, luna::util::ImagePreset::PanoramicHero);
-                        }
-                        fillRect(0, std::max(0, heroY), 1920, 540, 0xFF0E0B16);
-                    }
-                }
-
-                ensureMasks();
-                applyAlphaMask(heroMask_, 1920, 540, heroRowStart_, heroRowEnd_, 0, heroY, 0xFF0E0B16);
-
-                // Lado izquierdo del Hero (x = 68):
-                bool btn0Focused = (focusZone == 2) ? (heroBtnIdx == 0) : heroFocused;
-                bool btn1Focused = (focusZone == 2 && heroBtnIdx == 1);
-
-                // Badge de GameNight si es pestaña GameNight
-                if (activeTabIdx == 1) {
-                    drawRoundedRect(68, heroY + 80, 290, 32, 8, 0xFF7C3AED);
-                    drawText(82, heroY + 88, 1, "[GN] USA TELEFONOS COMO MANDOS", 0xFFFFFFFF);
-                }
-
-                if (isFirstSlide) {
-                    drawText(68, heroY + 140, 6, "Luna Premium", 0xFFFFFFFF);
-                    drawText(68, heroY + 310, 2, "Mas de 100 juegos. Una suscripcion.", 0xFFE2E8F0);
-                    drawPillButton(68, heroY + 365, 280, 58, "Mas informacion", btn0Focused, "", false);
-                } else {
-                    bool drawnLogo = false;
-                    if (!heroGame.logoUrl.empty()) {
-                        auto logoImg = luna::util::ImageLoader::instance().getImage(heroGame.logoUrl, luna::util::ImagePreset::ProductLogo);
-                        if (logoImg && logoImg->ready) {
-                            drawPreScaledImage(68, heroY + 115, logoImg->rgba.data(), logoImg->width, logoImg->height, logoImg->width, logoImg->height);
-                            drawnLogo = true;
-                        } else {
-                            luna::util::ImageLoader::instance().requestImage(heroGame.logoUrl, luna::util::ImagePreset::ProductLogo);
-                        }
-                    }
-                    if (!drawnLogo) {
-                        drawText(68, heroY + 140, 6, utf8SafeTruncate(heroGame.title, 26), 0xFFFFFFFF);
-                    }
-                    std::string sub = heroGame.subtitle.empty() ? (heroGame.synopsis.empty() ? "Descubre grandes titulos para jugar en la nube." : heroGame.synopsis) : heroGame.subtitle;
-                    drawText(68, heroY + 310, 2, utf8SafeTruncate(sub, 54), 0xFFE2E8F0);
-                    drawPillButton(68, heroY + 365, 280, 58, "Jugar ahora", btn0Focused, "", true);
-                    drawPillButton(364, heroY + 365, 280, 58, "Mas informacion", btn1Focused, "", false);
-                }
-
-                int totalSlides = std::min(static_cast<int>(heroCol.items.size()), 6);
-                int dotX = 68;
-                int dotY = heroY + 450;
-                for (int s = 0; s < totalSlides; ++s) {
-                    if (s == heroIdx) {
-                        drawRoundedRect(dotX, dotY, 28, 6, 3, 0xFFFFFFFF);
-                        dotX += 36;
-                    } else {
-                        drawRoundedRect(dotX, dotY, 6, 6, 3, 0x8894A3B8);
-                        dotX += 14;
-                    }
-                }
-            }
-        }
-
-        // 3. SECCION DE SWIMLANES / FILAS HORIZONTALES
-        for (size_t r = firstRowIdx; r < collections.size(); ++r) {
-            int rowY = rowOffsets[r] - yOffset;
-            const auto& row = collections[r];
-            int rowH = row.isPartnerRow ? 570 : (row.isCategoryCarousel ? 240 : 370);
-            if (rowY + rowH < 0 || rowY > 1080) continue;
-
-            bool isFocusedRow = (focusZone != 0 && static_cast<int>(r) == clampedRow);
-            int selectedCol = (r < rowSelectedCol.size()) ? rowSelectedCol[r] : 0;
-
-            // CASO A: BANNER DESTACADO CON JUEGOS SUPERPUESTOS (PARTNER_UPSELL_ROW)
-            if (row.isPartnerRow) {
-                int bannerX = 68;
-                int bannerY = rowY + 10;
-                int bannerW = 1784;
-                int bannerH = 340;
-
-                uint32_t bannerBg = (row.id.find("home_2") != std::string::npos) ? 0xFF2B1055 : 0xFF1C1A2E;
-                drawRoundedRect(bannerX, bannerY, bannerW, bannerH, 16, bannerBg);
-
-                if (!row.partnerPromoImage.empty()) {
-                    auto bImg = luna::util::ImageLoader::instance().getImage(row.partnerPromoImage, luna::util::ImagePreset::PanoramicHero);
-                    if (bImg && bImg->ready) {
-                        int artW = 900;
-                        int artH = bannerH;
-                        int artX = bannerX + bannerW - artW;
-                        drawPreScaledImage(artX, bannerY, bImg->rgba.data(), artW, artH, bImg->width, bImg->height);
-                        for (int gx = 0; gx < 200; ++gx) {
-                            uint8_t alpha = static_cast<uint8_t>(255 - (gx * 255) / 200);
-                            blendRectUniform(artX + gx, bannerY, 1, bannerH, bannerBg, alpha);
-                        }
-                    } else {
-                        luna::util::ImageLoader::instance().requestImage(row.partnerPromoImage, luna::util::ImagePreset::PanoramicHero);
-                    }
-                }
-
-                drawRoundedBorder(bannerX, bannerY, bannerW, bannerH, 16, 1, 0xFF3D2B60);
-
-                drawText(bannerX + 40, bannerY + 36, 4, row.partnerTitle, 0xFFFFFFFF);
-                drawText(bannerX + 40, bannerY + 84, 2, utf8SafeTruncate(row.partnerDescription, 68), 0xFFCBD5E1);
-                drawPillButton(bannerX + 40, bannerY + 130, 240, 46, row.partnerButtonText, false, "", false);
-
-                // Parte inferior superpuesta: carrusel horizontal con 6-7 carátulas verticales (200x280 px)
-                // Solapándose 110 px sobre la parte baja del banner: cardY = bannerY + 230
-                int cardW = 200;
-                int cardH = 280;
-                int curCardGap = 24;
-                int scrollOffset = std::max(0, (selectedCol - 3) * (cardW + curCardGap));
-                int cardY = bannerY + 230;
-
-                for (size_t i = 0; i < row.items.size(); ++i) {
-                    int cardX = bannerX + 40 + static_cast<int>(i) * (cardW + curCardGap) - scrollOffset;
-                    if (cardX + cardW < 0 || cardX > 1920) continue;
-                    bool isSel = isFocusedRow && (static_cast<int>(i) == selectedCol);
-                    if (isSel) {
-                        focusedCardX = cardX;
-                        focusedCardY = cardY;
-                        hasFocusedCard = true;
-                        focusedTilePtr = &row.items[i];
-                    }
-
-                    const auto& item = row.items[i];
-                    std::string imgUrl = item.coverUrl.empty() ? item.backdropUrl : item.coverUrl;
-                    auto cImg = luna::util::ImageLoader::instance().getImage(imgUrl, luna::util::ImagePreset::VerticalPoster);
-                    if (cImg && cImg->ready) {
-                        drawPreScaledImage(cardX, cardY, cImg->rgba.data(), cardW, cardH, cImg->width, cImg->height);
-                    } else {
-                        if (!imgUrl.empty()) luna::util::ImageLoader::instance().requestImage(imgUrl, luna::util::ImagePreset::VerticalPoster);
-                        drawRoundedRect(cardX, cardY, cardW, cardH, 14, 0xFF241B3B);
-                    }
-
-                    if (isSel) {
-                        drawRoundedBorder(cardX - 2, cardY - 2, cardW + 4, cardH + 4, 16, 3, 0xFFFFFFFF);
-                    }
-
-                    bool isGameNight = (row.id.find("home_2") != std::string::npos || item.category == "GAMENIGHT");
-                    if (isGameNight) {
-                        int gnX = cardX + cardW - 38;
-                        int gnY = cardY + cardH - 32;
-                        drawRoundedRect(gnX, gnY, 32, 24, 6, 0xFF7C3AED);
-                        drawText(gnX + 6, gnY + 4, 2, "GN", 0xFFFFFFFF);
-                    }
-
-                    drawText(cardX, cardY + cardH + 8, 2, utf8SafeTruncate(item.title, 20), 0xFFFFFFFF);
-                }
-                continue;
-            }
-
-            // CASO B: EXPLORAR CATEGORIAS (CATEGORY_CAROUSEL - TARJETAS CUADRADAS CON ICONO VECTORIAL BLANCO)
-            if (row.isCategoryCarousel) {
-                drawText(68, rowY + 10, 3, "Explorar categorías", 0xFFFFFFFF);
-                int cardW = 172;
-                int cardH = 156;
-                int cardR = 12;
-                int gap = 20;
-                int cardY = rowY + 50;
-                int scrollOff = std::max(0, (selectedCol - 4) * (cardW + gap));
-
-                for (size_t c = 0; c < row.items.size(); ++c) {
-                    int cardX = 68 + static_cast<int>(c) * (cardW + gap) - scrollOff;
-                    if (cardX + cardW < 0 || cardX > 1920) continue;
-                    bool isSel = isFocusedRow && (static_cast<int>(c) == selectedCol);
-                    if (isSel) {
-                        focusedCardX = cardX;
-                        focusedCardY = cardY;
-                        hasFocusedCard = true;
-                        focusedTilePtr = &row.items[c];
-                    }
-
-                    drawRoundedRect(cardX, cardY, cardW, cardH, cardR, isSel ? 0xFF2C2640 : 0xFF211D30);
-                    drawRoundedBorder(cardX, cardY, cardW, cardH, cardR, isSel ? 3 : 1, isSel ? 0xFFFFFFFF : 0xFF352F48);
-
-                    int cx = cardX + 86;
-                    int cy = cardY + 58;
-                    bool drawnIcon = false;
-                    if (!row.items[c].coverUrl.empty()) {
-                        auto icImg = luna::util::ImageLoader::instance().getImage(row.items[c].coverUrl, luna::util::ImagePreset::Raw);
-                        if (icImg && icImg->ready) {
-                            drawCategoryIconTinted(cx - 21, cy - 21, icImg->rgba.data(), 42, 42, icImg->width, icImg->height, 0xFFFFFFFF);
-                            drawnIcon = true;
-                        } else {
-                            luna::util::ImageLoader::instance().requestImage(row.items[c].coverUrl, luna::util::ImagePreset::Raw);
-                        }
-                    }
-                    if (!drawnIcon) {
-                        drawCategoryIcon(cx, cy, 42, row.items[c].title, 0xFFFFFFFF);
-                    }
-
-                    std::string catName = row.items[c].title;
-                    int tw = fontRenderer_.measureText(catName, 14);
-                    int tx = cx - (tw / 2);
-                    drawText(tx, cardY + 118, 1, catName, 0xFFFFFFFF);
-                }
-                continue;
-            }
-
-            // CASO E: BANNER PROMOCIONAL PRIME GAMING (RECLAMA TUS JUEGOS)
-            if (row.id.find("promo_banner") != std::string::npos || row.id.find("claims") != std::string::npos) {
-                int bannerX = 68;
-                int bannerY = rowY + 10;
-                int bannerW = 1784;
-                int bannerH = 180;
-                drawRoundedRect(bannerX, bannerY, bannerW, bannerH, 14, 0xFF1C152E);
-                if (!row.partnerPromoImage.empty()) {
-                    auto bImg = luna::util::ImageLoader::instance().getImage(row.partnerPromoImage, luna::util::ImagePreset::PanoramicHero);
-                    if (bImg && bImg->ready) {
-                        drawPreScaledImage(bannerX, bannerY, bImg->rgba.data(), bannerW, bannerH, bImg->width, bImg->height);
-                    } else {
-                        luna::util::ImageLoader::instance().requestImage(row.partnerPromoImage, luna::util::ImagePreset::PanoramicHero);
-                    }
-                }
-                drawRoundedBorder(bannerX, bannerY, bannerW, bannerH, 14, isFocusedRow ? 3 : 1, isFocusedRow ? 0xFFFFFFFF : 0xFF2D2248);
-                continue;
-            }
-
-            // CASO C: JUGADOS RECIENTEMENTE (16:9 EN MI ESPACIO)
-            if (row.isRecentlyPlayed16_9 || (activeTabIdx == 2 && r == 0)) {
-                drawText(68, rowY + 10, 3, row.title.empty() ? "Jugados recientemente" : row.title, 0xFFFFFFFF);
-                int c16W = 290;
-                int c16H = 164;
-                int c16Gap = 24;
-                int scrollOff = std::max(0, (selectedCol - 3) * (c16W + c16Gap));
-
-                for (size_t i = 0; i < row.items.size(); ++i) {
-                    int cardX = 68 + static_cast<int>(i) * (c16W + c16Gap) - scrollOff;
-                    if (cardX + c16W < 0 || cardX > 1920) continue;
-                    bool isSel = isFocusedRow && (static_cast<int>(i) == selectedCol);
-                    int cardY = rowY + 50;
-                    if (isSel) {
-                        focusedCardX = cardX;
-                        focusedCardY = cardY;
-                        hasFocusedCard = true;
-                        focusedTilePtr = &row.items[i];
-                    }
-
-                    const auto& item = row.items[i];
-                    std::string imgUrl = item.backdropUrl.empty() ? item.coverUrl : item.backdropUrl;
-                    auto cImg = luna::util::ImageLoader::instance().getImage(imgUrl, luna::util::ImagePreset::HorizontalCard16_9);
-                    if (cImg && cImg->ready) {
-                        drawPreScaledImage(cardX, cardY, cImg->rgba.data(), c16W, c16H, cImg->width, cImg->height);
-                    } else {
-                        if (!imgUrl.empty()) {
-                            luna::util::ImageLoader::instance().requestImage(imgUrl, luna::util::ImagePreset::HorizontalCard16_9);
-                        }
-                        drawRoundedRect(cardX, cardY, c16W, c16H, 12, 0xFF241B3B);
-                    }
-
-                    if (isSel) {
-                        drawRoundedBorder(cardX - 2, cardY - 2, c16W + 4, c16H + 4, 14, 3, 0xFFFFFFFF);
-                    }
-
-                    // Titulo y Fecha relativa/exacta (28 oct, 27 oct)
-                    drawText(cardX, cardY + 175, 2, utf8SafeTruncate(item.title, 22), 0xFFFFFFFF);
-                    std::string dateStr = item.lastPlayedDate.empty() ? "Partida reciente" : ("Ultima partida: " + item.lastPlayedDate);
-                    drawText(cardX, cardY + 202, 1, dateStr, 0xFF10B981);
-                }
-                continue;
-            }
-
-            // CASO D: SWIMLANE ESTANDAR CON POSTERS VERTICALES (Y RANKINGS 1..6)
-            drawText(68, rowY + 10, 3, row.title, 0xFFFFFFFF);
-
-            int cardW = 200;
-            int cardH = 280;
-            int curCardGap = 28;
-            int rankMargin = row.isRankings ? 72 : 0;
-            int slotWidth = cardW + curCardGap + rankMargin;
-            int scrollOffset = std::max(0, (selectedCol - 3) * slotWidth);
-
-            int rankNumberIndex = 1;
-            for (size_t i = 0; i < row.items.size(); ++i) {
-                const auto& item = row.items[i];
-                if (row.isRankings) {
-                    if (item.title.find("Luna Premium") != std::string::npos ||
-                        item.id.find("luna_premium") != std::string::npos) {
-                        continue;
-                    }
-                }
-
-                int slotX = 68 + static_cast<int>(rankNumberIndex - 1) * slotWidth - scrollOffset;
-                int numberX = slotX;
-                int cardX = slotX + rankMargin;
-                if (cardX + cardW < 0 || numberX > 1920) {
-                    rankNumberIndex++;
-                    continue;
-                }
-
-                bool isSelectedCard = isFocusedRow && (static_cast<int>(i) == selectedCol);
-                int cardY = rowY + 50;
-                if (isSelectedCard) {
-                    focusedCardX = cardX;
-                    focusedCardY = cardY;
-                    hasFocusedCard = true;
-                    focusedTilePtr = &item;
-                }
-
-                if (row.isRankings) {
-                    std::string rankStr = std::to_string(rankNumberIndex);
-                    drawText(numberX, cardY + cardH - 80, 8, rankStr, 0x4AFFFFFF);
-                }
-
-                auto coverImg = luna::util::ImageLoader::instance().getImage(item.coverUrl, luna::util::ImagePreset::VerticalPoster);
-                if (coverImg && coverImg->ready) {
-                    drawPreScaledImage(cardX, cardY, coverImg->rgba.data(), 200, 280, coverImg->width, coverImg->height);
-                } else {
-                    if (!item.coverUrl.empty()) {
-                        luna::util::ImageLoader::instance().requestImage(item.coverUrl, luna::util::ImagePreset::VerticalPoster);
-                    }
-                    drawRoundedRect(cardX, cardY, cardW, cardH, 14, 0xFF241B3B);
-                    drawText(cardX + 16, cardY + 110, 2, utf8SafeTruncate(item.title, 18), 0xFFFFFFFF);
-                }
-
-                if (isSelectedCard) {
-                    drawRoundedBorder(cardX - 2, cardY - 2, cardW + 4, cardH + 4, 16, 3, 0xFFFFFFFF);
-                }
-                rankNumberIndex++;
-            }
-        }
-    }
-
-    // 4. BARRA DE NAVEGACION SUPERIOR
-    fillRect(0, 0, 1920, 68, 0xCC0E0B16);
-    drawText(44, 22, 2, "<", 0xFF94A3B8);
-    drawText(74, 22, 2, ">", 0xFF94A3B8);
-    drawLunaLogoIcon(112, 22, 22);
-    drawText(142, 20, 3, "luna", 0xFFFFFFFF);
-
-    int tabX = 230;
-    int numTabs = static_cast<int>(navTabs.size());
-    for (int t = 0; t < numTabs; ++t) {
-        bool active = (t == activeTabIdx);
-        bool focusedTab = (focusZone == 0 && navColIdx == t);
-
-        uint32_t tColor = (active || focusedTab) ? 0xFFFFFFFF : 0xFF94A3B8;
-        drawText(tabX, 22, 2, navTabs[t], tColor);
-        int tw = fontRenderer_.measureText(navTabs[t], 20);
-
-        if (focusedTab) {
-            drawRoundedBorder(tabX - 8, 14, tw + 16, 40, 8, 2, 0xFF9146FF);
-        } else if (active) {
-            fillRect(tabX, 52, tw, 3, 0xFFFFFFFF);
-        }
-        tabX += tw + 32;
-    }
-
-    int magX = 1754, magY = 32, magR = 8;
-    bool magFocused = (focusZone == 0 && navColIdx == numTabs);
-    if (magFocused) {
-        drawRoundedBorder(magX - 16, 14, 38, 38, 8, 2, 0xFFFFFFFF);
-    }
-    drawRoundedBorder(magX - magR, magY - magR, magR * 2, magR * 2, magR, 2, magFocused ? 0xFFFFFFFF : 0xFFCBD5E1);
-    for (int d = 0; d < 6; ++d) {
-        fillRect(magX + magR - 3 + d, magY + magR - 3 + d, 2, 2, magFocused ? 0xFFFFFFFF : 0xFFCBD5E1);
-    }
-
-    int profX = 1810, profY = 16;
-    bool profFocused = (focusZone == 0 && navColIdx == numTabs + 1);
-    if (profFocused) {
-        drawRoundedBorder(profX - 3, profY - 3, 44, 44, 22, 3, 0xFFFFFFFF);
-    }
-    drawRoundedRect(profX, profY, 38, 38, 19, 0xFF14B8A6);
-    drawText(profX + 12, profY + 8, 2, "B", 0xFFFFFFFF);
-
-    // 5. BARRA DE ESTADO INFERIOR
-    if (!statusText.empty()) {
-        fillRect(0, 1046, 1920, 34, 0xEE0B0912);
-        drawText(44, 1054, 1, statusText, 0xFF94A3B8);
-        drawText(1700, 1054, 1, "DualSense conectado", padConnected ? 0xFF10B981 : 0xFFEF4444);
-    }
-
-    // 6. POPUP MENU PERFIL DE USUARIO (10 OPCIONES OFICIALES)
-    if (profileMenuOpen) {
-        int pw = 480, ph = 640;
-        int px = 1920 - pw - 40;
-        int py = 76;
-        drawRoundedRect(px, py, pw, ph, 16, 0xF8140F24);
-        drawRoundedBorder(px, py, pw, ph, 16, 2, 0xFF9146FF);
-
-        drawRoundedRect(px + 24, py + 20, 48, 48, 24, 0xFF14B8A6);
-        drawText(px + 40, py + 30, 3, "B", 0xFFFFFFFF);
-        drawText(px + 86, py + 22, 3, profile.displayName + " " + profile.discriminator, 0xFFFFFFFF);
-        drawText(px + 86, py + 50, 1, profile.planStatus, 0xFF10B981);
-
-        fillRect(px + 24, py + 80, pw - 48, 1, 0xFF2D2545);
-
-        static const char* kOfficialProfileOpts[10] = {
-            "Gestionar perfiles",
-            "Planes Luna",
-            "Distintivos",
-            "Stream",
-            "Cuentas vinculadas",
-            "Idioma",
-            "Configuración",
-            "Novedades de Luna",
-            "Ayuda",
-            "Acerca de Luna"
-        };
-
-        for (int m = 0; m < 10; ++m) {
-            int by = py + 92 + m * 52;
-            bool btnFoc = (profileMenuIdx == m);
-            if (btnFoc) {
-                drawRoundedRect(px + 16, by, pw - 32, 44, 8, 0xFF9146FF);
-                drawText(px + 32, by + 12, 2, kOfficialProfileOpts[m], 0xFFFFFFFF);
-            } else {
-                drawText(px + 32, by + 12, 2, kOfficialProfileOpts[m], 0xFFCBD5E1);
-            }
-        }
-    }
-
-    // 5. TARJETA FLOTANTE DE PREVISUALIZACION (HOVER PREVIEW CARD TRAS 600 MS)
-    if (hoverCardOpen && hasFocusedCard && focusedTilePtr && !profileMenuOpen && !searchOpen) {
-        drawHoverPreviewCard(focusedCardX, focusedCardY, *focusedTilePtr, frameCount);
-    }
-
-    present();
+    HomeScreenProps props{
+        .collections = collections,
+        .navTabs = navTabs,
+        .activeTabIdx = activeTabIdx,
+        .focusZone = focusZone,
+        .navColIdx = navColIdx,
+        .selectedRowIdx = selectedRowIdx,
+        .rowSelectedCol = rowSelectedCol,
+        .heroBtnIdx = heroBtnIdx,
+        .profile = profile,
+        .padConnected = padConnected,
+        .statusText = statusText,
+        .frameCount = frameCount,
+        .profileMenuOpen = profileMenuOpen,
+        .profileMenuIdx = profileMenuIdx,
+        .searchOpen = searchOpen,
+        .searchZone = searchZone,
+        .searchLetterIdx = searchLetterIdx,
+        .searchGridIdx = searchGridIdx,
+        .filteredGames = filteredGames,
+        .hoverCardOpen = hoverCardOpen
+    };
+    LunaClayUI::renderHomeScreen(*this, props);
 }
 
 void DisplayManager::drawGameDetailScreen(const GameTile& game,
@@ -1940,223 +1295,18 @@ void DisplayManager::drawGameDetailScreen(const GameTile& game,
                                           uint64_t frameCount,
                                           bool isFavorite) {
     if (!isReady_ || !mappedMemory_) return;
-    (void)profile;
-    (void)frameCount;
-    ensureMasks();
-
-    // Zones: 0 buttons, 1 trailer/screenshots (top view) | 3 FAQs, 2 similar games (bottom view)
-    constexpr float kBottomScroll = 880.0f;
-    const float target = (detailZone >= 2) ? kBottomScroll : 0.0f;
-    detailScrollY_ += (target - detailScrollY_) * 0.40f;
-    if (std::fabs(target - detailScrollY_) < 2.0f) detailScrollY_ = target;
-    const int sy = static_cast<int>(detailScrollY_);
-    const float progress = detailScrollY_ / kBottomScroll;
-
-    clear(0xFF0E0B16);
-
-    if (progress < 0.99f) {
-        std::string bgUrl = game.backdropUrl.empty() ? game.coverUrl : game.backdropUrl;
-        auto bgImg = luna::util::ImageLoader::instance().getImage(bgUrl, luna::util::ImagePreset::PanoramicDetail);
-        if (!bgImg || !bgImg->ready) {
-            bgImg = luna::util::ImageLoader::instance().getImage(bgUrl, luna::util::ImagePreset::PanoramicHero);
-        }
-        if (bgImg && bgImg->ready) {
-            drawPreScaledImage(0, 0, bgImg->rgba.data(), 1920, 1080, bgImg->width, bgImg->height);
-        } else {
-            if (!bgUrl.empty()) luna::util::ImageLoader::instance().requestImage(bgUrl, luna::util::ImagePreset::PanoramicDetail);
-            fillRect(0, 0, 1920, 1080, 0xFF140F24);
-        }
-        applyAlphaMask(detailMask_, 1920, 1080, detailRowStart_, detailRowEnd_, 0, 0, 0xFF0E0B16);
-        if (progress > 0.01f) {
-            blendRectUniform(0, 0, 1920, 1080, 0xFF0E0B16, static_cast<uint8_t>(std::min(1.0f, progress * 1.05f) * 240.0f));
-        }
-    }
-
-    // Fixed top bar
-    blendRectUniform(0, 0, 1920, 68, 0xFF0E0B16, 150);
-    drawText(44, 22, 2, "<  Volver  (O)", 0xFFE2E8F0);
-    {
-        int magX = 1754, magY = 32, magR = 8;
-        drawRoundedBorder(magX - magR, magY - magR, magR * 2, magR * 2, magR, 2, 0xFFCBD5E1);
-        for (int d = 0; d < 6; ++d) fillRect(magX + magR - 3 + d, magY + magR - 3 + d, 2, 2, 0xFFCBD5E1);
-        drawRoundedRect(1810, 16, 38, 38, 19, 0xFF14B8A6);
-        drawText(1822, 24, 2, "B", 0xFFFFFFFF);
-    }
-
-    const int ty = -sy;
-
-    // ===================== TOP VIEW =====================
-    if (progress < 0.9f) {
-        bool drawnLogo = false;
-        if (!game.logoUrl.empty()) {
-            auto logoImg = luna::util::ImageLoader::instance().getImage(game.logoUrl, luna::util::ImagePreset::ProductLogo);
-            if (logoImg && logoImg->ready) {
-                drawPreScaledImage(72, ty + 110, logoImg->rgba.data(), logoImg->width, logoImg->height, logoImg->width, logoImg->height);
-                drawnLogo = true;
-            } else {
-                luna::util::ImageLoader::instance().requestImage(game.logoUrl, luna::util::ImagePreset::ProductLogo);
-            }
-        }
-        if (!drawnLogo) {
-            drawText(72, ty + 150, 6, utf8SafeTruncate(game.title, 26), 0xFFFFFFFF);
-        }
-
-        std::string meta = game.genres.empty() ? "Acción, Aventura" : game.genres;
-        meta += "  \xE2\x80\xA2  " + (game.playerCount.empty() ? std::string("1 jugador") : game.playerCount);
-        meta += "  \xE2\x80\xA2  Remote Play";
-        drawText(72, ty + 296, 2, utf8SafeTruncate(meta, 90), 0xFFCBD5E1);
-
-        const int btnY = ty + 350;
-        const bool primFocused = (detailZone == 0 && detailBtnIdx == 0);
-        const bool favFocused = (detailZone == 0 && detailBtnIdx == 1);
-        const bool rpFocused = (detailZone == 0 && detailBtnIdx == 2);
-        if (game.isEntitled) {
-            drawPillButton(72, btnY, 260, 60, isConnecting ? "CONECTANDO..." : "Jugar ahora", primFocused, "", true);
-        } else {
-            std::string pri = game.buttonText.empty() ? "Incluido en Luna Premium" : game.buttonText;
-            drawPillButton(72, btnY, 260, 60, pri, primFocused, "9,99 EUR/mes");
-        }
-        drawRoundedRect(344, btnY, 60, 60, 14, favFocused ? 0xFFFFFFFF : 0xFF2D2248);
-        drawStarIcon(374, btnY + 30, 12, isFavorite ? 0xFFF59E0B : (favFocused ? 0xFF0E0B16 : 0xFFFFFFFF));
-        drawRoundedRect(416, btnY, 210, 60, 14, rpFocused ? 0xFF9146FF : 0xFF2D2248);
-        drawRoundedBorder(416, btnY, 210, 60, 14, rpFocused ? 2 : 1, rpFocused ? 0xFFFFFFFF : 0xFF4C1D95);
-        drawText(440, btnY + 18, 2, "Remote Play", 0xFFFFFFFF);
-
-        if (game.isEntitled) {
-            drawCheckGlyph(*this, 72, ty + 436, 18, 0xFF4DA3FF);
-            drawText(98, ty + 432, 2, "Incluido con Prime", 0xFF4DA3FF);
-        }
-        drawText(72, ty + 478, 2, "Compartir", 0xFF94A3B8);
-        drawText(200, ty + 478, 2, "Añadir al escritorio", 0xFF94A3B8);
-        drawText(430, ty + 478, 2, "Informar de un problema", 0xFF94A3B8);
-        drawText(72, ty + 522, 1, "Al jugar aceptas las condiciones de uso de Amazon Luna y el aviso de privacidad de Amazon.", 0xFF64748B);
-        drawText(72, ty + 546, 1, "Los juegos de terceros pueden recopilar datos conforme a sus propias politicas de privacidad.", 0xFF64748B);
-
-        // Small PEGI seal over the clean artwork
-        {
-            uint32_t pegiBg = 0xFFF59E0B;
-            std::string pegiNum = "12";
-            if (game.pegiRating.find("18") != std::string::npos) { pegiBg = 0xFFDC2626; pegiNum = "18"; }
-            else if (game.pegiRating.find("16") != std::string::npos) { pegiBg = 0xFFEA580C; pegiNum = "16"; }
-            else if (game.pegiRating.find("7") != std::string::npos || game.pegiRating.find("3") != std::string::npos) { pegiBg = 0xFF10B981; pegiNum = "7"; }
-            drawRoundedRect(1760, ty + 380, 60, 68, 8, pegiBg);
-            drawText(1774, ty + 388, 1, "PEGI", 0xFF0E0B16);
-            drawText(1772, ty + 408, 3, pegiNum, 0xFF0E0B16);
-        }
-
-        // Trailer & screenshots row (16:9 thumbnails)
-        drawText(72, ty + 660, 3, "Tráiler y capturas de pantalla", 0xFFFFFFFF);
-        const size_t numScreens = game.screenshotUrls.size();
-        for (size_t t = 0; t < numScreens && t < 5; ++t) {
-            int tx = 72 + static_cast<int>(t) * (290 + 24);
-            int thY = ty + 704;
-            const std::string& imgUrl = game.screenshotUrls[t];
-            auto thImg = luna::util::ImageLoader::instance().getImage(imgUrl, luna::util::ImagePreset::HorizontalCard16_9);
-            if (thImg && thImg->ready) {
-                drawPreScaledImage(tx, thY, thImg->rgba.data(), 290, 164, thImg->width, thImg->height);
-            } else {
-                luna::util::ImageLoader::instance().requestImage(imgUrl, luna::util::ImagePreset::HorizontalCard16_9);
-                drawRoundedRect(tx, thY, 290, 164, 12, 0xFF241B3B);
-            }
-            if (t == 0 && !game.videoUrl.empty()) {
-                drawRoundedRect(tx + 121, thY + 58, 48, 48, 24, 0xCC0E0B16);
-                drawPlayTriangleIcon(tx + 145, thY + 82, 10, 0xFFFFFFFF);
-            }
-            if (detailZone == 1 && similarSelectedIdx == static_cast<int>(t)) {
-                drawRoundedBorder(tx - 3, thY - 3, 296, 170, 14, 3, 0xFFFFFFFF);
-            }
-        }
-    }
-
-    // ===================== BOTTOM VIEW =====================
-    auto visible = [&](int vy, int h, int limit) { int y = vy - sy; return (y + h > -10) && (y < limit); };
-
-    // Description (left column)
-    if (visible(980, 40, 1060)) drawText(72, 980 + ty, 4, "Descripción", 0xFFFFFFFF);
-    if (visible(1030, 260, 1000)) {
-        std::string desc = game.synopsis.empty()
-            ? std::string("Disfruta de este juego en Amazon Luna con streaming a 1080p y 60 FPS desde la nube, sin descargas ni instalaciones.")
-            : game.synopsis;
-        auto lines = utf8WrapLines(desc, 92, 9);
-        int dy = 1034 + ty;
-        for (const auto& l : lines) {
-            drawText(72, dy, 2, l, 0xFFCBD5E1);
-            dy += 28;
-        }
-    }
-
-    // FAQs
-    if (visible(1290, 230, 1000)) {
-        drawText(72, 1290 + ty, 4, "Preguntas frecuentes", 0xFFFFFFFF);
-        static const char* kFaqTitles[3] = {
-            "¿Qué es Amazon Luna?",
-            "¿Qué incluye la suscripción Prime?",
-            "¿Qué es la suscripción Luna Premium?"
-        };
-        for (int q = 0; q < 3; ++q) {
-            int qy = 1344 + q * 58 + ty;
-            bool qFoc = (detailZone == 3 && similarSelectedIdx == q);
-            drawRoundedRect(72, qy, 1050, 48, 10, qFoc ? 0xFF9146FF : 0xFF1C152E);
-            drawRoundedBorder(72, qy, 1050, 48, 10, qFoc ? 3 : 1, qFoc ? 0xFFFFFFFF : 0xFF2D2248);
-            drawText(96, qy + 13, 2, kFaqTitles[q], 0xFFFFFFFF);
-            drawText(1086, qy + 11, 2, "+", qFoc ? 0xFFFFFFFF : 0xFF94A3B8);
-        }
-    }
-
-    // Specifications card (right column)
-    if (visible(980, 520, 1000)) {
-        int cx = 1180, cy = 980 + ty, cw = 668, chh = 520;
-        drawRoundedRect(cx, cy, cw, chh, 16, 0xEE161024);
-        drawRoundedBorder(cx, cy, cw, chh, 16, 1, 0xFF2D2248);
-        drawText(cx + 28, cy + 24, 3, "Especificaciones", 0xFFFFFFFF);
-        fillRect(cx + 28, cy + 66, cw - 56, 1, 0xFF352654);
-        struct SpecRow { const char* label; std::string value; };
-        std::vector<SpecRow> specs = {
-            {"Lanzamiento", game.releaseYear.empty() ? "2025" : game.releaseYear},
-            {"Distribuidora", utf8SafeTruncate(game.publisher.empty() ? "Amazon Luna" : game.publisher, 28)},
-            {"Desarrolladores", utf8SafeTruncate(game.developer.empty() ? "Amazon Games" : game.developer, 28)},
-            {"Gameplay", game.playerCount.empty() ? "1 jugador" : game.playerCount},
-            {"Vídeo", "Hasta 1080p a 60 FPS"},
-            {"Entradas", utf8SafeTruncate(game.inputMethods.empty() ? "Mando, Teclado y ratón" : game.inputMethods, 28)},
-            {"Idiomas", "Español, English, Français, Deutsch"},
-            {"PEGI", game.pegiRating.empty() ? "PEGI 12" : game.pegiRating}
-        };
-        int sRowY = cy + 84;
-        for (const auto& sp : specs) {
-            drawText(cx + 28, sRowY, 2, sp.label, 0xFF94A3B8);
-            drawText(cx + 250, sRowY, 2, sp.value, 0xFFFFFFFF);
-            sRowY += 54;
-        }
-    }
-
-    // Similar games carousel
-    if (visible(1580, 280, 1060) && !game.similarGames.empty()) {
-        drawText(72, 1580 + ty, 4, "También te puede interesar", 0xFFFFFFFF);
-        int posterW = 150, posterH = 210, gap = 22;
-        for (size_t s = 0; s < game.similarGames.size() && s < 10; ++s) {
-            int sx = 72 + static_cast<int>(s) * (posterW + gap);
-            if (sx + posterW > 1920) break;
-            int py = 1634 + ty;
-            const auto& simTile = game.similarGames[s];
-            auto sImg = luna::util::ImageLoader::instance().getImage(simTile.coverUrl, luna::util::ImagePreset::VerticalPoster);
-            if (sImg && sImg->ready) {
-                drawPreScaledImage(sx, py, sImg->rgba.data(), posterW, posterH, sImg->width, sImg->height);
-            } else {
-                if (!simTile.coverUrl.empty()) luna::util::ImageLoader::instance().requestImage(simTile.coverUrl, luna::util::ImagePreset::VerticalPoster);
-                drawRoundedRect(sx, py, posterW, posterH, 10, 0xFF241B3B);
-            }
-            if (detailZone == 2 && similarSelectedIdx == static_cast<int>(s)) {
-                drawRoundedBorder(sx - 3, py - 3, posterW + 6, posterH + 6, 12, 3, 0xFFFFFFFF);
-            }
-        }
-    }
-
-    if (!statusText.empty()) {
-        fillRect(0, 1046, 1920, 34, 0xEE0B0912);
-        drawText(44, 1054, 1, statusText, 0xFF94A3B8);
-    }
-
-    present();
+    GameDetailProps props{
+        .game = game,
+        .profile = profile,
+        .statusText = statusText,
+        .isConnecting = isConnecting,
+        .detailZone = detailZone,
+        .detailBtnIdx = detailBtnIdx,
+        .similarSelectedIdx = similarSelectedIdx,
+        .frameCount = frameCount,
+        .isFavorite = isFavorite
+    };
+    LunaClayUI::renderGameDetail(*this, props);
 }
 
 void DisplayManager::drawNativeEngineWaitingScreen(const std::string& localWebUrl,
@@ -2995,7 +2145,7 @@ void DisplayManager::present() {
     sceVideoOutSubmitFlip(videoHandle_, currentBuffer_, 1, flipMarker_);
 #else
     if (mappedMemory_) {
-        std::memcpy(mappedMemory_, canvas_.data(), width_ * height_ * sizeof(uint32_t));
+        std::memcpy(mappedMemory_, canvas_, width_ * height_ * sizeof(uint32_t));
     }
 #endif
 

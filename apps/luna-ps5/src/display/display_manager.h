@@ -83,18 +83,33 @@ public:
     void clear(uint32_t colorArgb);
     void fillRect(int x, int y, int w, int h, uint32_t colorArgb);
     void drawText(int x, int y, int scale, const std::string& text, uint32_t colorArgb);
+    void drawTextPx(int x, int y, int fontSizePx, const std::string& text, uint32_t colorArgb);
     void drawQrCode(int x, int y, int moduleScale, const std::string& text);
     void drawImage(int x, int y, int w, int h, const uint8_t* rgba, int imgW, int imgH);
     void drawPreScaledImage(int rx, int ry, const uint8_t* rgba, int dstW, int dstH, int srcW = 0, int srcH = 0);
     void drawRoundedRect(int x, int y, int w, int h, int r, uint32_t colorArgb);
     void drawRoundedBorder(int x, int y, int w, int h, int r, int thickness, uint32_t colorArgb);
     void drawPlayTriangleIcon(int cx, int cy, int size, uint32_t color);
+
+    struct ClipRect {
+        int x0 = 0;
+        int y0 = 0;
+        int x1 = 1920;
+        int y1 = 1080;
+    };
+    void pushScissor(int x, int y, int w, int h);
+    void popScissor();
+    void resetScissor();
+    const ClipRect& getClipRect() const { return clipRect_; }
+
+    FontRenderer& getFontRenderer() { return fontRenderer_; }
     void drawStarIcon(int cx, int cy, int size, uint32_t color);
     void drawLunaLogoIcon(int x, int y, int size);
     void drawMutedSpeakerIcon(int cx, int cy, int size, uint32_t color);
     void drawCategoryIcon(int cx, int cy, int size, const std::string& catName, uint32_t color);
     void drawCategoryIconTinted(int dx, int dy, const uint8_t* rgba, int dstW, int dstH, int srcW, int srcH, uint32_t color);
     void drawPegiBadge(int x, int y, int w, int h, const std::string& rating);
+    void drawHoverPreviewCard(int anchorX, int anchorY, const GameTile& tile, uint64_t frameCount);
     void drawPillButton(int x, int y, int w, int h, const std::string& text, bool focused, const std::string& subtext = "", bool hasPlayIcon = false);
 
     void drawLoginScreen(const std::string& publicCode,
@@ -161,8 +176,13 @@ public:
                            uint64_t frameCount);
 
     void setSearchQuery(const std::string& q) { searchQuery_ = q; }
+    const std::string& getSearchQuery() const { return searchQuery_; }
     // The next present() call is swallowed so a modal can be drawn over the current scene in the same frame.
     void deferNextPresent() { deferPresent_ = true; }
+
+    const uint8_t* getHeroBannerRgba() const { return heroBannerRgba_.empty() ? nullptr : heroBannerRgba_.data(); }
+    int getHeroBannerWidth() const { return heroBannerWidth_; }
+    int getHeroBannerHeight() const { return heroBannerHeight_; }
 
     void drawMediaViewerScreen(const GameTile& game,
                                int currentMediaIdx,
@@ -226,16 +246,17 @@ private:
     uint32_t getPixelSwizzled(const uint8_t*, int x, int y) const { return getPixel(x, y); }
     void blendPixelSwizzled(uint8_t*, int x, int y, uint32_t colorArgb, uint8_t alpha) { blendPixel(x, y, colorArgb, alpha); }
 
-    void drawHoverPreviewCard(int anchorX, int anchorY, const GameTile& tile, uint64_t frameCount);
-
     FontRenderer fontRenderer_;
 
     int width_ = 1920;
     int height_ = 1080;
     bool isReady_ = false;
 
+    ClipRect clipRect_{0, 0, 1920, 1080};
+    std::vector<ClipRect> clipStack_;
+
     // Linear offscreen frame canvas in system RAM (ABGR word order for PS5/PC)
-    std::vector<uint32_t> canvas_;
+    uint32_t* canvas_ = nullptr;
 
     int videoHandle_ = -1;
     void* mappedMemory_ = nullptr;
@@ -248,21 +269,6 @@ private:
     void loadStaticHeroBanner();
 
     void blendRectUniform(int x, int y, int w, int h, uint32_t colorArgb, uint8_t alpha);
-    void applyAlphaMask(const std::vector<uint8_t>& mask, int maskW, int maskH,
-                        const std::vector<int>& rowStart, const std::vector<int>& rowEnd,
-                        int destX, int destY, uint32_t colorArgb);
-    void ensureMasks();
-
-    // Pre-computed render caches (built once, reused every frame)
-    std::vector<uint8_t> bgCache_;
-    uint32_t bgCacheColor_ = 0;
-    std::vector<uint8_t> sceneCache_;
-    std::string sceneKey_;
-    std::vector<uint8_t> heroMask_;
-    std::vector<int> heroRowStart_, heroRowEnd_;
-    std::vector<uint8_t> detailMask_;
-    std::vector<int> detailRowStart_, detailRowEnd_;
-    bool masksReady_ = false;
     float detailScrollY_ = 0.0f;
     std::string searchQuery_;
     bool deferPresent_ = false;
