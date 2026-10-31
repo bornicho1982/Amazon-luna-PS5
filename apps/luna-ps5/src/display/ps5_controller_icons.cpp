@@ -233,18 +233,34 @@ void PS5ControllerIcons::drawOfficialPegi(DisplayManager& disp, int x, int y, in
     disp.drawRoundedRect(x, y, w, h, 6, bgCol);
     disp.drawRoundedBorder(x, y, w, h, 6, 1, 0x40FFFFFF);
 
+    // Colored top block (44 x 40 px, 24px bold white number)
+    int stripeH = (h >= 40) ? 12 : std::max(6, h * 25 / 100);
+    int topH = h - stripeH;
+
     std::string ageStr = std::to_string(pegiAge);
-    int numH = h * 55 / 100;
+    int numH = (topH >= 36) ? 24 : (topH * 60 / 100);
     int tw = disp.getFontRenderer().measureText(ageStr, numH);
-    disp.drawTextPx(x + (w - tw) / 2, y + 2, numH, ageStr, 0xFFFFFFFF);
+    int numX = x + (w - tw) / 2;
+    int numY = y + (topH - numH) / 2;
+    disp.drawTextPx(numX, numY, numH, ageStr, 0xFFFFFFFF);
 
-    // Bottom official white strip with black "PEGI"
-    int stripeH = std::max(6, h * 30 / 100);
+    // Bottom official white stripe (44 x 12 px) with black "PEGI"
     int stripeY = y + h - stripeH;
-    disp.fillRect(x + 1, stripeY, w - 2, stripeH - 1, 0xFFFFFFFF);
+    for (int sy = stripeY; sy < y + h; ++sy) {
+        int inset = 1;
+        if (sy == y + h - 1) inset = 3;
+        else if (sy == y + h - 2) inset = 2;
+        disp.fillRect(x + inset, sy, w - (2 * inset), 1, 0xFFFFFFFF);
+    }
 
-    int pw = disp.getFontRenderer().measureText("PEGI", stripeH - 2);
-    disp.drawTextPx(x + (w - pw) / 2, stripeY, stripeH - 2, "PEGI", 0xFF000000);
+    int pegiFontSize = (stripeH >= 12) ? 9 : (stripeH - 2);
+    int pw = disp.getFontRenderer().measureText("PEGI", pegiFontSize);
+    int px = x + (w - pw) / 2;
+    int py = stripeY + (stripeH - pegiFontSize) / 2;
+    disp.drawTextPx(px, py, pegiFontSize, "PEGI", 0xFF000000);
+
+    // Subtle border over card
+    disp.drawRoundedBorder(x, y, w, h, 6, 1, 0x50FFFFFF);
 }
 
 } // namespace luna::display

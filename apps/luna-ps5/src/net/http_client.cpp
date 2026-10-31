@@ -458,8 +458,8 @@ HttpResponse HttpClient::get(const std::string& url,
         int readBytes = 0;
         while ((readBytes = sceHttpReadData(reqId, buf, sizeof(buf))) > 0) {
             resp.body.append(buf, readBytes);
-            if (resp.body.size() > 4 * 1024 * 1024) {
-                resp.error = "Response exceeded 4 MB limit";
+            if (resp.body.size() > 32 * 1024 * 1024) {
+                resp.error = "Response exceeded 32 MB limit";
                 break;
             }
         }

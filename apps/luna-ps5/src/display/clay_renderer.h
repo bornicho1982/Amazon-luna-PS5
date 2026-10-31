@@ -69,7 +69,8 @@ public:
                                   const std::string& text = "",
                                   uint32_t color = 0xFFFFFFFF,
                                   const GameTile* tile = nullptr,
-                                  uint64_t frameCount = 0);
+                                  uint64_t frameCount = 0,
+                                  bool inFocus = false);
 
     // Specialized DualSense / PS5 UI element allocators
     ClayCustomElement* allocControllerButton(DualSenseBtn btn, bool inFocus = false);

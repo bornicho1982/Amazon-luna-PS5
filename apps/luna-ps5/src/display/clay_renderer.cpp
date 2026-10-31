@@ -39,7 +39,7 @@ static Clay_Dimensions measureTextCallback(Clay_StringSlice text, Clay_TextEleme
     std::string s(text.chars, text.length);
     int fontSize = config ? config->fontSize : 16;
     int width = renderer->getDisplay()->getFontRenderer().measureText(s, fontSize);
-    int height = fontSize + 4;
+    int height = fontSize;
     return Clay_Dimensions{ static_cast<float>(width), static_cast<float>(height) };
 }
 
@@ -115,7 +115,8 @@ ClayCustomElement* ClayRenderer::allocCustom(CustomElementType type,
                                             const std::string& text,
                                             uint32_t color,
                                             const GameTile* tile,
-                                            uint64_t frameCount) {
+                                            uint64_t frameCount,
+                                            bool inFocus) {
     if (g_customCount < kMaxCustomElements) {
         auto& elem = g_customPool[g_customCount++];
         elem.type = type;
@@ -126,7 +127,7 @@ ClayCustomElement* ClayRenderer::allocCustom(CustomElementType type,
         elem.tile = tile;
         elem.frameCount = frameCount;
         elem.buttonType = DualSenseBtn::Cross;
-        elem.inFocus = false;
+        elem.inFocus = inFocus;
         elem.pegiAge = 12;
         return &elem;
     }
@@ -314,12 +315,59 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                     }
                 }
 
-                // Smooth horizontal 300px gradient blend into PS5 Dark Crystal (#0E1320)
-                int fadeW = std::min(300, w);
+                // Smooth horizontal 340px Hermite cubic gradient blend into PS5 Dark Crystal (#0E1320)
+                int fadeW = std::min(340, w);
                 for (int fx = 0; fx < fadeW; ++fx) {
-                    uint8_t alpha = static_cast<uint8_t>(255 - (fx * 255 / fadeW));
-                    display_->fillRect(x + fx, y, 1, h, (static_cast<uint32_t>(alpha) << 24) | 0x000E1320);
+                    float t = static_cast<float>(fx) / static_cast<float>(fadeW);
+                    float alphaF = 1.0f - (t * t * (3.0f - 2.0f * t));
+                    uint8_t alpha = static_cast<uint8_t>(std::clamp(alphaF * 255.0f, 0.0f, 255.0f));
+                    if (alpha > 0) {
+                        display_->fillRect(x + fx, y, 1, h, (static_cast<uint32_t>(alpha) << 24) | 0x000E1320);
+                    }
                 }
+
+                // Clip top-right and bottom-right corners (radius 22px) to screen background #070911
+                const int cornerR = 22;
+                const uint32_t screenBg = 0xFF070911;
+                int trCx = x + w - cornerR;
+                int brCx = x + w - cornerR;
+                int brCy = y + h - cornerR;
+
+                for (int cy = 0; cy < cornerR; ++cy) {
+                    for (int cx = 0; cx < cornerR; ++cx) {
+                        float dx = static_cast<float>(cx) + 0.5f;
+                        float dy = static_cast<float>(cornerR - 1 - cy) + 0.5f;
+                        float dist = std::sqrt(dx * dx + dy * dy);
+                        if (dist > static_cast<float>(cornerR) - 1.0f) {
+                            float cov = std::clamp(dist - (static_cast<float>(cornerR) - 1.0f), 0.0f, 1.0f);
+                            int px = trCx + cx;
+                            int py = y + cy;
+                            if (cov >= 1.0f) {
+                                display_->fillRect(px, py, 1, 1, screenBg);
+                            } else {
+                                display_->blendPixel(px, py, screenBg, static_cast<uint8_t>(cov * 255.0f));
+                            }
+                        }
+
+                        float bdy = static_cast<float>(cy) + 0.5f;
+                        float bdist = std::sqrt(dx * dx + bdy * bdy);
+                        if (bdist > static_cast<float>(cornerR) - 1.0f) {
+                            float cov = std::clamp(bdist - (static_cast<float>(cornerR) - 1.0f), 0.0f, 1.0f);
+                            int px = brCx + cx;
+                            int py = brCy + cy;
+                            if (cov >= 1.0f) {
+                                display_->fillRect(px, py, 1, 1, screenBg);
+                            } else {
+                                display_->blendPixel(px, py, screenBg, static_cast<uint8_t>(cov * 255.0f));
+                            }
+                        }
+                    }
+                }
+
+                // Re-draw outer card border for SpotlightStage
+                uint32_t borderColor = custom.inFocus ? 0xFF0070D1 : 0xFF222C42;
+                int borderThick = custom.inFocus ? 2 : 1;
+                display_->drawRoundedBorder(x - 880, y, 1824, h, 22, borderThick, borderColor);
             }
             break;
         }

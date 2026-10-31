@@ -57,9 +57,9 @@ private:
     int frameIntervalMs_ = 33; // ~30 FPS
 
     mutable std::mutex frameMutex_;
-    int frameWidth_ = 330;
-    int frameHeight_ = 186;
-    std::vector<uint32_t> frameRgba_; // 330 x 186 in ABGR format
+    int frameWidth_ = 960;
+    int frameHeight_ = 540;
+    std::vector<uint32_t> frameRgba_; // 960 x 540 in ABGR format
 
     std::vector<uint8_t> annexBBuffer_;
 };

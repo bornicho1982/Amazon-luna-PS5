@@ -484,7 +484,8 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
 
     if (backdropUrl.empty()) backdropUrl = sw["imageUrl"].asString();
 
-    if (backdropUrl.empty()) backdropUrl = coverUrl;
+    // Backdrop will be enriched from LunaCatalogMetadataDB, only fallback to cover if nothing found after enrich
+    // if (backdropUrl.empty()) backdropUrl = coverUrl;
 
 
 
@@ -533,19 +534,10 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     if (synopsis.empty()) synopsis = pdata["shortDescription"].asString();
 
     if (synopsis.empty()) {
-
         std::string lastPlayed = pdata["lastPlayedDate"].asString();
-
         if (!lastPlayed.empty()) {
-
             synopsis = "Jugado recientemente (" + lastPlayed + ") en tu cuenta de Amazon Luna.";
-
-        } else {
-
-            synopsis = "Disponible en Amazon Luna Cloud con graficos en alta definicion y soporte completo para el mando DualSense.";
-
         }
-
     }
 
 
@@ -620,6 +612,12 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     outTile.heroColor = colColor;
 
     LunaCatalogMetadataDB::enrich(outTile);
+    if (outTile.backdropUrl.empty()) {
+        outTile.backdropUrl = outTile.coverUrl;
+    }
+    if (outTile.synopsis.empty()) {
+        outTile.synopsis = "Disponible en Amazon Luna Cloud con graficos en alta definicion y soporte completo para el mando DualSense.";
+    }
 
     return true;
 

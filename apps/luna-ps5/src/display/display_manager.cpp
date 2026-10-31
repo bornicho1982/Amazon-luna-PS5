@@ -780,7 +780,7 @@ void DisplayManager::drawTextPx(int x, int y, int fontSizePx, const std::string&
     int cursorX = x;
     int cursorY = y;
     int lineHeight = fontSizePx + (fontSizePx / 3);
-    int baseline = static_cast<int>(fontSizePx * 0.82f);
+    int baseline = static_cast<int>(fontSizePx * 0.78f);
 
     size_t i = 0;
     while (i < text.size()) {

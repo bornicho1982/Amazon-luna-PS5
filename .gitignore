@@ -23,6 +23,7 @@ apps/luna-ps5/ps5/lib/
 # Packaged binaries (compiled via build_ps5.ps1 or provided in Releases)
 PPSA99825/eboot.bin
 PPSA99825/sce_module/*.prx
+PPSA99825/videos/
 
 # Credentials, tokens, sessions and private accounts (CRITICAL)
 account.json

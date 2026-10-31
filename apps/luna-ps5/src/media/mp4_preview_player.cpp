@@ -86,11 +86,19 @@ void Mp4PreviewPlayer::setVideoUrl(const std::string& url) {
         size_t lastSlash = url.find_last_of('/');
         if (lastSlash != std::string::npos && lastSlash + 1 < url.size()) {
             filename = url.substr(lastSlash + 1);
+            size_t queryPos = filename.find('?');
+            if (queryPos != std::string::npos) {
+                filename = filename.substr(0, queryPos);
+            }
         }
 
         std::vector<std::string> localPaths;
         if (!filename.empty()) {
+            localPaths.push_back("videos/" + filename);
+            localPaths.push_back("/app0/videos/" + filename);
+            localPaths.push_back("/user/app/PPSA99825/videos/" + filename);
             localPaths.push_back("/data/homebrew/PPSA99825/videos/" + filename);
+            localPaths.push_back("PPSA99825/videos/" + filename);
             localPaths.push_back("tools/luna_probe/captures/captura_pagina_1_inicio/assets/videos/" + filename);
         }
 
