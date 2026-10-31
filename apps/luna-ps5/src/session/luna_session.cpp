@@ -1,5 +1,5 @@
 #include "session/luna_session.h"
-
+#include "session/luna_catalog_metadata_db.h"
 #include "net/http_client.h"
 
 #include "util/crash_logger.h"
@@ -542,7 +542,7 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
 
         } else {
 
-            synopsis = "Disfruta de " + title + " al instante en streaming 1080p 60 FPS con Amazon Luna.";
+            synopsis = "Disponible en Amazon Luna Cloud con graficos en alta definicion y soporte completo para el mando DualSense.";
 
         }
 
@@ -618,6 +618,8 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     outTile.badgeColor = colColor;
 
     outTile.heroColor = colColor;
+
+    LunaCatalogMetadataDB::enrich(outTile);
 
     return true;
 
@@ -1485,7 +1487,8 @@ std::vector<luna::display::LunaCollection> LunaSessionClient::fetchRemotePlayCol
 
             t.coverUrl = cover;
 
-            t.synopsis = "Disfruta de " + title + " de tu biblioteca de GOG en Amazon Luna Cloud.";
+            t.synopsis = "Conecta tu biblioteca de GOG para jugar a " + title + " en la nube con Amazon Luna.";
+            LunaCatalogMetadataDB::enrich(t);
 
             gogRow.items.push_back(t);
 

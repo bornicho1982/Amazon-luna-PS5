@@ -1,6 +1,7 @@
 #pragma once
 
 #include "display/clay.h"
+#include "display/ps5_controller_icons.h"
 #include <string>
 #include <memory>
 #include <cstdint>
@@ -23,7 +24,11 @@ enum class CustomElementType : uint8_t {
     LunaLogoIcon,
     StarIcon,
     DualSenseHint,
-    SpotlightArt        // Cinematic 16:9 stage backdrop with seamless left-fade
+    SpotlightArt,       // Cinematic 16:9 stage backdrop with seamless left-fade
+    ControllerButton,   // DualSense Cross, Circle, Square, Triangle
+    Bumper,             // DualSense L1 or R1 bumper
+    OptionsButton,      // DualSense Options pill button
+    InterfaceIcon       // Search, Star, Play
 };
 
 struct ClayCustomElement {
@@ -32,6 +37,9 @@ struct ClayCustomElement {
     uint32_t color = 0xFFFFFFFF;
     const GameTile* tile = nullptr;
     uint64_t frameCount = 0;
+    DualSenseBtn buttonType = DualSenseBtn::Cross;
+    bool inFocus = false;
+    int pegiAge = 12;
 };
 
 struct ClayImageElement {
@@ -62,6 +70,13 @@ public:
                                   uint32_t color = 0xFFFFFFFF,
                                   const GameTile* tile = nullptr,
                                   uint64_t frameCount = 0);
+
+    // Specialized DualSense / PS5 UI element allocators
+    ClayCustomElement* allocControllerButton(DualSenseBtn btn, bool inFocus = false);
+    ClayCustomElement* allocBumper(bool isR1, bool inFocus = false);
+    ClayCustomElement* allocOptionsButton(bool inFocus = false);
+    ClayCustomElement* allocInterfaceIcon(DualSenseBtn icon, uint32_t color = 0xFFFFFFFF);
+    ClayCustomElement* allocPegiBadge(int pegiAge);
 
     ClayImageElement* allocImage(const uint8_t* rgba, int width, int height);
 

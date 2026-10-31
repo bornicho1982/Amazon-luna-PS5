@@ -235,13 +235,13 @@ public:
                               const std::string& gameTitle = "");
     void present();
 
-    bool isReady() const { return isReady_; }
-
-private:
     void putPixel(int x, int y, uint32_t colorArgb);
     uint32_t getPixel(int x, int y) const;
     void blendPixel(int x, int y, uint32_t colorArgb, uint8_t alpha);
 
+    bool isReady() const { return isReady_; }
+
+private:
     void setPixelSwizzled(uint8_t*, int x, int y, uint32_t colorArgb) { putPixel(x, y, colorArgb); }
     uint32_t getPixelSwizzled(const uint8_t*, int x, int y) const { return getPixel(x, y); }
     void blendPixelSwizzled(uint8_t*, int x, int y, uint32_t colorArgb, uint8_t alpha) { blendPixel(x, y, colorArgb, alpha); }

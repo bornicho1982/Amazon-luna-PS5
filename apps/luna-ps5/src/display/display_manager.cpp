@@ -1280,7 +1280,8 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         .searchLetterIdx = searchLetterIdx,
         .searchGridIdx = searchGridIdx,
         .filteredGames = filteredGames,
-        .hoverCardOpen = hoverCardOpen
+        .hoverCardOpen = hoverCardOpen,
+        .searchQuery = searchQuery_
     };
     LunaClayUI::renderHomeScreen(*this, props);
 }

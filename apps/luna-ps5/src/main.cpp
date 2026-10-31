@@ -1147,10 +1147,12 @@ int main(int argc, char* argv[]) {
                                     moved = true;
                                 } else if (selectedRowIdx > 0) {
                                     selectedRowIdx--;
+                                    focusZone = (selectedRowIdx == 0) ? 1 : 2;
                                     moved = true;
                                 }
                             } else if (moveDown && selectedRowIdx + 1 < numRows) {
                                 selectedRowIdx++;
+                                focusZone = 2;
                                 moved = true;
                             } else if (moveLeft) {
                                 if (activeTabIdx == 3) {
@@ -1161,8 +1163,8 @@ int main(int argc, char* argv[]) {
                                 } else if (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) {
                                     int maxC = (selectedRowIdx < numRows) ? static_cast<int>(curCols[selectedRowIdx].items.size()) : 1;
                                     if (selectedRowIdx == 0 && curCols[0].isHeroRotator) {
-                                        if (heroBtnIdx == 1) {
-                                            heroBtnIdx = 0;
+                                        if (heroBtnIdx > 0) {
+                                            heroBtnIdx--;
                                         } else {
                                             rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % std::max(1, maxC);
                                             heroBtnIdx = 0;
@@ -1185,8 +1187,8 @@ int main(int argc, char* argv[]) {
                                         if (!curCols.empty() && !curCols[0].items.empty() && rowSelectedCol[0] < static_cast<int>(curCols[0].items.size())) {
                                             if (curCols[0].items[rowSelectedCol[0]].title == "Luna Premium") isLunaPrem = true;
                                         }
-                                        if (heroBtnIdx == 0 && !isLunaPrem) {
-                                            heroBtnIdx = 1;
+                                        if (heroBtnIdx < 2 && !isLunaPrem) {
+                                            heroBtnIdx++;
                                         } else {
                                             rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
                                             heroBtnIdx = 0;
@@ -1257,12 +1259,15 @@ int main(int argc, char* argv[]) {
                                     // Mas informacion en Luna Premium: hacer scroll al catalogo
                                     if (numRows > 1) {
                                         selectedRowIdx = 1;
+                                        focusZone = 2;
                                     }
                                 } else {
                                     if (heroBtnIdx == 0) {
                                         startCloudGameSession(*focusedGame);
-                                    } else {
+                                    } else if (heroBtnIdx == 1) {
                                         openGameDetail(*focusedGame);
+                                    } else {
+                                        g_lastStatusText = "Añadido a Favoritos: " + focusedGame->title;
                                     }
                                 }
                             } else {
@@ -1272,24 +1277,25 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    // Atajo directo [CUADRADO]: Jugar inmediatamente
+                    // Boton OPTIONS: Abrir menú de Ajustes / Perfil
+                    if (pressedNow & luna::input::PAD_OPTIONS) {
+                        profileMenuOpen = true;
+                        profileMenuIdx = 0;
+                    }
+
+                    // Botón CUADRADO: Abrir ficha completa del juego
                     if ((pressedNow & luna::input::PAD_SQUARE) && focusedGame && focusedGame->title != "Luna Premium") {
-                        startCloudGameSession(*focusedGame);
+                        openGameDetail(*focusedGame);
                         break;
                     }
 
-                    // Boton TRIANGULO: Cerrar sesion de cuenta Amazon
-                    if (pressedNow & luna::input::PAD_TRIANGLE) {
-                        luna::util::CrashLogger::log("[Main] [TRIANGULO] Cerrando sesion de Amazon...");
-                        cbl.logout();
-                        catalogFetched = false;
-                        g_catalogDiagnostic.clear();
-                        g_lastStatusText.clear();
-                        appState = AppState::LoginCBL;
+                    // Boton TRIANGULO: Añadir / Quitar de Favoritos
+                    if ((pressedNow & luna::input::PAD_TRIANGLE) && focusedGame && focusedGame->title != "Luna Premium") {
+                        g_lastStatusText = "Añadido a Favoritos: " + focusedGame->title;
                         break;
                     }
 
-                    // Boton CIRCULO: Volver a la primera fila
+                    // Boton CIRCULO: Volver al Hero stage superior
                     if (pressedNow & luna::input::PAD_CIRCLE) {
                         focusZone = 1;
                         selectedRowIdx = 0;
@@ -1308,33 +1314,36 @@ int main(int argc, char* argv[]) {
 
                 int curHoverRow = selectedRowIdx;
                 int curHoverCol = (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) ? rowSelectedCol[selectedRowIdx] : 0;
-                if (focusZone == 1 && (curHoverRow != prevHoverRow || curHoverCol != prevHoverCol || dirHeldNow)) {
+                if ((focusZone == 1 || focusZone == 2) && (curHoverRow != prevHoverRow || curHoverCol != prevHoverCol || dirHeldNow)) {
                     lastTileChangeTime = now;
                     prevHoverRow = curHoverRow;
                     prevHoverCol = curHoverCol;
                 }
 
-                bool hoverCardOpen = false;
-                int hoverMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTileChangeTime).count();
-                if (focusZone == 1 && selectedRowIdx > 0 && hoverMs >= 600 && !profileMenuOpen && !searchOpen) {
-                    hoverCardOpen = true;
-                }
-
-                const luna::display::GameTile* hoveredTile = nullptr;
-                if (!curCols.empty() && curHoverRow >= 0 && curHoverRow < static_cast<int>(curCols.size())) {
-                    const auto& rItems = curCols[curHoverRow].items;
-                    if (curHoverCol >= 0 && curHoverCol < static_cast<int>(rItems.size())) {
-                        hoveredTile = &rItems[curHoverCol];
+                // Determinar el juego activo para el Hero Stage estilo PS5 y reproducción del tráiler
+                const luna::display::GameTile* activeHeroTile = nullptr;
+                if (!curCols.empty()) {
+                    if (selectedRowIdx >= 0 && selectedRowIdx < static_cast<int>(curCols.size())) {
+                        const auto& rItems = curCols[selectedRowIdx].items;
+                        int cCol = (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) ? rowSelectedCol[selectedRowIdx] : 0;
+                        if (cCol >= 0 && cCol < static_cast<int>(rItems.size())) {
+                            activeHeroTile = &rItems[cCol];
+                        }
+                    }
+                    if (!activeHeroTile && !curCols[0].items.empty()) {
+                        int hCol = (!rowSelectedCol.empty()) ? rowSelectedCol[0] : 0;
+                        if (hCol >= 0 && hCol < static_cast<int>(curCols[0].items.size())) {
+                            activeHeroTile = &curCols[0].items[hCol];
+                        } else {
+                            activeHeroTile = &curCols[0].items[0];
+                        }
                     }
                 }
 
-                if (hoverCardOpen && hoveredTile != nullptr) {
-                    if (!hoveredTile->videoUrl.empty()) {
-                        luna::media::Mp4PreviewPlayer::instance().setVideoUrl(hoveredTile->videoUrl);
-                        luna::media::Mp4PreviewPlayer::instance().update(&videoDecoder);
-                    } else {
-                        luna::media::Mp4PreviewPlayer::instance().stop();
-                    }
+                // Reproducir el tráiler oficial en la mitad derecha del Banner Superior
+                if (activeHeroTile != nullptr && !activeHeroTile->videoUrl.empty() && !profileMenuOpen && !searchOpen) {
+                    luna::media::Mp4PreviewPlayer::instance().setVideoUrl(activeHeroTile->videoUrl);
+                    luna::media::Mp4PreviewPlayer::instance().update(&videoDecoder);
                 } else {
                     luna::media::Mp4PreviewPlayer::instance().stop();
                 }
@@ -1360,7 +1369,7 @@ int main(int argc, char* argv[]) {
                     searchLetterIdx,
                     searchGridIdx,
                     filteredGames,
-                    hoverCardOpen
+                    false
                 );
                 break;
             }
@@ -1664,6 +1673,7 @@ int main(int argc, char* argv[]) {
             }
 
             case AppState::StartingSession: {
+                luna::media::Mp4PreviewPlayer::instance().stop();
                 sessionClient.tick();
 
                 if (sessionClient.getState() == luna::session::SessionState::Ready) {

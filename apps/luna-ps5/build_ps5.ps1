@@ -50,6 +50,7 @@ try {
         "display/font_inter_bold",
         "display/font_renderer",
         "display/display_manager",
+        "display/ps5_controller_icons",
         "display/clay_renderer",
         "display/luna_clay_ui",
         "display/hero_banner_asset",
