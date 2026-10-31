@@ -36,6 +36,11 @@ static size_t g_customCount = 0;
 alignas(64) static ClayImageElement g_imagePool[kMaxImageElements];
 static size_t g_imageCount = 0;
 
+// Frame-scoped shared_ptr retention for DecodedImages
+static constexpr size_t kMaxFrameImages = 1024;
+static std::shared_ptr<const luna::util::DecodedImage> g_frameDecodedImages[kMaxFrameImages];
+static size_t g_frameDecodedImageCount = 0;
+
 static Clay_Dimensions measureTextForClay(Clay_StringSlice text, Clay_TextElementConfig* config, void* userData) {
     auto* renderer = static_cast<ClayRenderer*>(userData);
     if (!renderer || !renderer->getDisplay() || text.length <= 0 || !text.chars) {
@@ -87,6 +92,14 @@ Clay_String ClayRenderer::toClayString(const char* str) {
     };
 }
 
+void* ClayRenderer::allocDecodedImage(const std::shared_ptr<const luna::util::DecodedImage>& img) {
+    if (!img) return nullptr;
+    if (g_frameDecodedImageCount < kMaxFrameImages) {
+        g_frameDecodedImages[g_frameDecodedImageCount++] = img;
+    }
+    return const_cast<void*>(static_cast<const void*>(img.get()));
+}
+
 bool ClayRenderer::init(DisplayManager* display, int width, int height) {
     display_ = display;
     if (isReady_) return true;
@@ -111,6 +124,10 @@ void ClayRenderer::beginFrame() {
     g_customCount = 0;
     g_imageCount = 0;
     g_clayStringPoolIdx = 0;
+    for (size_t i = 0; i < g_frameDecodedImageCount; ++i) {
+        g_frameDecodedImages[i].reset();
+    }
+    g_frameDecodedImageCount = 0;
     Clay_BeginLayout();
 }
 
@@ -180,16 +197,64 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                     }
                 }
                 if (!drewVideo) {
-                    std::string prevUrl = custom.tile->backdropUrl.empty() ? custom.tile->coverUrl : custom.tile->backdropUrl;
-                    auto prevImg = luna::util::ImageLoader::instance().getImage(prevUrl, luna::util::ImagePreset::HorizontalCard16_9);
-                    if (prevImg && prevImg->ready) {
-                        display_->drawPreScaledImage(x, y, prevImg->rgba.data(), w, h, prevImg->width, prevImg->height);
-                    } else {
-                        if (!prevUrl.empty()) {
-                            luna::util::ImageLoader::instance().requestImage(prevUrl, luna::util::ImagePreset::HorizontalCard16_9);
+                    // Determine whether vertical poster or horizontal 16:9
+                    bool isVert = (h > w * 1.2f);
+                    auto preset = isVert ? luna::util::ImagePreset::VerticalPoster : luna::util::ImagePreset::HorizontalCard16_9;
+                    std::string imgUrl = isVert ? (custom.tile->coverUrl.empty() ? custom.tile->backdropUrl : custom.tile->coverUrl)
+                                                : (custom.tile->backdropUrl.empty() ? custom.tile->coverUrl : custom.tile->backdropUrl);
+                    if (!imgUrl.empty()) {
+                        luna::util::ImageLoader::instance().requestImage(imgUrl, preset);
+                        auto prevImg = luna::util::ImageLoader::instance().getImage(imgUrl, preset);
+                        if (prevImg && prevImg->ready && !prevImg->rgba.empty() && prevImg->width > 0 && prevImg->height > 0) {
+                            display_->drawPreScaledImage(x, y, prevImg->rgba.data(), w, h, prevImg->width, prevImg->height);
+                        } else {
+                            display_->fillRect(x, y, w, h, 0xFF241B3B);
                         }
-                        display_->fillRect(x, y, w, h, 0xFF181326);
+                    } else {
+                        display_->fillRect(x, y, w, h, 0xFF241B3B);
                     }
+                }
+            }
+            break;
+        }
+        case CustomElementType::SpotlightArt: {
+            if (custom.tile) {
+                auto& player = luna::media::Mp4PreviewPlayer::instance();
+                bool drewVideo = false;
+                if (!custom.tile->videoUrl.empty() && player.hasFrame() && player.currentUrl() == custom.tile->videoUrl) {
+                    const uint32_t* vPix = player.getFrameRgba();
+                    if (vPix) {
+                        display_->drawPreScaledImage(x, y, reinterpret_cast<const uint8_t*>(vPix), w, h, player.getWidth(), player.getHeight());
+                        drewVideo = true;
+                    }
+                }
+                if (!drewVideo) {
+                    std::string artUrl = custom.tile->backdropUrl.empty() ? custom.tile->coverUrl : custom.tile->backdropUrl;
+                    if (artUrl.empty() && custom.tile->title == "Luna Premium") {
+                        const uint8_t* heroRgba = display_->getHeroBannerRgba();
+                        if (heroRgba) {
+                            display_->drawPreScaledImage(x, y, heroRgba, w, h, display_->getHeroBannerWidth(), display_->getHeroBannerHeight());
+                        }
+                    } else if (!artUrl.empty()) {
+                        luna::util::ImageLoader::instance().requestImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
+                        auto artImg = luna::util::ImageLoader::instance().getImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
+                        if (!artImg || !artImg->ready) {
+                            artImg = luna::util::ImageLoader::instance().getImage(artUrl, luna::util::ImagePreset::HorizontalCard16_9);
+                        }
+                        if (artImg && artImg->ready && !artImg->rgba.empty() && artImg->width > 0 && artImg->height > 0) {
+                            display_->drawPreScaledImage(x, y, artImg->rgba.data(), w, h, artImg->width, artImg->height);
+                        } else {
+                            display_->fillRect(x, y, w, h, 0xFF120F1D);
+                        }
+                    } else {
+                        display_->fillRect(x, y, w, h, 0xFF120F1D);
+                    }
+                }
+                // Seamless left-edge gradient blend into stage background (#120F1D)
+                int fadeW = std::min(260, w);
+                for (int fx = 0; fx < fadeW; ++fx) {
+                    uint8_t alpha = static_cast<uint8_t>(255 - (fx * 255 / fadeW));
+                    display_->fillRect(x + fx, y, 1, h, (static_cast<uint32_t>(alpha) << 24) | 0x00120F1D);
                 }
             }
             break;
@@ -227,6 +292,7 @@ void ClayRenderer::renderCommands(Clay_RenderCommandArray commands) {
         switch (cmd->commandType) {
             case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
                 uint32_t argb = clayColorToArgb(cmd->renderData.rectangle.backgroundColor);
+                if ((argb >> 24) == 0) break; // Transparent
                 int r = static_cast<int>(cmd->renderData.rectangle.cornerRadius.topLeft);
                 if (r > 0) {
                     display_->drawRoundedRect(x, y, w, h, r, argb);
@@ -237,6 +303,7 @@ void ClayRenderer::renderCommands(Clay_RenderCommandArray commands) {
             }
             case CLAY_RENDER_COMMAND_TYPE_BORDER: {
                 uint32_t argb = clayColorToArgb(cmd->renderData.border.color);
+                if ((argb >> 24) == 0) break; // Transparent
                 int r = static_cast<int>(cmd->renderData.border.cornerRadius.topLeft);
                 int thickness = static_cast<int>(cmd->renderData.border.width.top);
                 if (thickness <= 0) thickness = static_cast<int>(cmd->renderData.border.width.left);
@@ -252,9 +319,16 @@ void ClayRenderer::renderCommands(Clay_RenderCommandArray commands) {
             }
             case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
                 if (cmd->renderData.image.imageData) {
-                    auto* img = static_cast<ClayImageElement*>(cmd->renderData.image.imageData);
-                    if (img && img->rgba && img->width > 0 && img->height > 0) {
-                        display_->drawPreScaledImage(x, y, img->rgba, w, h, img->width, img->height);
+                    // Try DecodedImage first
+                    const auto* decImg = static_cast<const luna::util::DecodedImage*>(cmd->renderData.image.imageData);
+                    if (decImg && decImg->ready && !decImg->rgba.empty() && decImg->width > 0 && decImg->height > 0) {
+                        display_->drawPreScaledImage(x, y, decImg->rgba.data(), w, h, decImg->width, decImg->height);
+                    } else {
+                        // Fallback to ClayImageElement if allocated that way
+                        const auto* imgElem = static_cast<const ClayImageElement*>(cmd->renderData.image.imageData);
+                        if (imgElem && imgElem->rgba && imgElem->width > 0 && imgElem->height > 0) {
+                            display_->drawPreScaledImage(x, y, imgElem->rgba, w, h, imgElem->width, imgElem->height);
+                        }
                     }
                 }
                 break;

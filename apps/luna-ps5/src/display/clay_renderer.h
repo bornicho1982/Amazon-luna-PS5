@@ -2,8 +2,13 @@
 
 #include "display/clay.h"
 #include <string>
+#include <memory>
 #include <cstdint>
 #include <algorithm>
+
+namespace luna::util {
+struct DecodedImage;
+}
 
 namespace luna::display {
 
@@ -17,7 +22,8 @@ enum class CustomElementType : uint8_t {
     Mp4PreviewPlayer,   // Miniature MP4 video preview player
     LunaLogoIcon,
     StarIcon,
-    DualSenseHint
+    DualSenseHint,
+    SpotlightArt        // Cinematic 16:9 stage backdrop with seamless left-fade
 };
 
 struct ClayCustomElement {
@@ -47,6 +53,9 @@ public:
     // Helpers to create Clay_String from strings with frame-lifetime pool (zero heap allocation)
     static Clay_String toClayString(const std::string& str);
     static Clay_String toClayString(const char* str);
+
+    // Keeps refcounted image pointer alive for the duration of the current frame
+    void* allocDecodedImage(const std::shared_ptr<const luna::util::DecodedImage>& img);
 
     ClayCustomElement* allocCustom(CustomElementType type,
                                   const std::string& text = "",

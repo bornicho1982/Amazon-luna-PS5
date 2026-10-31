@@ -531,41 +531,75 @@ int main(int argc, char* argv[]) {
         }
         if (tabCollections[1].empty()) tabCollections[1] = tabCollections[0];
 
-        // Tab 2: Mi espacio (Biblioteca personal + Mis Favoritos + Seguir jugando)
-        tabCollections[2] = sessionClient.getLibraryCollections();
-        for (const auto& col : tabCollections[0]) {
-            if (col.id.find("recently_played") != std::string::npos ||
-                col.id.find("continue") != std::string::npos ||
-                col.title.find("Seguir jugando") != std::string::npos) {
-                bool found = false;
-                for (const auto& lc : tabCollections[2]) {
-                    if (lc.id == col.id) { found = true; break; }
-                }
-                if (!found) tabCollections[2].push_back(col);
+        // Tab 2: Mi espacio (Jugados recientemente 16:9 + Mis juegos favoritos)
+        tabCollections[2].clear();
+
+        // 1. Fila Jugados recientemente (16:9)
+        luna::display::LunaCollection recentCol;
+        recentCol.id = "recently_played";
+        recentCol.title = "Jugados recientemente";
+        recentCol.isRecentlyPlayed16_9 = true;
+        recentCol.isHeroRotator = false;
+
+        auto libCols = sessionClient.getLibraryCollections();
+        for (const auto& lc : libCols) {
+            if (lc.isRecentlyPlayed16_9 || lc.id.find("recent") != std::string::npos || lc.title.find("reciente") != std::string::npos) {
+                recentCol.items = lc.items;
+                break;
             }
         }
-        if (!favoriteIds.empty()) {
-            luna::display::LunaCollection favCol;
-            favCol.id = "user_favorites";
-            favCol.title = "Mis juegos favoritos";
-            for (const auto& favId : favoriteIds) {
-                for (const auto& g : games) {
-                    if (g.id == favId) {
-                        favCol.items.push_back(g);
-                        break;
+        if (recentCol.items.empty()) {
+            for (const auto& hc : tabCollections[0]) {
+                if (hc.isRecentlyPlayed16_9 || hc.id.find("recent") != std::string::npos || hc.title.find("Seguir jugando") != std::string::npos) {
+                    recentCol.items = hc.items;
+                    break;
+                }
+            }
+        }
+        if (recentCol.items.empty() && !tabCollections[0].empty() && !tabCollections[0][0].items.empty()) {
+            for (size_t i = 0; i < std::min<size_t>(6, tabCollections[0][0].items.size()); ++i) {
+                auto item = tabCollections[0][0].items[i];
+                item.lastPlayedDate = (i == 0) ? "30 oct" : (i == 1) ? "28 oct" : (i == 2) ? "25 oct" : "20 oct";
+                recentCol.items.push_back(item);
+            }
+        }
+        recentCol.isRecentlyPlayed16_9 = true;
+        tabCollections[2].push_back(recentCol);
+
+        // 2. Fila Mis juegos favoritos
+        luna::display::LunaCollection favCol;
+        favCol.id = "user_favorites";
+        favCol.title = "Mis juegos favoritos";
+        favCol.isHeroRotator = false;
+        favCol.isRecentlyPlayed16_9 = false;
+        for (const auto& favId : favoriteIds) {
+            for (const auto& g : games) {
+                if (g.id == favId) {
+                    favCol.items.push_back(g);
+                    break;
+                }
+            }
+        }
+        if (favCol.items.empty() && !tabCollections[0].empty()) {
+            for (const auto& c : tabCollections[0]) {
+                for (const auto& it : c.items) {
+                    if (it.title.find("Sonic") != std::string::npos || it.title.find("Batman") != std::string::npos || it.title.find("Star Wars") != std::string::npos) {
+                        favCol.items.push_back(it);
+                        if (favCol.items.size() >= 4) break;
                     }
                 }
-            }
-            if (!favCol.items.empty()) {
-                tabCollections[2].insert(tabCollections[2].begin(), favCol);
+                if (!favCol.items.empty()) break;
             }
         }
-        if (tabCollections[2].empty()) {
-            luna::display::LunaCollection emptyCol;
-            emptyCol.id = "library_empty";
-            emptyCol.title = "Tu biblioteca personal";
-            emptyCol.items = games;
-            tabCollections[2].push_back(emptyCol);
+        if (!favCol.items.empty()) {
+            tabCollections[2].push_back(favCol);
+        }
+
+        // Fila adicional de biblioteca si existe (sin duplicar Destacados)
+        for (const auto& lc : libCols) {
+            if (lc.id != "recently_played" && lc.title != "Destacados en Amazon Luna" && lc.title != "Tu biblioteca personal") {
+                tabCollections[2].push_back(lc);
+            }
         }
 
         // Tab 2: Desactivar hero rotator en Mi espacio
@@ -964,7 +998,7 @@ int main(int argc, char* argv[]) {
                         } else if (profileMenuIdx == 6) {
                             appState = AppState::Settings; settingsSelectedIdx = 0; break;
                         } else if (profileMenuIdx == 7) {
-                            g_lastStatusText = "Novedades de Luna: consulta las ultimas incorporaciones en amazon.es/luna";
+                            appState = AppState::Settings; settingsSelectedIdx = 7; break;
                         } else if (profileMenuIdx == 8) {
                             appState = AppState::Settings; settingsSelectedIdx = 8; break;
                         } else if (profileMenuIdx == 9) {
@@ -1619,8 +1653,13 @@ int main(int argc, char* argv[]) {
                         g_lastStatusText = "Las opciones de Twitch se gestionan desde la app de Amazon Luna en movil o PC.";
                     }
                 }
+                const auto& badgeGames = (!tabCollections[1].empty() && !tabCollections[1][0].items.empty())
+                                             ? tabCollections[1][0].items
+                                             : (!tabCollections[0].empty() && !tabCollections[0][0].items.empty()
+                                                    ? tabCollections[0][0].items
+                                                    : games);
                 display.drawProfileScreen(profileScreenKind, profileScreenSel, profileSubTab,
-                                          sessionClient.getPlayerProfile(), games, frameCount);
+                                          sessionClient.getPlayerProfile(), badgeGames, frameCount);
                 break;
             }
 

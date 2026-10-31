@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <cstdio>
+#include <memory>
 
 namespace luna::display {
 
@@ -37,13 +38,73 @@ std::string utf8SafeTruncate(const std::string& str, size_t maxChars) {
     return str.substr(0, byteIdx) + "...";
 }
 
+// Reusable professional game card with 100% full-bleed decoded cover image and focus ring
+static void renderGameCard(DisplayManager& disp, ClayRenderer& clay,
+                           const GameTile& tile, bool isSel, bool isVertical,
+                           float cardW, float cardH, uint64_t frameCount,
+                           const std::string& subtext = "") {
+    (void)disp;
+    (void)frameCount;
+    auto preset = isVertical ? luna::util::ImagePreset::VerticalPoster : luna::util::ImagePreset::HorizontalCard16_9;
+    std::string imgUrl = isVertical
+        ? (tile.coverUrl.empty() ? tile.backdropUrl : tile.coverUrl)
+        : (tile.backdropUrl.empty() ? tile.coverUrl : tile.backdropUrl);
+
+    std::shared_ptr<const luna::util::DecodedImage> img;
+    if (!imgUrl.empty()) {
+        luna::util::ImageLoader::instance().requestImage(imgUrl, preset);
+        img = luna::util::ImageLoader::instance().getImage(imgUrl, preset);
+    }
+    bool imgReady = img && img->ready && !img->rgba.empty() && img->width > 0 && img->height > 0;
+
+    CLAY_AUTO_ID({
+        .layout = {
+            .sizing = { CLAY_SIZING_FIXED(cardW), CLAY_SIZING_FIXED(cardH) },
+            .padding = { 8, 8, 8, 8 },
+            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+            .layoutDirection = CLAY_TOP_TO_BOTTOM
+        },
+        .backgroundColor = imgReady ? Clay_Color{ 0, 0, 0, 0 } : Clay_Color{ 36, 27, 59, 255 },
+        .cornerRadius = CLAY_CORNER_RADIUS(12),
+        .image = imgReady ? Clay_ImageElementConfig{ .imageData = clay.allocDecodedImage(img) } : Clay_ImageElementConfig{},
+        .border = {
+            .color = isSel ? Clay_Color{ 255, 255, 255, 255 } : (imgReady ? Clay_Color{ 0, 0, 0, 0 } : Clay_Color{ 55, 42, 84, 255 }),
+            .width = LUNA_BORDER(isSel ? 3 : 1)
+        }
+    }) {
+        if (!imgReady) {
+            CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(tile.title, 22)), CLAY_TEXT_CONFIG({
+                .textColor = { 203, 213, 225, 255 },
+                .fontSize = 15
+            }));
+        }
+    }
+
+    if (!subtext.empty()) {
+        CLAY_AUTO_ID({
+            .layout = {
+                .sizing = { CLAY_SIZING_FIXED(cardW), CLAY_SIZING_FIXED(24) },
+                .padding = { 4, 4, 0, 0 },
+                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER }
+            }
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString(subtext), CLAY_TEXT_CONFIG({
+                .textColor = { 148, 163, 184, 255 },
+                .fontSize = 13
+            }));
+        }
+    }
+}
+
 } // namespace
 
 void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& props) {
     disp.clear(0xFF0E0B16); // Cosmic Deep official background
     auto& clay = ClayRenderer::instance();
 
+    // =========================================================================
     // 1. VISTA DE BUSQUEDA
+    // =========================================================================
     if (props.searchOpen) {
         clay.beginFrame();
         CLAY(CLAY_ID("SearchRoot"), {
@@ -121,7 +182,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 }));
             }
 
-            // Results Grid (5 columns 16:9 cards)
+            // Cuadrícula 16:9 de 5 columnas con carátulas horizontales reales
             int firstRow = (props.searchZone == 1) ? std::max(0, props.searchGridIdx / 5 - 1) : 0;
             int maxRows = 2;
             for (int row = firstRow; row < firstRow + maxRows && row * 5 < numF; ++row) {
@@ -138,25 +199,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         const auto& tile = props.filteredGames[g];
                         bool isSel = (props.searchZone == 1 && props.searchGridIdx == g);
 
-                        CLAY_AUTO_ID({
-                            .layout = {
-                                .sizing = { CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(200) },
-                                .childGap = 8,
-                                .layoutDirection = CLAY_TOP_TO_BOTTOM
-                            }
-                        }) {
-                            CLAY_AUTO_ID({
-                                .layout = { .sizing = { CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(180) } },
-                                .backgroundColor = { 36, 27, 59, 255 },
-                                .cornerRadius = CLAY_CORNER_RADIUS(10),
-                                .border = { .color = isSel ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(isSel ? 3 : 1) },
-                                .custom = { .customData = clay.allocCustom(CustomElementType::Mp4PreviewPlayer, "", 0xFFFFFFFF, &tile, props.frameCount) }
-                            }) {}
-                            CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(tile.title, 26)), CLAY_TEXT_CONFIG({
-                                .textColor = {255, 255, 255, 255},
-                                .fontSize = 16
-                            }));
-                        }
+                        renderGameCard(disp, clay, tile, isSel, /*isVertical=*/false, 320, 180, props.frameCount, utf8SafeTruncate(tile.title, 24));
                     }
                 }
             }
@@ -167,7 +210,9 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
         return;
     }
 
+    // =========================================================================
     // 2. REMOTE PLAY TAB (activeTabIdx == 3)
+    // =========================================================================
     if (props.activeTabIdx == 3) {
         clay.beginFrame();
         CLAY(CLAY_ID("RemotePlayRoot"), {
@@ -183,8 +228,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
             CLAY_AUTO_ID({
                 .layout = {
                     .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(100) },
-                    .padding = { 32, 32, 16, 16 },
-                    .childGap = 8,
+                    .padding = { 32, 32, 20, 20 },
+                    .childGap = 10,
                     .layoutDirection = CLAY_TOP_TO_BOTTOM
                 },
                 .backgroundColor = { 24, 18, 38, 255 },
@@ -195,7 +240,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 CLAY_TEXT(CLAY_STRING("Juega con tus amigos esteis donde esteis. Compartid partidas multijugador y cooperativas al instante sin coste adicional."), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 16 }));
             }
 
-            // 2 Columns: Host Card & Guest Card
+            // Dos cajas principales: Host y Guest (2 columnas)
             CLAY_AUTO_ID({
                 .layout = {
                     .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(480) },
@@ -203,39 +248,42 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                 }
             }) {
-                // Host Card
-                bool hostFoc = (props.focusZone != 0 && props.selectedRowIdx == 0 && (!props.rowSelectedCol.empty() && props.rowSelectedCol[0] == 0));
+                int rpCardSel = (!props.rowSelectedCol.empty()) ? props.rowSelectedCol[0] : 0;
+                bool hostFoc = (props.focusZone != 0 && rpCardSel == 0);
+                bool guestFoc = (props.focusZone != 0 && rpCardSel == 1);
+
+                // Caja 1: ANFITRION (Host)
                 CLAY_AUTO_ID({
                     .layout = {
                         .sizing = { CLAY_SIZING_PERCENT(0.5f), CLAY_SIZING_GROW(0) },
-                        .padding = { 32, 32, 28, 28 },
-                        .childGap = 16,
+                        .padding = { 36, 36, 32, 32 },
+                        .childGap = 20,
                         .layoutDirection = CLAY_TOP_TO_BOTTOM
                     },
-                    .backgroundColor = { 20, 15, 34, 255 },
+                    .backgroundColor = { 20, 15, 36, 255 },
                     .cornerRadius = CLAY_CORNER_RADIUS(16),
-                    .border = { .color = hostFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(hostFoc ? 3 : 1) }
+                    .border = { .color = hostFoc ? Clay_Color{145, 70, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(hostFoc ? 2 : 1) }
                 }) {
                     CLAY_AUTO_ID({
-                        .layout = { .sizing = { CLAY_SIZING_FIXED(130), CLAY_SIZING_FIXED(32) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
-                        .backgroundColor = { 59, 27, 104, 255 },
-                        .cornerRadius = CLAY_CORNER_RADIUS(8)
+                        .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(28) }, .padding = { 10, 10, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                        .backgroundColor = { 88, 28, 135, 255 },
+                        .cornerRadius = CLAY_CORNER_RADIUS(6)
                     }) {
                         CLAY_TEXT(CLAY_STRING("ANFITRION"), CLAY_TEXT_CONFIG({ .textColor = {233, 213, 255, 255}, .fontSize = 16 }));
                     }
                     CLAY_TEXT(CLAY_STRING("Crear una partida"), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 26 }));
                     CLAY_TEXT(CLAY_STRING("1. Genera un codigo unico de acceso de 6 digitos.\n2. Enviaselo a tus amigos (hasta 8 jugadores).\n3. Inicia cualquier juego compatible de tu biblioteca."), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 16, .lineHeight = 26 }));
 
-                    // Code box
+                    // Codigo PIN box
                     CLAY_AUTO_ID({
                         .layout = {
-                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(80) },
-                            .padding = { 24, 24, 0, 0 },
-                            .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
-                            .childGap = 20,
+                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(88) },
+                            .padding = { 20, 20, 0, 0 },
+                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                            .childGap = 16,
                             .layoutDirection = CLAY_LEFT_TO_RIGHT
                         },
-                        .backgroundColor = { 34, 23, 59, 255 },
+                        .backgroundColor = { 30, 22, 50, 255 },
                         .cornerRadius = CLAY_CORNER_RADIUS(12),
                         .border = { .color = { 76, 29, 149, 255 }, .width = LUNA_BORDER(1) }
                     }) {
@@ -244,11 +292,15 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_TEXT(CLAY_STRING("Sala activa lista para jugar"), CLAY_TEXT_CONFIG({ .textColor = {16, 185, 129, 255}, .fontSize = 16 }));
                     }
 
-                    // Button
+                    // Boton Generar Nuevo
                     CLAY_AUTO_ID({
-                        .layout = { .sizing = { CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(54) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                        .layout = {
+                            .sizing = { CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(52) },
+                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
+                        },
                         .backgroundColor = hostFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{121, 82, 236, 255},
-                        .cornerRadius = CLAY_CORNER_RADIUS(27)
+                        .cornerRadius = CLAY_CORNER_RADIUS(26),
+                        .border = { .color = hostFoc ? Clay_Color{145, 70, 255, 255} : Clay_Color{0, 0, 0, 0}, .width = LUNA_BORDER(hostFoc ? 2 : 0) }
                     }) {
                         CLAY_TEXT(CLAY_STRING("Generar nuevo codigo"), CLAY_TEXT_CONFIG({
                             .textColor = hostFoc ? Clay_Color{14, 11, 22, 255} : Clay_Color{255, 255, 255, 255},
@@ -257,58 +309,65 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                     }
                 }
 
-                // Guest Card
-                bool guestFoc = (props.focusZone != 0 && props.selectedRowIdx == 0 && (!props.rowSelectedCol.empty() && props.rowSelectedCol[0] == 1));
+                // Caja 2: INVITADO (Guest)
                 CLAY_AUTO_ID({
                     .layout = {
                         .sizing = { CLAY_SIZING_PERCENT(0.5f), CLAY_SIZING_GROW(0) },
-                        .padding = { 32, 32, 28, 28 },
-                        .childGap = 16,
+                        .padding = { 36, 36, 32, 32 },
+                        .childGap = 20,
                         .layoutDirection = CLAY_TOP_TO_BOTTOM
                     },
-                    .backgroundColor = { 20, 15, 34, 255 },
+                    .backgroundColor = { 20, 15, 36, 255 },
                     .cornerRadius = CLAY_CORNER_RADIUS(16),
-                    .border = { .color = guestFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(guestFoc ? 3 : 1) }
+                    .border = { .color = guestFoc ? Clay_Color{145, 70, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(guestFoc ? 2 : 1) }
                 }) {
                     CLAY_AUTO_ID({
-                        .layout = { .sizing = { CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(32) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                        .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(28) }, .padding = { 10, 10, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
                         .backgroundColor = { 6, 78, 59, 255 },
-                        .cornerRadius = CLAY_CORNER_RADIUS(8)
+                        .cornerRadius = CLAY_CORNER_RADIUS(6)
                     }) {
                         CLAY_TEXT(CLAY_STRING("INVITADO"), CLAY_TEXT_CONFIG({ .textColor = {167, 243, 208, 255}, .fontSize = 16 }));
                     }
                     CLAY_TEXT(CLAY_STRING("Unirse a una partida"), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 26 }));
                     CLAY_TEXT(CLAY_STRING("Introduce el codigo de 6 digitos facilitado por el anfitrion:"), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 16 }));
 
-                    // Pin Boxes
+                    // Casillas PIN
                     CLAY_AUTO_ID({
                         .layout = {
-                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(76) },
+                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(70) },
                             .childGap = 14,
+                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                             .layoutDirection = CLAY_LEFT_TO_RIGHT
                         }
                     }) {
-                        static const char* kDemoPin[] = {"2", "9", "9", "9", "8", "3"};
+                        static const char* kDemoPin[6] = {"5", "8", "1", "4", "2", "0"};
                         for (int p = 0; p < 6; ++p) {
                             CLAY_AUTO_ID({
-                                .layout = { .sizing = { CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(74) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
-                                .backgroundColor = { 34, 23, 59, 255 },
+                                .layout = {
+                                    .sizing = { CLAY_SIZING_FIXED(56), CLAY_SIZING_FIXED(64) },
+                                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
+                                },
+                                .backgroundColor = { 28, 21, 46, 255 },
                                 .cornerRadius = CLAY_CORNER_RADIUS(10),
-                                .border = { .color = guestFoc ? Clay_Color{145, 70, 255, 255} : Clay_Color{55, 65, 81, 255}, .width = LUNA_BORDER(2) }
+                                .border = { .color = { 76, 29, 149, 255 }, .width = LUNA_BORDER(1) }
                             }) {
                                 CLAY_TEXT(ClayRenderer::toClayString(kDemoPin[p]), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 28 }));
                             }
                         }
                     }
 
-                    // Button
+                    // Boton Unirse
                     CLAY_AUTO_ID({
-                        .layout = { .sizing = { CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(54) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
-                        .backgroundColor = guestFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{121, 82, 236, 255},
-                        .cornerRadius = CLAY_CORNER_RADIUS(27)
+                        .layout = {
+                            .sizing = { CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(52) },
+                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
+                        },
+                        .backgroundColor = guestFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{30, 22, 50, 255},
+                        .cornerRadius = CLAY_CORNER_RADIUS(26),
+                        .border = { .color = guestFoc ? Clay_Color{145, 70, 255, 255} : Clay_Color{55, 42, 84, 255}, .width = LUNA_BORDER(guestFoc ? 2 : 1) }
                     }) {
                         CLAY_TEXT(CLAY_STRING("Unirme a la partida"), CLAY_TEXT_CONFIG({
-                            .textColor = guestFoc ? Clay_Color{14, 11, 22, 255} : Clay_Color{255, 255, 255, 255},
+                            .textColor = guestFoc ? Clay_Color{14, 11, 22, 255} : Clay_Color{203, 213, 225, 255},
                             .fontSize = 18
                         }));
                     }
@@ -321,10 +380,9 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
         return;
     }
 
-    // 3. PANTALLA PRINCIPAL (INICIO, GAMENIGHT, MI ESPACIO)
-    clay.beginFrame();
-
-    // Calculo del scroll vertical suave
+    // =========================================================================
+    // 3. PANTALLA PRINCIPAL CON SWIMLANES (Inicio, GameNight, Mi espacio)
+    // =========================================================================
     int clampedRow = std::clamp(props.selectedRowIdx, 0, std::max(0, static_cast<int>(props.collections.size()) - 1));
     bool hasHero = (props.activeTabIdx != 2) && !props.collections.empty() && props.collections[0].isHeroRotator && !props.collections[0].items.empty();
 
@@ -333,6 +391,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
         scrollY = (clampedRow - 1) * 360;
     }
 
+    clay.beginFrame();
+
     CLAY(CLAY_ID("RootContainer"), {
         .layout = {
             .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(1080) },
@@ -340,328 +400,376 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
         },
         .backgroundColor = { 14, 11, 22, 255 }
     }) {
-        // --- TOP BAR FIJA (1920 x 76 px) ---
-        CLAY(CLAY_ID("TopBar"), {
+        // --- 3.1 TOP BAR FIJA (1920 x 68 px) ---
+        CLAY(CLAY_ID("TopNavBar"), {
             .layout = {
-                .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(76) },
-                .padding = { 56, 56, 0, 0 },
+                .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(68) },
+                .padding = { 48, 48, 0, 0 },
                 .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                .childGap = 32,
                 .layoutDirection = CLAY_LEFT_TO_RIGHT
             },
             .backgroundColor = { 15, 17, 24, 242 },
             .border = { .color = { 255, 255, 255, 20 }, .width = { .bottom = 1 } }
         }) {
-            // Left: Logo + [L1]
+            // Icono Luna
             CLAY_AUTO_ID({
                 .layout = {
-                    .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_GROW(0) },
+                    .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(40) },
+                    .childGap = 10,
                     .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
-                    .childGap = 12,
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                 }
             }) {
                 CLAY_AUTO_ID({
-                    .layout = { .sizing = { CLAY_SIZING_FIXED(32), CLAY_SIZING_FIXED(32) } },
+                    .layout = { .sizing = { CLAY_SIZING_FIXED(36), CLAY_SIZING_FIXED(36) } },
                     .custom = { .customData = clay.allocCustom(CustomElementType::LunaLogoIcon) }
                 }) {}
                 CLAY_TEXT(CLAY_STRING("Luna"), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 24 }));
-                CLAY_AUTO_ID({
-                    .layout = { .sizing = { CLAY_SIZING_FIXED(36), CLAY_SIZING_FIXED(26) } },
-                    .custom = { .customData = clay.allocCustom(CustomElementType::DualSenseHint, "L1", 0xFFCBD5E1) }
-                }) {}
             }
 
-            // Spacer
-            CLAY_AUTO_ID({ .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) } } }) {}
-
-            // Center: Nav Tabs
+            // Tabs centrales de Navegacion
             CLAY_AUTO_ID({
                 .layout = {
-                    .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_GROW(0) },
-                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
-                    .childGap = 12,
+                    .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48) },
+                    .childGap = 20,
+                    .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                 }
             }) {
                 for (size_t t = 0; t < props.navTabs.size(); ++t) {
-                    bool isActive = (props.activeTabIdx == static_cast<int>(t));
-                    bool isFoc = (props.focusZone == 0 && props.navColIdx == static_cast<int>(t));
-
-                    Clay_Color bg = isActive ? (isFoc ? Clay_Color{145, 70, 255, 255} : Clay_Color{121, 82, 236, 255})
-                                             : (isFoc ? Clay_Color{45, 34, 72, 255} : Clay_Color{0, 0, 0, 0});
-                    Clay_Color borderCol = isFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{0, 0, 0, 0};
+                    bool isTabActive = (props.activeTabIdx == static_cast<int>(t));
+                    bool isTabFoc = (props.focusZone == 0 && props.navColIdx == static_cast<int>(t));
 
                     CLAY_AUTO_ID({
                         .layout = {
                             .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(40) },
-                            .padding = { 20, 20, 0, 0 },
-                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
+                            .padding = { 14, 14, 0, 0 },
+                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                            .layoutDirection = CLAY_LEFT_TO_RIGHT
                         },
-                        .backgroundColor = bg,
+                        .backgroundColor = isTabFoc ? Clay_Color{121, 82, 236, 255} : (isTabActive ? Clay_Color{36, 28, 56, 255} : Clay_Color{0, 0, 0, 0}),
                         .cornerRadius = CLAY_CORNER_RADIUS(20),
-                        .border = { .color = borderCol, .width = LUNA_BORDER(isFoc ? 2 : 0) }
+                        .border = { .color = isTabFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{0, 0, 0, 0}, .width = LUNA_BORDER(isTabFoc ? 2 : 0) }
                     }) {
                         CLAY_TEXT(ClayRenderer::toClayString(props.navTabs[t]), CLAY_TEXT_CONFIG({
-                            .textColor = isActive ? Clay_Color{255, 255, 255, 255} : Clay_Color{148, 163, 184, 255},
+                            .textColor = (isTabFoc || isTabActive) ? Clay_Color{255, 255, 255, 255} : Clay_Color{148, 163, 184, 255},
                             .fontSize = 17
                         }));
                     }
                 }
             }
 
-            // Spacer
-            CLAY_AUTO_ID({ .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) } } }) {}
-
-            // Right: [R1] + Search + Profile
+            // Boton Buscar
+            bool searchBtnFoc = (props.focusZone == 0 && props.navColIdx == static_cast<int>(props.navTabs.size()));
             CLAY_AUTO_ID({
                 .layout = {
-                    .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_GROW(0) },
-                    .childAlignment = { CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER },
-                    .childGap = 16,
+                    .sizing = { CLAY_SIZING_FIXED(110), CLAY_SIZING_FIXED(40) },
+                    .padding = { 12, 12, 0, 0 },
+                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                    .childGap = 8,
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
-                }
+                },
+                .backgroundColor = searchBtnFoc ? Clay_Color{121, 82, 236, 255} : Clay_Color{28, 22, 44, 255},
+                .cornerRadius = CLAY_CORNER_RADIUS(20),
+                .border = { .color = searchBtnFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(searchBtnFoc ? 2 : 1) }
             }) {
-                CLAY_AUTO_ID({
-                    .layout = { .sizing = { CLAY_SIZING_FIXED(36), CLAY_SIZING_FIXED(26) } },
-                    .custom = { .customData = clay.allocCustom(CustomElementType::DualSenseHint, "R1", 0xFFCBD5E1) }
-                }) {}
+                CLAY_TEXT(CLAY_STRING("\xF0\x9F\x94\x8D Buscar"), CLAY_TEXT_CONFIG({
+                    .textColor = searchBtnFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{203, 213, 225, 255},
+                    .fontSize = 15
+                }));
+            }
 
-                // Search Icon Button (navColIdx == 4)
-                bool searchFoc = (props.focusZone == 0 && props.navColIdx == 4);
+            // Avatar de Usuario con Dropdown Menu
+            bool avatarFoc = (props.focusZone == 0 && props.navColIdx == static_cast<int>(props.navTabs.size()) + 1);
+            CLAY_AUTO_ID({
+                .layout = {
+                    .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(42) },
+                    .padding = { 8, 14, 0, 0 },
+                    .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                    .childGap = 10,
+                    .layoutDirection = CLAY_LEFT_TO_RIGHT
+                },
+                .backgroundColor = avatarFoc ? Clay_Color{121, 82, 236, 255} : Clay_Color{28, 22, 44, 255},
+                .cornerRadius = CLAY_CORNER_RADIUS(21),
+                .border = { .color = avatarFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(avatarFoc ? 2 : 1) }
+            }) {
+                // Avatar circle
                 CLAY_AUTO_ID({
-                    .layout = {
-                        .sizing = { CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40) },
-                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
-                    },
-                    .backgroundColor = searchFoc ? Clay_Color{145, 70, 255, 255} : Clay_Color{28, 21, 46, 255},
-                    .cornerRadius = CLAY_CORNER_RADIUS(20),
-                    .border = { .color = searchFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(searchFoc ? 2 : 1) }
+                    .layout = { .sizing = { CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(28) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                    .backgroundColor = { 20, 184, 166, 255 },
+                    .cornerRadius = CLAY_CORNER_RADIUS(14)
                 }) {
-                    CLAY_TEXT(CLAY_STRING("Q"), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 18 }));
+                    CLAY_TEXT(CLAY_STRING("B"), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 16 }));
                 }
 
-                // Profile Chip (navColIdx == 5)
-                bool profFoc = (props.focusZone == 0 && props.navColIdx == 5);
-                CLAY_AUTO_ID({
-                    .layout = {
-                        .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(44) },
-                        .padding = { 10, 16, 0, 0 },
-                        .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
-                        .childGap = 10,
-                        .layoutDirection = CLAY_LEFT_TO_RIGHT
-                    },
-                    .backgroundColor = profFoc ? Clay_Color{145, 70, 255, 255} : Clay_Color{24, 18, 38, 255},
-                    .cornerRadius = CLAY_CORNER_RADIUS(22),
-                    .border = { .color = profFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(profFoc ? 2 : 1) }
-                }) {
-                    // Avatar circle
-                    CLAY_AUTO_ID({
-                        .layout = { .sizing = { CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(28) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
-                        .backgroundColor = { 20, 184, 166, 255 },
-                        .cornerRadius = CLAY_CORNER_RADIUS(14)
-                    }) {
-                        CLAY_TEXT(CLAY_STRING("B"), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 14 }));
-                    }
-                    CLAY_TEXT(ClayRenderer::toClayString(props.profile.displayName), CLAY_TEXT_CONFIG({
-                        .textColor = {255, 255, 255, 255},
-                        .fontSize = 16
-                    }));
-                }
+                CLAY_TEXT(ClayRenderer::toClayString(props.profile.displayName), CLAY_TEXT_CONFIG({
+                    .textColor = {255, 255, 255, 255},
+                    .fontSize = 15
+                }));
+
+                CLAY_TEXT(CLAY_STRING("\xE2\x96\xBE"), CLAY_TEXT_CONFIG({
+                    .textColor = {148, 163, 184, 255},
+                    .fontSize = 12
+                }));
             }
         }
 
-        // --- CONTENIDO PRINCIPAL CON SCISSOR CLIPPING ---
-        CLAY(CLAY_ID("MainScrollContainer"), {
+        // --- 3.2 SCROLLABLE BODY ---
+        CLAY(CLAY_ID("ScrollContainer"), {
             .layout = {
-                .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(960) },
-                .padding = { 48, 48, 16, 0 },
-                .childGap = 36,
+                .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(968) },
+                .padding = { 48, 48, 20, 28 },
+                .childGap = 32,
                 .layoutDirection = CLAY_TOP_TO_BOTTOM
             },
             .clip = { .horizontal = false, .vertical = true, .childOffset = { 0, static_cast<float>(-scrollY) } }
         }) {
-            // ==================== SPOTLIGHT DYNAMIC STAGE (1824 x 400 px) ====================
+            // =================================================================
+            // DYNAMIC PS5 SPOTLIGHT STAGE (1824 x 420 px)
+            // Reactivo en tiempo real al juego enfocado con el mando DualSense
+            // =================================================================
             if (hasHero) {
+                // Determine active game: if browsing rows (focusZone == 2), show focused card!
+                const GameTile* activeGame = nullptr;
                 const auto& heroCol = props.collections[0];
                 int heroIdx = (!props.rowSelectedCol.empty()) ? props.rowSelectedCol[0] : 0;
                 if (heroIdx < 0 || heroIdx >= static_cast<int>(heroCol.items.size())) heroIdx = 0;
-                const auto& heroGame = heroCol.items[heroIdx];
-                bool heroFocused = (props.focusZone != 0 && clampedRow == 0);
+                activeGame = &heroCol.items[heroIdx];
+
+                if (props.focusZone == 2 && clampedRow >= 0 && clampedRow < static_cast<int>(props.collections.size())) {
+                    const auto& curRow = props.collections[clampedRow];
+                    int selCol = (clampedRow < static_cast<int>(props.rowSelectedCol.size())) ? props.rowSelectedCol[clampedRow] : 0;
+                    if (selCol >= 0 && selCol < static_cast<int>(curRow.items.size())) {
+                        activeGame = &curRow.items[selCol];
+                    }
+                }
+                if (!activeGame && !props.collections.empty() && !props.collections[0].items.empty()) {
+                    activeGame = &props.collections[0].items[0];
+                }
+
+                bool isHeroActive = (props.focusZone == 1);
 
                 CLAY(CLAY_ID("SpotlightStage"), {
                     .layout = {
-                        .sizing = { CLAY_SIZING_FIXED(1824), CLAY_SIZING_FIXED(400) },
-                        .padding = { 36, 36, 28, 28 },
-                        .childGap = 36,
+                        .sizing = { CLAY_SIZING_FIXED(1824), CLAY_SIZING_FIXED(420) },
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     },
-                    .backgroundColor = { 20, 15, 36, 255 },
-                    .cornerRadius = CLAY_CORNER_RADIUS(16),
-                    .border = { .color = heroFocused ? Clay_Color{121, 82, 236, 255} : Clay_Color{46, 34, 72, 255}, .width = LUNA_BORDER(heroFocused ? 2 : 1) }
+                    .backgroundColor = { 18, 15, 29, 255 }, // #120F1D Escenario cinematografico integrado
+                    .cornerRadius = CLAY_CORNER_RADIUS(20),
+                    .border = { .color = isHeroActive ? Clay_Color{145, 70, 255, 255} : Clay_Color{38, 30, 56, 255}, .width = LUNA_BORDER(isHeroActive ? 2 : 1) }
                 }) {
-                    // Columna Izquierda (55% width ~ 960 px)
+                    // Columna Izquierda (50% = 912 px)
                     CLAY_AUTO_ID({
                         .layout = {
-                            .sizing = { CLAY_SIZING_PERCENT(0.55f), CLAY_SIZING_GROW(0) },
+                            .sizing = { CLAY_SIZING_FIXED(912), CLAY_SIZING_FIXED(420) },
+                            .padding = { 36, 24, 28, 28 },
                             .childGap = 12,
                             .layoutDirection = CLAY_TOP_TO_BOTTOM
                         }
                     }) {
-                        // Badge Tag
-                        std::string badgeText = (props.activeTabIdx == 1) ? "[GN] USA TELEFONOS COMO MANDOS" : "INCLUIDO CON PRIME";
-                        CLAY_AUTO_ID({
-                            .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(28) }, .padding = { 12, 12, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
-                            .backgroundColor = { 124, 58, 237, 255 },
-                            .cornerRadius = CLAY_CORNER_RADIUS(6)
-                        }) {
-                            CLAY_TEXT(ClayRenderer::toClayString(badgeText), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 13 }));
-                        }
-
-                        // Titulo
-                        CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(heroGame.title, 32)), CLAY_TEXT_CONFIG({
-                            .textColor = {255, 255, 255, 255},
-                            .fontSize = 36
-                        }));
-
-                        // Metadata row
+                        // Fila 1: Píldoras de estado (Suscripción + Distribuidora + PEGI oficial)
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(32) },
+                                .childGap = 12,
                                 .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
-                                .childGap = 14,
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
+                            // Chip de suscripción
+                            std::string subText = "INCLUIDO CON PRIME";
+                            Clay_Color subBg = { 14, 70, 99, 255 };
+                            Clay_Color subFg = { 56, 189, 248, 255 };
+                            if (props.activeTabIdx == 1) {
+                                subText = "[GN] GAMENIGHT";
+                                subBg = { 109, 40, 217, 255 };
+                                subFg = { 255, 255, 255, 255 };
+                            } else if (activeGame->channelSubtext.find("Luna+") != std::string::npos || activeGame->category == "LUNA+") {
+                                subText = "LUNA+";
+                                subBg = { 124, 58, 237, 255 };
+                                subFg = { 255, 255, 255, 255 };
+                            }
                             CLAY_AUTO_ID({
-                                .layout = { .sizing = { CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(26) } },
-                                .custom = { .customData = clay.allocCustom(CustomElementType::PegiBadge, heroGame.pegiRating.empty() ? "PEGI 12" : heroGame.pegiRating) }
-                            }) {}
+                                .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(26) }, .padding = { 10, 10, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                                .backgroundColor = subBg,
+                                .cornerRadius = CLAY_CORNER_RADIUS(6)
+                            }) {
+                                CLAY_TEXT(ClayRenderer::toClayString(subText), CLAY_TEXT_CONFIG({ .textColor = subFg, .fontSize = 12 }));
+                            }
 
-                            std::string genres = heroGame.genres.empty() ? "Accion, Aventura" : heroGame.genres;
-                            CLAY_TEXT(ClayRenderer::toClayString(genres), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 16 }));
+                            // Chip Distribuidora real
+                            std::string pub = activeGame->publisher.empty() ? activeGame->developer : activeGame->publisher;
+                            if (pub.empty()) pub = "Amazon Games";
+                            CLAY_AUTO_ID({
+                                .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(26) }, .padding = { 10, 10, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                                .backgroundColor = { 34, 27, 53, 255 },
+                                .cornerRadius = CLAY_CORNER_RADIUS(6)
+                            }) {
+                                CLAY_TEXT(ClayRenderer::toClayString(pub), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 12 }));
+                            }
 
-                            std::string yr = heroGame.releaseYear.empty() ? "2024" : heroGame.releaseYear;
-                            CLAY_TEXT(ClayRenderer::toClayString(yr), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 16 }));
-
-                            CLAY_TEXT(CLAY_STRING("4.5 \xE2\x98\x85"), CLAY_TEXT_CONFIG({ .textColor = {245, 158, 11, 255}, .fontSize = 16 }));
+                            // Sello PEGI oficial reglamentario
+                            std::string pegiStr = activeGame->pegiRating.empty() ? "PEGI 12" : activeGame->pegiRating;
+                            Clay_Color pegiBgCol = { 227, 82, 5, 255 }; // Default orange (12, 16)
+                            if (pegiStr.find("3") != std::string::npos || pegiStr.find("7") != std::string::npos) {
+                                pegiBgCol = { 101, 179, 46, 255 }; // Green
+                            } else if (pegiStr.find("18") != std::string::npos) {
+                                pegiBgCol = { 206, 17, 38, 255 }; // Red
+                            }
+                            CLAY_AUTO_ID({
+                                .layout = { .sizing = { CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(26) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                                .backgroundColor = pegiBgCol,
+                                .cornerRadius = CLAY_CORNER_RADIUS(6)
+                            }) {
+                                CLAY_TEXT(ClayRenderer::toClayString(pegiStr), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 12 }));
+                            }
                         }
 
-                        // Synopsis (auto-wrap)
-                        std::string syn = heroGame.synopsis.empty() ? "Disponible para jugar al instante en streaming de alta calidad en Amazon Luna Cloud." : heroGame.synopsis;
-                        CLAY_AUTO_ID({
-                            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(70) } }
-                        }) {
-                            CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(syn, 140)), CLAY_TEXT_CONFIG({
-                                .textColor = {226, 232, 240, 255},
-                                .fontSize = 17,
-                                .lineHeight = 24
+                        // Fila 2: Título / Logo
+                        std::shared_ptr<const luna::util::DecodedImage> logoImg;
+                        if (!activeGame->logoUrl.empty()) {
+                            luna::util::ImageLoader::instance().requestImage(activeGame->logoUrl, luna::util::ImagePreset::ProductLogo);
+                            logoImg = luna::util::ImageLoader::instance().getImage(activeGame->logoUrl, luna::util::ImagePreset::ProductLogo);
+                        }
+                        if (logoImg && logoImg->ready && !logoImg->rgba.empty() && logoImg->width > 0 && logoImg->height > 0) {
+                            float lw = static_cast<float>(std::min(360, logoImg->width));
+                            float lh = static_cast<float>(std::min(74, logoImg->height));
+                            CLAY_AUTO_ID({
+                                .layout = { .sizing = { CLAY_SIZING_FIXED(lw), CLAY_SIZING_FIXED(lh) } },
+                                .image = { .imageData = clay.allocDecodedImage(logoImg) }
+                            }) {}
+                        } else {
+                            CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(activeGame->title, 28)), CLAY_TEXT_CONFIG({
+                                .textColor = {255, 255, 255, 255},
+                                .fontSize = 36
                             }));
                         }
 
-                        // Buttons row
-                        bool btn0Foc = (props.focusZone == 2) ? (props.heroBtnIdx == 0) : heroFocused;
-                        bool btn1Foc = (props.focusZone == 2 && props.heroBtnIdx == 1);
-                        bool btn2Foc = (props.focusZone == 2 && props.heroBtnIdx == 2);
+                        // Fila 3: Píldoras de Género y Jugadores
+                        CLAY_AUTO_ID({
+                            .layout = {
+                                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(30) },
+                                .childGap = 10,
+                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                .layoutDirection = CLAY_LEFT_TO_RIGHT
+                            }
+                        }) {
+                            std::string gen = activeGame->genres.empty() ? "Acción, Aventura" : activeGame->genres;
+                            CLAY_AUTO_ID({
+                                .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(24) }, .padding = { 8, 8, 0, 0 } },
+                                .backgroundColor = { 37, 32, 56, 255 },
+                                .cornerRadius = CLAY_CORNER_RADIUS(6)
+                            }) {
+                                CLAY_TEXT(ClayRenderer::toClayString(gen), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 12 }));
+                            }
+
+                            std::string pl = activeGame->playerCount.empty() ? "1-4 jugadores" : activeGame->playerCount;
+                            CLAY_AUTO_ID({
+                                .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(24) }, .padding = { 8, 8, 0, 0 } },
+                                .backgroundColor = { 37, 32, 56, 255 },
+                                .cornerRadius = CLAY_CORNER_RADIUS(6)
+                            }) {
+                                CLAY_TEXT(ClayRenderer::toClayString(pl), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 12 }));
+                            }
+
+                            CLAY_AUTO_ID({
+                                .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(24) }, .padding = { 8, 8, 0, 0 } },
+                                .backgroundColor = { 37, 32, 56, 255 },
+                                .cornerRadius = CLAY_CORNER_RADIUS(6)
+                            }) {
+                                CLAY_TEXT(CLAY_STRING("\xF0\x9F\x8E\xAE DualSense + Vibracion"), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 12 }));
+                            }
+                        }
+
+                        // Fila 4: Sinopsis real
+                        std::string syn = activeGame->synopsis.empty() ? "Disponible para jugar al instante en streaming de alta calidad en Amazon Luna Cloud." : activeGame->synopsis;
+                        CLAY_AUTO_ID({
+                            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(68) } }
+                        }) {
+                            CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(syn, 160)), CLAY_TEXT_CONFIG({
+                                .textColor = {148, 163, 184, 255},
+                                .fontSize = 15,
+                                .lineHeight = 22
+                            }));
+                        }
+
+                        // Fila 5: Botones de Consola PS5
+                        bool btn0Foc = isHeroActive && (props.heroBtnIdx == 0);
+                        bool btn1Foc = isHeroActive && (props.heroBtnIdx == 1);
+                        bool btn2Foc = isHeroActive && (props.heroBtnIdx == 2);
 
                         CLAY_AUTO_ID({
                             .layout = {
-                                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56) },
+                                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(52) },
                                 .childGap = 16,
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
-                            // Button 0: Jugar ahora
+                            // (X) Jugar ahora
                             CLAY_AUTO_ID({
                                 .layout = {
-                                    .sizing = { CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(54) },
-                                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
-                                    .childGap = 10,
-                                    .layoutDirection = CLAY_LEFT_TO_RIGHT
+                                    .sizing = { CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(50) },
+                                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
                                 },
-                                .backgroundColor = btn0Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{121, 82, 236, 255},
-                                .cornerRadius = CLAY_CORNER_RADIUS(27),
+                                .backgroundColor = btn0Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{124, 58, 237, 255},
+                                .cornerRadius = CLAY_CORNER_RADIUS(25),
                                 .border = { .color = btn0Foc ? Clay_Color{145, 70, 255, 255} : Clay_Color{0, 0, 0, 0}, .width = LUNA_BORDER(btn0Foc ? 3 : 0) }
                             }) {
-                                CLAY_TEXT(CLAY_STRING("\xE2\x96\xB6  Jugar ahora"), CLAY_TEXT_CONFIG({
-                                    .textColor = btn0Foc ? Clay_Color{14, 11, 22, 255} : Clay_Color{255, 255, 255, 255},
-                                    .fontSize = 18
+                                CLAY_TEXT(CLAY_STRING("\xE2\x96\xB6  (X) Jugar"), CLAY_TEXT_CONFIG({
+                                    .textColor = btn0Foc ? Clay_Color{10, 8, 18, 255} : Clay_Color{255, 255, 255, 255},
+                                    .fontSize = 17
                                 }));
                             }
 
-                            // Button 1: Añadir a Biblioteca
+                            // (□) Ficha y Capturas
                             CLAY_AUTO_ID({
                                 .layout = {
-                                    .sizing = { CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(54) },
+                                    .sizing = { CLAY_SIZING_FIXED(190), CLAY_SIZING_FIXED(50) },
                                     .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
                                 },
-                                .backgroundColor = btn1Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{34, 24, 56, 255},
-                                .cornerRadius = CLAY_CORNER_RADIUS(27),
+                                .backgroundColor = btn1Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{37, 28, 59, 255},
+                                .cornerRadius = CLAY_CORNER_RADIUS(25),
                                 .border = { .color = btn1Foc ? Clay_Color{145, 70, 255, 255} : Clay_Color{55, 42, 84, 255}, .width = LUNA_BORDER(btn1Foc ? 3 : 1) }
                             }) {
-                                CLAY_TEXT(CLAY_STRING("+ Biblioteca"), CLAY_TEXT_CONFIG({
-                                    .textColor = btn1Foc ? Clay_Color{14, 11, 22, 255} : Clay_Color{203, 213, 225, 255},
-                                    .fontSize = 18
+                                CLAY_TEXT(CLAY_STRING("[\xE2\x96\xA1] Ficha"), CLAY_TEXT_CONFIG({
+                                    .textColor = btn1Foc ? Clay_Color{10, 8, 18, 255} : Clay_Color{203, 213, 225, 255},
+                                    .fontSize = 16
                                 }));
                             }
 
-                            // Button 2: Ver detalles
+                            // (△) Favorito
                             CLAY_AUTO_ID({
                                 .layout = {
-                                    .sizing = { CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(54) },
+                                    .sizing = { CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(50) },
                                     .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
                                 },
-                                .backgroundColor = btn2Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{34, 24, 56, 255},
-                                .cornerRadius = CLAY_CORNER_RADIUS(27),
+                                .backgroundColor = btn2Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{37, 28, 59, 255},
+                                .cornerRadius = CLAY_CORNER_RADIUS(25),
                                 .border = { .color = btn2Foc ? Clay_Color{145, 70, 255, 255} : Clay_Color{55, 42, 84, 255}, .width = LUNA_BORDER(btn2Foc ? 3 : 1) }
                             }) {
-                                CLAY_TEXT(CLAY_STRING("Detalles"), CLAY_TEXT_CONFIG({
-                                    .textColor = btn2Foc ? Clay_Color{14, 11, 22, 255} : Clay_Color{203, 213, 225, 255},
-                                    .fontSize = 18
+                                CLAY_TEXT(CLAY_STRING("[\xE2\x96\xB3] \xE2\x98\x85 Fav"), CLAY_TEXT_CONFIG({
+                                    .textColor = btn2Foc ? Clay_Color{10, 8, 18, 255} : Clay_Color{203, 213, 225, 255},
+                                    .fontSize = 16
                                 }));
                             }
                         }
                     }
 
-                    // Columna Derecha (45% width ~ 760 px) - Artwork 16:9 o Video Player
+                    // Columna Derecha (50% = 912 px): Arte Panorámico 16:9 / Video MP4 con degradado suave
                     CLAY_AUTO_ID({
                         .layout = {
-                            .sizing = { CLAY_SIZING_PERCENT(0.45f), CLAY_SIZING_GROW(0) },
-                            .childAlignment = { CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER },
-                            .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                            .childGap = 12
-                        }
-                    }) {
-                        CLAY_AUTO_ID({
-                            .layout = { .sizing = { CLAY_SIZING_FIXED(640), CLAY_SIZING_FIXED(310) } },
-                            .backgroundColor = { 24, 19, 38, 255 },
-                            .cornerRadius = CLAY_CORNER_RADIUS(14),
-                            .border = { .color = { 55, 42, 84, 255 }, .width = LUNA_BORDER(1) },
-                            .custom = { .customData = clay.allocCustom(CustomElementType::Mp4PreviewPlayer, "", 0xFFFFFFFF, &heroGame, props.frameCount) }
-                        }) {}
-
-                        // Rotator dots
-                        int totalDots = std::min(static_cast<int>(heroCol.items.size()), 6);
-                        CLAY_AUTO_ID({
-                            .layout = {
-                                .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(12) },
-                                .childGap = 8,
-                                .layoutDirection = CLAY_LEFT_TO_RIGHT
-                            }
-                        }) {
-                            for (int d = 0; d < totalDots; ++d) {
-                                bool isDot = (d == heroIdx);
-                                CLAY_AUTO_ID({
-                                    .layout = { .sizing = { CLAY_SIZING_FIXED(isDot ? 28.0f : 8.0f), CLAY_SIZING_FIXED(6) } },
-                                    .backgroundColor = isDot ? Clay_Color{255, 255, 255, 255} : Clay_Color{148, 163, 184, 136},
-                                    .cornerRadius = CLAY_CORNER_RADIUS(3)
-                                }) {}
-                            }
-                        }
-                    }
+                            .sizing = { CLAY_SIZING_FIXED(912), CLAY_SIZING_FIXED(420) },
+                            .layoutDirection = CLAY_TOP_TO_BOTTOM
+                        },
+                        .custom = { .customData = clay.allocCustom(CustomElementType::SpotlightArt, "", 0xFFFFFFFF, activeGame, props.frameCount) }
+                    }) {}
                 }
             }
 
-            // ==================== SWIMLANES Y CARROUSELES DE JUEGOS ====================
+            // =================================================================
+            // SWIMLANES Y CARROUSELES DE JUEGOS
+            // =================================================================
             size_t startRow = hasHero ? 1 : 0;
             for (size_t r = startRow; r < props.collections.size(); ++r) {
                 const auto& row = props.collections[r];
@@ -672,7 +780,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 if (row.isCategoryCarousel) {
                     CLAY_AUTO_ID({
                         .layout = {
-                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(230) },
+                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(220) },
                             .childGap = 14,
                             .layoutDirection = CLAY_TOP_TO_BOTTOM
                         }
@@ -686,15 +794,14 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
-                            int catScroll = std::max(0, (selectedCol - 4) * 188);
                             for (size_t c = 0; c < row.items.size(); ++c) {
                                 bool isSel = isFocusedRow && (static_cast<int>(c) == selectedCol);
                                 CLAY_AUTO_ID({
                                     .layout = {
                                         .sizing = { CLAY_SIZING_FIXED(168), CLAY_SIZING_FIXED(148) },
-                                        .padding = { 12, 12, 20, 16 },
+                                        .padding = { 12, 12, 16, 16 },
                                         .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
-                                        .childGap = 16,
+                                        .childGap = 14,
                                         .layoutDirection = CLAY_TOP_TO_BOTTOM
                                     },
                                     .backgroundColor = isSel ? Clay_Color{44, 38, 64, 255} : Clay_Color{33, 29, 48, 255},
@@ -717,36 +824,58 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                     continue;
                 }
 
-                // --- CASO 2: COMPOSITE BANNERS ("Personajes emblemáticos" y "Jugad juntos" 560 px, SIN DUPLICADOS) ---
+                // --- CASO 2: BANNERS COMPUESTOS CON ARTE REAL ("Personajes emblemáticos" y "Jugad juntos") ---
                 if (row.isPartnerRow) {
                     CLAY_AUTO_ID({
                         .layout = {
-                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(560) },
-                            .padding = { 32, 32, 28, 28 },
-                            .childGap = 28,
+                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(480) },
+                            .padding = { 32, 32, 24, 24 },
+                            .childGap = 20,
                             .layoutDirection = CLAY_TOP_TO_BOTTOM
                         },
                         .backgroundColor = { 24, 18, 38, 255 },
                         .cornerRadius = CLAY_CORNER_RADIUS(16),
                         .border = { .color = isFocusedRow ? Clay_Color{145, 70, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(isFocusedRow ? 2 : 1) }
                     }) {
-                        // Header del Banner
+                        // Header del Banner con Arte Panorámico y Botón "Ver todos los juegos"
                         CLAY_AUTO_ID({
                             .layout = {
-                                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64) },
-                                .childGap = 8,
-                                .layoutDirection = CLAY_TOP_TO_BOTTOM
+                                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(70) },
+                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                .childGap = 16,
+                                .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
-                            CLAY_TEXT(ClayRenderer::toClayString(row.title), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 28 }));
-                            CLAY_TEXT(ClayRenderer::toClayString(row.subtitle.empty() ? "Descubre los mejores titulos seleccionados para ti." : row.subtitle), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 16 }));
+                            CLAY_AUTO_ID({
+                                .layout = {
+                                    .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64) },
+                                    .childGap = 6,
+                                    .layoutDirection = CLAY_TOP_TO_BOTTOM
+                                }
+                            }) {
+                                CLAY_TEXT(ClayRenderer::toClayString(row.title), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 26 }));
+                                CLAY_TEXT(ClayRenderer::toClayString(row.subtitle.empty() ? "Descubre los mejores titulos seleccionados para ti." : row.subtitle), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 15 }));
+                            }
+
+                            // Botón "Ver todos los juegos"
+                            CLAY_AUTO_ID({
+                                .layout = {
+                                    .sizing = { CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(42) },
+                                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
+                                },
+                                .backgroundColor = { 37, 28, 59, 255 },
+                                .cornerRadius = CLAY_CORNER_RADIUS(21),
+                                .border = { .color = { 76, 29, 149, 255 }, .width = LUNA_BORDER(1) }
+                            }) {
+                                CLAY_TEXT(CLAY_STRING("Ver todos los juegos"), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 14 }));
+                            }
                         }
 
-                        // Juegos superpuestos sin duplicados
+                        // Juegos superpuestos con carátulas verticales reales (sin duplicados)
                         CLAY_AUTO_ID({
                             .layout = {
-                                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(380) },
-                                .childGap = 24,
+                                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(330) },
+                                .childGap = 20,
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
@@ -755,37 +884,12 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                             for (size_t i = 0; i < row.items.size() && displayedCount < 7; ++i) {
                                 const auto& item = row.items[i];
                                 std::string uniqueKey = item.id.empty() ? item.title : item.id;
-                                if (seenIds.count(uniqueKey)) continue; // Evitar duplicados
+                                if (seenIds.count(uniqueKey)) continue;
                                 seenIds.insert(uniqueKey);
                                 displayedCount++;
 
                                 bool isSel = isFocusedRow && (displayedCount - 1 == selectedCol);
-                                CLAY_AUTO_ID({
-                                    .layout = {
-                                        .sizing = { CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(360) },
-                                        .childGap = 10,
-                                        .layoutDirection = CLAY_TOP_TO_BOTTOM
-                                    }
-                                }) {
-                                    CLAY_AUTO_ID({
-                                        .layout = { .sizing = { CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(280) } },
-                                        .backgroundColor = { 36, 27, 59, 255 },
-                                        .cornerRadius = CLAY_CORNER_RADIUS(12),
-                                        .border = { .color = isSel ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(isSel ? 3 : 1) },
-                                        .custom = { .customData = clay.allocCustom(CustomElementType::Mp4PreviewPlayer, "", 0xFFFFFFFF, &item, props.frameCount) }
-                                    }) {
-                                        // Badge [GN]
-                                        CLAY_AUTO_ID({
-                                            .layout = { .sizing = { CLAY_SIZING_FIXED(34), CLAY_SIZING_FIXED(24) } },
-                                            .custom = { .customData = clay.allocCustom(CustomElementType::GoodiesBadge) }
-                                        }) {}
-                                    }
-
-                                    CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(item.title, 20)), CLAY_TEXT_CONFIG({
-                                        .textColor = {255, 255, 255, 255},
-                                        .fontSize = 16
-                                    }));
-                                }
+                                renderGameCard(disp, clay, item, isSel, /*isVertical=*/true, 190, 270, props.frameCount);
                             }
                         }
                     }
@@ -810,7 +914,6 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
-                            int rScroll = std::max(0, (selectedCol - 4) * 260);
                             for (size_t i = 0; i < row.items.size() && i < 10; ++i) {
                                 const auto& item = row.items[i];
                                 bool isSel = isFocusedRow && (static_cast<int>(i) == selectedCol);
@@ -833,27 +936,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                         }));
                                     }
 
-                                    // Tarjeta de juego
-                                    CLAY_AUTO_ID({
-                                        .layout = {
-                                            .sizing = { CLAY_SIZING_FIXED(190), CLAY_SIZING_FIXED(290) },
-                                            .childGap = 8,
-                                            .layoutDirection = CLAY_TOP_TO_BOTTOM
-                                        }
-                                    }) {
-                                        CLAY_AUTO_ID({
-                                            .layout = { .sizing = { CLAY_SIZING_FIXED(190), CLAY_SIZING_FIXED(260) } },
-                                            .backgroundColor = { 36, 27, 59, 255 },
-                                            .cornerRadius = CLAY_CORNER_RADIUS(10),
-                                            .border = { .color = isSel ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(isSel ? 3 : 1) },
-                                            .custom = { .customData = clay.allocCustom(CustomElementType::Mp4PreviewPlayer, "", 0xFFFFFFFF, &item, props.frameCount) }
-                                        }) {}
-
-                                        CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(item.title, 18)), CLAY_TEXT_CONFIG({
-                                            .textColor = {255, 255, 255, 255},
-                                            .fontSize = 15
-                                        }));
-                                    }
+                                    // Tarjeta de juego con carátula real
+                                    renderGameCard(disp, clay, item, isSel, /*isVertical=*/true, 190, 260, props.frameCount);
                                 }
                             }
                         }
@@ -861,10 +945,39 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                     continue;
                 }
 
-                // --- CASO 4: FILA ESTANDAR DE JUEGOS ---
+                // --- CASO 4: JUGADOS RECIENTEMENTE 16:9 (MI ESPACIO) ---
+                if (row.isRecentlyPlayed16_9) {
+                    CLAY_AUTO_ID({
+                        .layout = {
+                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(240) },
+                            .childGap = 14,
+                            .layoutDirection = CLAY_TOP_TO_BOTTOM
+                        }
+                    }) {
+                        CLAY_TEXT(ClayRenderer::toClayString(row.title), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 24 }));
+
+                        CLAY_AUTO_ID({
+                            .layout = {
+                                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(190) },
+                                .childGap = 20,
+                                .layoutDirection = CLAY_LEFT_TO_RIGHT
+                            }
+                        }) {
+                            for (size_t i = 0; i < row.items.size(); ++i) {
+                                const auto& item = row.items[i];
+                                bool isSel = isFocusedRow && (static_cast<int>(i) == selectedCol);
+                                std::string dateSub = item.lastPlayedDate.empty() ? "30 oct" : item.lastPlayedDate;
+                                renderGameCard(disp, clay, item, isSel, /*isVertical=*/false, 290, 164, props.frameCount, dateSub);
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // --- CASO 5: FILA ESTANDAR DE JUEGOS VERTICALES ---
                 CLAY_AUTO_ID({
                     .layout = {
-                        .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(360) },
+                        .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(330) },
                         .childGap = 14,
                         .layoutDirection = CLAY_TOP_TO_BOTTOM
                     }
@@ -873,43 +986,22 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
 
                     CLAY_AUTO_ID({
                         .layout = {
-                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(310) },
-                            .childGap = 24,
+                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(280) },
+                            .childGap = 20,
                             .layoutDirection = CLAY_LEFT_TO_RIGHT
                         }
                     }) {
-                        int sScroll = std::max(0, (selectedCol - 4) * 214);
                         for (size_t i = 0; i < row.items.size(); ++i) {
                             const auto& item = row.items[i];
                             bool isSel = isFocusedRow && (static_cast<int>(i) == selectedCol);
-
-                            CLAY_AUTO_ID({
-                                .layout = {
-                                    .sizing = { CLAY_SIZING_FIXED(190), CLAY_SIZING_FIXED(300) },
-                                    .childGap = 8,
-                                    .layoutDirection = CLAY_TOP_TO_BOTTOM
-                                }
-                            }) {
-                                CLAY_AUTO_ID({
-                                    .layout = { .sizing = { CLAY_SIZING_FIXED(190), CLAY_SIZING_FIXED(260) } },
-                                    .backgroundColor = { 36, 27, 59, 255 },
-                                    .cornerRadius = CLAY_CORNER_RADIUS(10),
-                                    .border = { .color = isSel ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(isSel ? 3 : 1) },
-                                    .custom = { .customData = clay.allocCustom(CustomElementType::Mp4PreviewPlayer, "", 0xFFFFFFFF, &item, props.frameCount) }
-                                }) {}
-
-                                CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(item.title, 18)), CLAY_TEXT_CONFIG({
-                                    .textColor = {255, 255, 255, 255},
-                                    .fontSize = 15
-                                }));
-                            }
+                            renderGameCard(disp, clay, item, isSel, /*isVertical=*/true, 190, 270, props.frameCount);
                         }
                     }
                 }
             }
         }
 
-        // --- FOOTER HUD DE BOTONES (1920 x 44 px) ---
+        // --- 3.3 FOOTER HUD DE BOTONES (1920 x 44 px) ---
         CLAY(CLAY_ID("FooterHUD"), {
             .layout = {
                 .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(44) },
@@ -925,9 +1017,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
             CLAY_TEXT(CLAY_STRING("[O] Volver"), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 15 }));
             CLAY_TEXT(CLAY_STRING("[L1]/[R1] Pestanas"), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 15 }));
             CLAY_TEXT(CLAY_STRING("[\xE2\x96\xA1] Buscar"), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 15 }));
-            CLAY_TEXT(CLAY_STRING("[\xE2\x96\xB3] Opciones"), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 15 }));
+            CLAY_TEXT(CLAY_STRING("[\xE2\x96\xB3] Favorito"), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 15 }));
 
-            // Spacer
             CLAY_AUTO_ID({ .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) } } }) {}
 
             if (!props.statusText.empty()) {
@@ -1008,16 +1099,10 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     .layoutDirection = CLAY_TOP_TO_BOTTOM
                 }
             }) {
-                // Caratula
-                CLAY_AUTO_ID({
-                    .layout = { .sizing = { CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(440) } },
-                    .backgroundColor = { 36, 27, 59, 255 },
-                    .cornerRadius = CLAY_CORNER_RADIUS(14),
-                    .border = { .color = { 55, 42, 84, 255 }, .width = LUNA_BORDER(1) },
-                    .custom = { .customData = clay.allocCustom(CustomElementType::Mp4PreviewPlayer, "", 0xFFFFFFFF, &props.game, props.frameCount) }
-                }) {}
+                // Carátula vertical real
+                renderGameCard(disp, clay, props.game, false, /*isVertical=*/true, 320, 440, props.frameCount);
 
-                // Boton Jugar Ahora
+                // Botón Jugar Ahora
                 bool btnPlayFoc = (props.detailZone == 0 && props.detailBtnIdx == 0);
                 CLAY_AUTO_ID({
                     .layout = {
@@ -1037,7 +1122,7 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     }));
                 }
 
-                // Boton Galeria / Capturas
+                // Botón Galería / Capturas
                 bool btnGalFoc = (props.detailZone == 0 && props.detailBtnIdx == 1);
                 CLAY_AUTO_ID({
                     .layout = {
@@ -1054,7 +1139,7 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     }));
                 }
 
-                // Boton Favoritos
+                // Botón Favoritos
                 bool btnFavFoc = (props.detailZone == 0 && props.detailBtnIdx == 2);
                 CLAY_AUTO_ID({
                     .layout = {
@@ -1082,7 +1167,7 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     .layoutDirection = CLAY_TOP_TO_BOTTOM
                 }
             }) {
-                // Titulo grande
+                // Título grande
                 CLAY_TEXT(ClayRenderer::toClayString(props.game.title), CLAY_TEXT_CONFIG({
                     .textColor = {255, 255, 255, 255},
                     .fontSize = 40
@@ -1098,43 +1183,44 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     }
                 }) {
                     CLAY_AUTO_ID({
-                        .layout = { .sizing = { CLAY_SIZING_FIXED(44), CLAY_SIZING_FIXED(28) } },
+                        .layout = { .sizing = { CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(30) } },
                         .custom = { .customData = clay.allocCustom(CustomElementType::PegiBadge, props.game.pegiRating.empty() ? "PEGI 12" : props.game.pegiRating) }
                     }) {}
 
-                    std::string metaStr = (props.game.genres.empty() ? "Accion, Aventura" : props.game.genres) + "  \xE2\x80\xA2  " +
-                                          (props.game.publisher.empty() ? "Amazon Luna" : props.game.publisher) + "  \xE2\x80\xA2  " +
-                                          (props.game.releaseYear.empty() ? "2024" : props.game.releaseYear) + "  \xE2\x80\xA2  " +
-                                          (props.game.playerCount.empty() ? "1 jugador" : props.game.playerCount);
+                    std::string catText = props.game.category.empty() ? "LUNA+" : props.game.category;
+                    CLAY_AUTO_ID({
+                        .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(30) }, .padding = { 12, 12, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                        .backgroundColor = { 124, 58, 237, 255 },
+                        .cornerRadius = CLAY_CORNER_RADIUS(8)
+                    }) {
+                        CLAY_TEXT(ClayRenderer::toClayString(catText), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 14 }));
+                    }
 
-                    CLAY_TEXT(ClayRenderer::toClayString(metaStr), CLAY_TEXT_CONFIG({
-                        .textColor = {203, 213, 225, 255},
-                        .fontSize = 17
-                    }));
+                    std::string pubText = props.game.publisher.empty() ? "Amazon Games" : props.game.publisher;
+                    CLAY_TEXT(ClayRenderer::toClayString(pubText), CLAY_TEXT_CONFIG({ .textColor = {203, 213, 225, 255}, .fontSize = 16 }));
+
+                    std::string devText = props.game.developer.empty() ? "" : ("• " + props.game.developer);
+                    if (!devText.empty()) {
+                        CLAY_TEXT(ClayRenderer::toClayString(devText), CLAY_TEXT_CONFIG({ .textColor = {148, 163, 184, 255}, .fontSize = 16 }));
+                    }
                 }
 
-                // Sinopsis
+                // Sinopsis completa
+                std::string syn = props.game.synopsis.empty() ? "Disponible para jugar al instante en streaming 1080p 60 FPS en Amazon Luna." : props.game.synopsis;
                 CLAY_AUTO_ID({
-                    .layout = {
-                        .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(110) },
-                        .padding = { 20, 20, 16, 16 }
-                    },
-                    .backgroundColor = { 20, 15, 34, 255 },
-                    .cornerRadius = CLAY_CORNER_RADIUS(12),
-                    .border = { .color = { 45, 34, 72, 255 }, .width = LUNA_BORDER(1) }
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(90) } }
                 }) {
-                    std::string syn = props.game.synopsis.empty() ? "Disponible para jugar al instante en Amazon Luna Cloud en tu PlayStation 5 a 1080p 60 FPS con sonido envolvente y soporte total de mando DualSense." : props.game.synopsis;
-                    CLAY_TEXT(ClayRenderer::toClayString(syn), CLAY_TEXT_CONFIG({
+                    CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(syn, 280)), CLAY_TEXT_CONFIG({
                         .textColor = {226, 232, 240, 255},
-                        .fontSize = 16,
-                        .lineHeight = 24
+                        .fontSize = 18,
+                        .lineHeight = 28
                     }));
                 }
 
-                // Fila de Especificaciones Tecnicas Oficiales
+                // Especificaciones técnicas en tarjetas
                 CLAY_AUTO_ID({
                     .layout = {
-                        .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(70) },
+                        .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(80) },
                         .childGap = 16,
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     }
@@ -1164,7 +1250,7 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     }
                 }
 
-                // Galeria de Capturas
+                // Galería de Capturas 16:9
                 CLAY_TEXT(CLAY_STRING("Capturas de pantalla"), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 20 }));
                 CLAY_AUTO_ID({
                     .layout = {
@@ -1174,10 +1260,18 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     }
                 }) {
                     for (int sc = 0; sc < 4; ++sc) {
+                        std::shared_ptr<const luna::util::DecodedImage> scImg;
+                        if (sc < static_cast<int>(props.game.screenshotUrls.size())) {
+                            const auto& scUrl = props.game.screenshotUrls[sc];
+                            luna::util::ImageLoader::instance().requestImage(scUrl, luna::util::ImagePreset::ScreenshotThumbnail);
+                            scImg = luna::util::ImageLoader::instance().getImage(scUrl, luna::util::ImagePreset::ScreenshotThumbnail);
+                        }
+                        bool scReady = scImg && scImg->ready && !scImg->rgba.empty() && scImg->width > 0 && scImg->height > 0;
                         CLAY_AUTO_ID({
                             .layout = { .sizing = { CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(150) } },
-                            .backgroundColor = { 34, 25, 54, 255 },
+                            .backgroundColor = scReady ? Clay_Color{0, 0, 0, 0} : Clay_Color{ 34, 25, 54, 255 },
                             .cornerRadius = CLAY_CORNER_RADIUS(10),
+                            .image = scReady ? Clay_ImageElementConfig{ .imageData = clay.allocDecodedImage(scImg) } : Clay_ImageElementConfig{},
                             .border = { .color = { 55, 42, 84, 255 }, .width = LUNA_BORDER(1) }
                         }) {}
                     }
@@ -1188,7 +1282,7 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     CLAY_TEXT(CLAY_STRING("Juegos similares"), CLAY_TEXT_CONFIG({ .textColor = {255, 255, 255, 255}, .fontSize = 20 }));
                     CLAY_AUTO_ID({
                         .layout = {
-                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(180) },
+                            .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(210) },
                             .childGap = 16,
                             .layoutDirection = CLAY_LEFT_TO_RIGHT
                         }
@@ -1196,20 +1290,7 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                         for (size_t sim = 0; sim < props.game.similarGames.size() && sim < 6; ++sim) {
                             const auto& sg = props.game.similarGames[sim];
                             bool simFoc = (props.detailZone == 2 && props.similarSelectedIdx == static_cast<int>(sim));
-                            CLAY_AUTO_ID({
-                                .layout = { .sizing = { CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(170) }, .childGap = 6, .layoutDirection = CLAY_TOP_TO_BOTTOM }
-                            }) {
-                                CLAY_AUTO_ID({
-                                    .layout = { .sizing = { CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(140) } },
-                                    .backgroundColor = { 36, 27, 59, 255 },
-                                    .cornerRadius = CLAY_CORNER_RADIUS(8),
-                                    .border = { .color = simFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{45, 34, 72, 255}, .width = LUNA_BORDER(simFoc ? 2 : 1) }
-                                }) {}
-                                CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(sg.title, 16)), CLAY_TEXT_CONFIG({
-                                    .textColor = {203, 213, 225, 255},
-                                    .fontSize = 14
-                                }));
-                            }
+                            renderGameCard(disp, clay, sg, simFoc, /*isVertical=*/true, 140, 200, props.frameCount);
                         }
                     }
                 }
