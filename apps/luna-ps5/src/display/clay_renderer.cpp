@@ -266,20 +266,57 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
         }
         case CustomElementType::SpotlightArt: {
             if (custom.tile) {
+                // Helper to draw an image or video frame with Aspect-Fill (center crop) instead of stretching
+                auto drawAspectFill = [&](const uint8_t* rgba, int srcW, int srcH) {
+                    if (!rgba || srcW <= 0 || srcH <= 0 || w <= 0 || h <= 0) return;
+                    // If source is a vertical poster (3:4), draw dark background and center the poster on the right
+                    if (srcW < srcH) {
+                        display_->fillRect(x, y, w, h, 0xFF0E1320);
+                        int fitH = h;
+                        int fitW = (fitH * srcW) / srcH;
+                        int px = x + (w - fitW) / 2 + 60;
+                        display_->drawPreScaledImage(px, y, rgba, fitW, fitH, srcW, srcH);
+                        return;
+                    }
+                    float scaleX = static_cast<float>(w) / static_cast<float>(srcW);
+                    float scaleY = static_cast<float>(h) / static_cast<float>(srcH);
+                    float scale = std::max(scaleX, scaleY);
+                    int cropW = std::clamp(static_cast<int>(static_cast<float>(w) / scale), 1, srcW);
+                    int cropH = std::clamp(static_cast<int>(static_cast<float>(h) / scale), 1, srcH);
+                    int cropX = (srcW - cropW) / 2;
+                    int cropY = (srcH - cropH) / 2;
+
+                    for (int dy = 0; dy < h; ++dy) {
+                        int sy = cropY + (dy * cropH) / h;
+                        if (sy >= srcH) sy = srcH - 1;
+                        const uint8_t* rowSrc = rgba + (static_cast<size_t>(sy) * static_cast<size_t>(srcW) * 4);
+                        for (int dx = 0; dx < w; ++dx) {
+                            int sx = cropX + (dx * cropW) / w;
+                            if (sx >= srcW) sx = srcW - 1;
+                            const uint8_t* p = rowSrc + static_cast<size_t>(sx) * 4;
+                            uint32_t argb = 0xFF000000U | (static_cast<uint32_t>(p[0]) << 16) |
+                                                          (static_cast<uint32_t>(p[1]) << 8)  |
+                                                           static_cast<uint32_t>(p[2]);
+                            display_->putPixel(x + dx, y + dy, argb);
+                        }
+                    }
+                };
+
                 auto& player = luna::media::Mp4PreviewPlayer::instance();
                 bool drewVideo = false;
                 if (!custom.tile->videoUrl.empty() && player.hasFrame() && player.currentUrl() == custom.tile->videoUrl) {
                     const uint32_t* vPix = player.getFrameRgba();
                     if (vPix) {
-                        display_->drawPreScaledImage(x, y, reinterpret_cast<const uint8_t*>(vPix), w, h, player.getWidth(), player.getHeight());
+                        drawAspectFill(reinterpret_cast<const uint8_t*>(vPix), player.getWidth(), player.getHeight());
                         drewVideo = true;
 
-                        // Discrete Trailer indicator in top right corner
-                        int badgeW = 160, badgeH = 26;
+                        // Discrete Trailer indicator & R3 fullscreen hint in top right corner
+                        int badgeW = 240, badgeH = 28;
                         int bx = x + w - badgeW - 24, by = y + 18;
-                        display_->drawRoundedRect(bx, by, badgeW, badgeH, 6, 0xCC070911);
+                        display_->drawRoundedRect(bx, by, badgeW, badgeH, 6, 0xD8070911);
                         display_->drawRoundedBorder(bx, by, badgeW, badgeH, 6, 1, 0xFF0070D1);
-                        display_->drawTextPx(bx + 12, by + 5, 12, "\xF0\x9F\x8E\xAC TR\xC3\x81ILER EN VIVO", 0xFFFFFFFF);
+                        display_->drawPlayTriangleIcon(bx + 16, by + 14, 5, 0xFF38BDF8);
+                        display_->drawTextPx(bx + 28, by + 6, 12, "TR\xC3\x81ILER  \xE2\x80\xA2  [R3] Pantalla completa", 0xFFFFFFFF);
                     }
                 }
                 if (!drewVideo) {
@@ -289,40 +326,61 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                                           custom.tile->title.find("Luna Premium") != std::string::npos ||
                                           custom.tile->title.find("100 juegos") != std::string::npos);
 
-                    if (isPremiumHero || artUrl.empty()) {
+                    if (isPremiumHero) {
                         const uint8_t* heroRgba = display_->getHeroBannerRgba();
                         if (heroRgba) {
-                            display_->drawPreScaledImage(x, y, heroRgba, w, h, display_->getHeroBannerWidth(), display_->getHeroBannerHeight());
+                            drawAspectFill(heroRgba, display_->getHeroBannerWidth(), display_->getHeroBannerHeight());
                         } else {
                             display_->fillRect(x, y, w, h, 0xFF0E1320);
                         }
-                    } else {
+                    } else if (!artUrl.empty()) {
                         luna::util::ImageLoader::instance().requestImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
                         auto artImg = luna::util::ImageLoader::instance().getImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
                         if (!artImg || !artImg->ready) {
                             artImg = luna::util::ImageLoader::instance().getImage(artUrl, luna::util::ImagePreset::HorizontalCard16_9);
                         }
-                        if (artImg && artImg->ready && !artImg->rgba.empty() && artImg->width > 0 && artImg->height > 0) {
-                            display_->drawPreScaledImage(x, y, artImg->rgba.data(), w, h, artImg->width, artImg->height);
-                        } else {
-                            const uint8_t* heroRgba = display_->getHeroBannerRgba();
-                            if (heroRgba) {
-                                display_->drawPreScaledImage(x, y, heroRgba, w, h, display_->getHeroBannerWidth(), display_->getHeroBannerHeight());
-                            } else {
-                                display_->fillRect(x, y, w, h, 0xFF0E1320);
+                        if (!artImg || !artImg->ready) {
+                            if (!custom.tile->coverUrl.empty()) {
+                                artImg = luna::util::ImageLoader::instance().getImage(custom.tile->coverUrl, luna::util::ImagePreset::VerticalPoster);
                             }
                         }
+                        if (artImg && artImg->ready && !artImg->rgba.empty() && artImg->width > 0 && artImg->height > 0) {
+                            drawAspectFill(artImg->rgba.data(), artImg->width, artImg->height);
+                        } else {
+                            display_->fillRect(x, y, w, h, 0xFF0E1320);
+                        }
+                    } else {
+                        display_->fillRect(x, y, w, h, 0xFF0E1320);
+                    }
+
+                    // Show discrete buffering indicator when trailer is streaming into RAM
+                    if (!custom.tile->videoUrl.empty() && player.isDownloading() && player.currentUrl() == custom.tile->videoUrl) {
+                        int badgeW = 190, badgeH = 26;
+                        int bx = x + w - badgeW - 24, by = y + 18;
+                        display_->drawRoundedRect(bx, by, badgeW, badgeH, 6, 0xCC070911);
+                        display_->drawRoundedBorder(bx, by, badgeW, badgeH, 6, 1, 0xFF38BDF8);
+                        display_->drawTextPx(bx + 12, by + 5, 12, "Cargando tr\xC3\xA1iler HD...", 0xFF38BDF8);
                     }
                 }
 
-                // Smooth horizontal 340px Hermite cubic gradient blend into PS5 Dark Crystal (#0E1320)
-                int fadeW = std::min(340, w);
+                // Clean 150px Hermite cubic gradient blend on the left edge into PS5 Dark Crystal (#0E1320)
+                int fadeW = std::min(150, w);
                 for (int fx = 0; fx < fadeW; ++fx) {
                     float t = static_cast<float>(fx) / static_cast<float>(fadeW);
                     float alphaF = 1.0f - (t * t * (3.0f - 2.0f * t));
                     uint8_t alpha = static_cast<uint8_t>(std::clamp(alphaF * 255.0f, 0.0f, 255.0f));
                     if (alpha > 0) {
                         display_->fillRect(x + fx, y, 1, h, (static_cast<uint32_t>(alpha) << 24) | 0x000E1320);
+                    }
+                }
+
+                // Subtle bottom vignette (48px) so right-side framing looks cinema-grade
+                int botH = std::min(48, h);
+                for (int fy = 0; fy < botH; ++fy) {
+                    float t = static_cast<float>(fy) / static_cast<float>(botH);
+                    uint8_t alpha = static_cast<uint8_t>(t * t * 140.0f);
+                    if (alpha > 0) {
+                        display_->fillRect(x, y + h - botH + fy, w, 1, (static_cast<uint32_t>(alpha) << 24) | 0x00070911);
                     }
                 }
 

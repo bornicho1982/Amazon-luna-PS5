@@ -1929,11 +1929,55 @@ void DisplayManager::drawMediaViewerScreen(const GameTile& game,
     if (!isReady_ || !mappedMemory_) return;
     (void)frameCount;
 
-    clear(0xFF08060D);
+    clear(0xFF070911);
 
-    size_t numScreens = game.screenshotUrls.size();
+    auto& player = luna::media::Mp4PreviewPlayer::instance();
+    const bool hasTrailer = !game.videoUrl.empty();
+    const size_t numScreens = game.screenshotUrls.size();
+
+    // Mode -1 (or when no screenshots exist and trailer exists): Fullscreen 1080p Trailer Player
+    if (hasTrailer && (currentMediaIdx < 0 || numScreens == 0)) {
+        const uint32_t* vPix = player.hasFrame() ? player.getFrameRgba() : nullptr;
+        if (vPix && player.currentUrl() == game.videoUrl) {
+            drawPreScaledImage(0, 0, reinterpret_cast<const uint8_t*>(vPix), 1920, 1080, player.getWidth(), player.getHeight());
+        } else {
+            std::string bgUrl = game.backdropUrl.empty() ? game.coverUrl : game.backdropUrl;
+            if (!bgUrl.empty()) {
+                auto bgImg = luna::util::ImageLoader::instance().getImage(bgUrl, luna::util::ImagePreset::PanoramicDetail);
+                if (!bgImg || !bgImg->ready) {
+                    bgImg = luna::util::ImageLoader::instance().getImage(bgUrl, luna::util::ImagePreset::HorizontalCard16_9);
+                }
+                if (bgImg && bgImg->ready && !bgImg->rgba.empty()) {
+                    drawPreScaledImage(0, 0, bgImg->rgba.data(), 1920, 1080, bgImg->width, bgImg->height);
+                }
+            }
+            blendRectUniform(0, 0, 1920, 1080, 0xFF070911, 160);
+            drawTextPx(760, 520, 26, "Cargando tr\xC3\xA1iler en streaming HD...", 0xFF38BDF8);
+        }
+
+        // Top & bottom cinema HUD bars
+        blendRectUniform(0, 0, 1920, 84, 0xFF070911, 200);
+        blendRectUniform(0, 964, 1920, 116, 0xFF070911, 215);
+
+        drawTextPx(64, 26, 28, game.title, 0xFFFFFFFF);
+        std::string stateBadge = player.isPaused() ? "PAUSADO" : "TR\xC3\x81ILER OFICIAL HD (1080p)";
+        drawRoundedRect(1560, 22, 296, 38, 8, player.isPaused() ? 0xFFD97706 : 0xFF0070D1);
+        drawTextPx(1582, 30, 16, stateBadge, 0xFFFFFFFF);
+
+        // Progress bar
+        int barX = 64, barY = 984, barW = 1792, barH = 8;
+        drawRoundedRect(barX, barY, barW, barH, 4, 0xFF1E293B);
+        int fillW = std::clamp(static_cast<int>(player.getProgress() * static_cast<float>(barW)), 8, barW);
+        drawRoundedRect(barX, barY, fillW, barH, 4, 0xFF38BDF8);
+
+        std::string ctrlHint = "[(X)] Pausa / Reproducir     [L1 / R1] -5s / +5s     [\xE2\x97\x80 / \xE2\x96\xB6] Ver capturas     [(O)] Volver";
+        drawTextPx(64, 1018, 18, ctrlHint, 0xFFE2E8F0);
+        present();
+        return;
+    }
+
     if (numScreens == 0) {
-        drawText(68, 500, 3, "No hay capturas disponibles para este juego.", 0xFFFFFFFF);
+        drawText(68, 500, 3, "No hay capturas ni trailer disponibles para este juego.", 0xFFFFFFFF);
         present();
         return;
     }
@@ -1943,7 +1987,6 @@ void DisplayManager::drawMediaViewerScreen(const GameTile& game,
 
     std::string currentUrl = game.screenshotUrls[currentMediaIdx];
 
-    // Carga robusta: Si no esta en 1080p aun, muestra la miniatura escalada al instante sin bloquear la pantalla
     auto img = luna::util::ImageLoader::instance().getImage(currentUrl, luna::util::ImagePreset::PanoramicDetail);
     if (!img || !img->ready) {
         img = luna::util::ImageLoader::instance().getImage(currentUrl, luna::util::ImagePreset::HorizontalCard16_9);
@@ -1957,7 +2000,6 @@ void DisplayManager::drawMediaViewerScreen(const GameTile& game,
         fillRect(0, 0, 1920, 1080, 0xFF140F22);
     }
 
-    // Pre-cargar imagenes adyacentes para navegacion instantanea
     if (currentMediaIdx + 1 < static_cast<int>(numScreens)) {
         luna::util::ImageLoader::instance().requestImage(game.screenshotUrls[currentMediaIdx + 1], luna::util::ImagePreset::PanoramicDetail);
     }
@@ -1965,18 +2007,15 @@ void DisplayManager::drawMediaViewerScreen(const GameTile& game,
         luna::util::ImageLoader::instance().requestImage(game.screenshotUrls[currentMediaIdx - 1], luna::util::ImagePreset::PanoramicDetail);
     }
 
-    // Degradados superior e inferior para legibilidad
-    fillRect(0, 0, 1920, 90, 0xCC0E0B16);
-    fillRect(0, 990, 1920, 90, 0xCC0E0B16);
+    blendRectUniform(0, 0, 1920, 84, 0xFF070911, 200);
+    blendRectUniform(0, 990, 1920, 90, 0xFF070911, 210);
 
-    drawText(68, 30, 4, game.title, 0xFFFFFFFF);
-    std::string countStr = (currentMediaIdx == 0 && !game.videoUrl.empty())
-        ? "Trailer oficial"
-        : ("Captura " + std::to_string(currentMediaIdx + 1) + " de " + std::to_string(numScreens));
-    drawText(1600, 32, 3, countStr, 0xFFFCD34D);
+    drawTextPx(68, 26, 28, game.title, 0xFFFFFFFF);
+    std::string countStr = "Captura " + std::to_string(currentMediaIdx + 1) + " de " + std::to_string(numScreens);
+    drawTextPx(1620, 30, 20, countStr, 0xFFFCD34D);
 
-    std::string ctrlHint = "[◀ / L1] Anterior      [▶ / R1] Siguiente      [(O)] Volver a la ficha del juego";
-    drawText(68, 1025, 2, ctrlHint, 0xFFE2E8F0);
+    std::string ctrlHint = "[\xE2\x97\x80 / L1] Anterior      [\xE2\x96\xB6 / R1] Siguiente      [R3] Ver Tr\xC3\xA1iler HD      [(O)] Volver";
+    drawTextPx(68, 1025, 18, ctrlHint, 0xFFE2E8F0);
 
     present();
 }

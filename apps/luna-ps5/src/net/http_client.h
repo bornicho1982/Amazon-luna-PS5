@@ -35,7 +35,8 @@ public:
                                       size_t maxCap,
                                       size_t& outSize,
                                       std::atomic<bool>* cancelFlag = nullptr,
-                                      const std::vector<std::pair<std::string, std::string>>& headers = {});
+                                      const std::vector<std::pair<std::string, std::string>>& headers = {},
+                                      std::atomic<size_t>* liveOutSize = nullptr);
 };
 
 } // namespace luna::net

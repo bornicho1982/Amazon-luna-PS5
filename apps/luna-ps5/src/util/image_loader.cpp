@@ -69,8 +69,8 @@ std::string optimizeAmazonImageUrl(const std::string& url, ImagePreset preset) {
         case ImagePreset::ScreenshotThumbnail: px = 540; break;
         case ImagePreset::HorizontalCard16_9: px = 600; break;
         case ImagePreset::SquareCategory: px = 360; break;
-        case ImagePreset::PanoramicHero: px = 1920; break;
-        case ImagePreset::PanoramicDetail: px = 1920; break;
+        case ImagePreset::PanoramicHero: px = 960; break;
+        case ImagePreset::PanoramicDetail: px = 960; break;
         default: return url;
     }
     return url.substr(0, dot) + "._UX" + std::to_string(px) + "_" + url.substr(dot);
@@ -305,11 +305,7 @@ bool resizeAndProcessImage(const uint8_t* srcRgba, int srcW, int srcH,
             applyCornerMask(dstRgba.data(), dstW, dstH, 14);
             break;
         case ImagePreset::PanoramicHero:
-            applyDarkGradient(dstRgba.data(), dstW, dstH, 850, 160);
-            break;
         case ImagePreset::PanoramicDetail:
-            applyDarkGradient(dstRgba.data(), dstW, dstH, 850, 220);
-            break;
         case ImagePreset::ProductLogo:
         case ImagePreset::Raw:
         default:
@@ -571,9 +567,9 @@ void ImageLoader::workerLoop() {
             case ImagePreset::ScreenshotThumbnail:
                 targetW = 270; targetH = 152; break;
             case ImagePreset::PanoramicHero:
-                targetW = 1920; targetH = 540; break;
+                targetW = 960; targetH = 540; break;
             case ImagePreset::PanoramicDetail:
-                targetW = 1920; targetH = 1080; break;
+                targetW = 960; targetH = 540; break;
             case ImagePreset::HorizontalCard16_9:
                 targetW = 290; targetH = 164; break;
             case ImagePreset::SquareCategory:

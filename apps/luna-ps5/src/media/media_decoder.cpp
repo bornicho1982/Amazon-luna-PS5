@@ -322,11 +322,6 @@ bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, De
         info.size = sizeof(info);
 
         int rc = sceVideodec2Decode(decoder_, &in, &frame, &info);
-        if (rc == 0 && !info.valid) {
-            info = Vdec2Output{};
-            info.size = sizeof(info);
-            rc = sceVideodec2Flush(decoder_, &frame, &info);
-        }
 
         lastDecodeRc_.store(static_cast<uint32_t>(rc));
         lastDecodeError_.store(info.error);

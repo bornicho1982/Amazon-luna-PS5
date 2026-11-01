@@ -455,6 +455,7 @@ int main(int argc, char* argv[]) {
 
     bool faqModalOpen = false;
     int detailFaqIdx = 0;
+    bool mediaViewerFromCatalog = false;
     bool bluetoothModalOpen = false;
     bool cancelModalOpen = false;
     int cancelModalBtnIdx = 0;
@@ -1187,7 +1188,7 @@ int main(int argc, char* argv[]) {
                                         if (!curCols.empty() && !curCols[0].items.empty() && rowSelectedCol[0] < static_cast<int>(curCols[0].items.size())) {
                                             if (curCols[0].items[rowSelectedCol[0]].title == "Luna Premium") isLunaPrem = true;
                                         }
-                                        if (heroBtnIdx < 2 && !isLunaPrem) {
+                                        if (heroBtnIdx < 3 && !isLunaPrem) {
                                             heroBtnIdx++;
                                         } else {
                                             rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
@@ -1266,8 +1267,20 @@ int main(int argc, char* argv[]) {
                                         startCloudGameSession(*focusedGame);
                                     } else if (heroBtnIdx == 1) {
                                         openGameDetail(*focusedGame);
+                                    } else if (heroBtnIdx == 2) {
+                                        currentDetailGame = *focusedGame;
+                                        if (!currentDetailGame.videoUrl.empty()) {
+                                            luna::media::Mp4PreviewPlayer::instance().setVideoUrl(currentDetailGame.videoUrl);
+                                            luna::media::Mp4PreviewPlayer::instance().setPaused(false);
+                                        }
+                                        mediaViewerIdx = -1;
+                                        mediaViewerFromCatalog = true;
+                                        appState = AppState::MediaViewer;
                                     } else {
-                                        g_lastStatusText = "Añadido a Favoritos: " + focusedGame->title;
+                                        toggleFavorite(focusedGame->id);
+                                        g_lastStatusText = isFavorite(focusedGame->id)
+                                            ? ("Añadido a Favoritos: " + focusedGame->title)
+                                            : ("Quitado de Favoritos: " + focusedGame->title);
                                     }
                                 }
                             } else {
@@ -1289,9 +1302,27 @@ int main(int argc, char* argv[]) {
                         break;
                     }
 
+                    // Boton R3 (Stick Derecho): Ver Tráiler en Pantalla Completa 1080p
+                    if ((pressedNow & luna::input::PAD_R3) && focusedGame && focusedGame->title != "Luna Premium") {
+                        currentDetailGame = *focusedGame;
+                        if (!currentDetailGame.videoUrl.empty()) {
+                            luna::media::Mp4PreviewPlayer::instance().setVideoUrl(currentDetailGame.videoUrl);
+                            luna::media::Mp4PreviewPlayer::instance().setPaused(false);
+                        } else {
+                            sessionClient.requestAsyncGameDetails(&currentDetailGame, cbl.getAccessToken(), cbl.getDeviceSerial());
+                        }
+                        mediaViewerIdx = -1;
+                        mediaViewerFromCatalog = true;
+                        appState = AppState::MediaViewer;
+                        break;
+                    }
+
                     // Boton TRIANGULO: Añadir / Quitar de Favoritos
                     if ((pressedNow & luna::input::PAD_TRIANGLE) && focusedGame && focusedGame->title != "Luna Premium") {
-                        g_lastStatusText = "Añadido a Favoritos: " + focusedGame->title;
+                        toggleFavorite(focusedGame->id);
+                        g_lastStatusText = isFavorite(focusedGame->id)
+                            ? ("Añadido a Favoritos: " + focusedGame->title)
+                            : ("Quitado de Favoritos: " + focusedGame->title);
                         break;
                     }
 
@@ -1341,13 +1372,16 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Si el juego enfocado aún no tiene tráiler o metadatos completos, resolver dinámicamente en segundo plano
-                if (activeHeroTile != nullptr && (!activeHeroTile->detailsLoaded || activeHeroTile->videoUrl.empty())) {
+                const auto hoverIdleMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTileChangeTime).count();
+                if (activeHeroTile != nullptr && hoverIdleMs >= 180 && (!activeHeroTile->detailsLoaded || activeHeroTile->videoUrl.empty())) {
                     sessionClient.requestAsyncGameDetails(activeHeroTile, cbl.getAccessToken(), cbl.getDeviceSerial());
                 }
 
                 // Reproducir el tráiler oficial en la mitad derecha del Banner Superior (100% streaming HTTP RAM)
                 if (activeHeroTile != nullptr && !activeHeroTile->videoUrl.empty() && !profileMenuOpen && !searchOpen) {
-                    luna::media::Mp4PreviewPlayer::instance().setVideoUrl(activeHeroTile->videoUrl);
+                    if (hoverIdleMs >= 200 || luna::media::Mp4PreviewPlayer::instance().currentUrl() == activeHeroTile->videoUrl) {
+                        luna::media::Mp4PreviewPlayer::instance().setVideoUrl(activeHeroTile->videoUrl);
+                    }
                     luna::media::Mp4PreviewPlayer::instance().update(&videoDecoder);
                 } else {
                     luna::media::Mp4PreviewPlayer::instance().stop();
@@ -1479,19 +1513,25 @@ int main(int argc, char* argv[]) {
                                 g_lastStatusText = "Este juego requiere suscripcion a Luna Premium (" + price + ").";
                             }
                         } else if (detailBtnIdx == 1) {
+                            if (!currentDetailGame.videoUrl.empty()) {
+                                luna::media::Mp4PreviewPlayer::instance().setVideoUrl(currentDetailGame.videoUrl);
+                                luna::media::Mp4PreviewPlayer::instance().setPaused(false);
+                                mediaViewerIdx = -1;
+                            } else {
+                                mediaViewerIdx = 0;
+                            }
+                            mediaViewerFromCatalog = false;
+                            appState = AppState::MediaViewer;
+                        } else if (detailBtnIdx == 2) {
                             toggleFavorite(currentDetailGame.id);
                             saveFavorites();
                             rebuildTabCollections();
                             g_lastStatusText = isFavorite(currentDetailGame.id) ? "Juego anadido a Favoritos." : "Juego quitado de Favoritos.";
-                        } else if (detailBtnIdx == 2) {
-                            std::string pin, partyId;
-                            bool ok = sessionClient.createParty(pin, partyId, cbl.getAccessToken(), cbl.getDeviceSerial());
-                            g_lastStatusText = ok ? ("Partida Remote Play creada para " + currentDetailGame.title + ". PIN: " + pin)
-                                                  : sessionClient.getStatusMessage();
                         }
                         break;
                     } else if (detailZone == 1 && numScreens > 0 && detailScreenshotIdx < static_cast<int>(numScreens)) {
                         mediaViewerIdx = detailScreenshotIdx;
+                        mediaViewerFromCatalog = false;
                         appState = AppState::MediaViewer;
                         break;
                     } else if (detailZone == 3) {
@@ -1501,6 +1541,20 @@ int main(int argc, char* argv[]) {
                         openGameDetail(currentDetailGame.similarGames[detailSimilarIdx]);
                         break;
                     }
+                }
+
+                // Cuadrado o R3 en Ficha del Juego -> Abrir Tráiler / Capturas en Pantalla Completa
+                if ((pressedNow & luna::input::PAD_SQUARE) || (pressedNow & luna::input::PAD_R3)) {
+                    if (!currentDetailGame.videoUrl.empty()) {
+                        luna::media::Mp4PreviewPlayer::instance().setVideoUrl(currentDetailGame.videoUrl);
+                        luna::media::Mp4PreviewPlayer::instance().setPaused(false);
+                        mediaViewerIdx = -1;
+                    } else {
+                        mediaViewerIdx = 0;
+                    }
+                    mediaViewerFromCatalog = false;
+                    appState = AppState::MediaViewer;
+                    break;
                 }
 
                 int zoneSel = 0;
@@ -1526,15 +1580,40 @@ int main(int argc, char* argv[]) {
 
             case AppState::MediaViewer: {
                 size_t numScreens = currentDetailGame.screenshotUrls.size();
+                const bool hasTrailer = !currentDetailGame.videoUrl.empty();
+
                 if (pressedNow & luna::input::PAD_CIRCLE) {
-                    appState = AppState::GameDetail;
+                    luna::media::Mp4PreviewPlayer::instance().setPaused(false);
+                    appState = mediaViewerFromCatalog ? AppState::Catalog : AppState::GameDetail;
                     break;
                 }
-                if (numScreens > 0) {
-                    if ((pressedNow & luna::input::PAD_LEFT) || (pressedNow & luna::input::PAD_L1)) {
-                        mediaViewerIdx = (mediaViewerIdx + static_cast<int>(numScreens) - 1) % static_cast<int>(numScreens);
-                    } else if ((pressedNow & luna::input::PAD_RIGHT) || (pressedNow & luna::input::PAD_R1)) {
-                        mediaViewerIdx = (mediaViewerIdx + 1) % static_cast<int>(numScreens);
+
+                if (hasTrailer && (mediaViewerIdx < 0 || numScreens == 0)) {
+                    luna::media::Mp4PreviewPlayer::instance().setVideoUrl(currentDetailGame.videoUrl);
+                    luna::media::Mp4PreviewPlayer::instance().update(&videoDecoder);
+
+                    if (pressedNow & luna::input::PAD_CROSS) {
+                        luna::media::Mp4PreviewPlayer::instance().togglePause();
+                    } else if (pressedNow & luna::input::PAD_L1) {
+                        luna::media::Mp4PreviewPlayer::instance().seekRelative(-150); // -5s
+                    } else if (pressedNow & luna::input::PAD_R1) {
+                        luna::media::Mp4PreviewPlayer::instance().seekRelative(150);  // +5s
+                    } else if (((pressedNow & luna::input::PAD_RIGHT) || (pressedNow & luna::input::PAD_LEFT)) && numScreens > 0) {
+                        mediaViewerIdx = 0;
+                    }
+                } else {
+                    if (pressedNow & luna::input::PAD_R3 && hasTrailer) {
+                        mediaViewerIdx = -1;
+                    } else if (numScreens > 0) {
+                        if ((pressedNow & luna::input::PAD_LEFT) || (pressedNow & luna::input::PAD_L1)) {
+                            if (mediaViewerIdx == 0 && hasTrailer) {
+                                mediaViewerIdx = -1;
+                            } else {
+                                mediaViewerIdx = (mediaViewerIdx + static_cast<int>(numScreens) - 1) % static_cast<int>(numScreens);
+                            }
+                        } else if ((pressedNow & luna::input::PAD_RIGHT) || (pressedNow & luna::input::PAD_R1)) {
+                            mediaViewerIdx = (mediaViewerIdx + 1) % static_cast<int>(numScreens);
+                        }
                     }
                 }
                 display.drawMediaViewerScreen(currentDetailGame, mediaViewerIdx, frameCount);

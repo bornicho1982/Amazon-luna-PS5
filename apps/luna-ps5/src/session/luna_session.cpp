@@ -290,43 +290,34 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
 
 
     std::string cleanGid = pdata["gameId"].asString();
-
-    if (cleanGid.empty()) {
-
-        cleanGid = extractProductIdFromString(swId);
-
+    std::string actionAsin;
+    const auto& acts = sw["actions"];
+    if (acts.isArray()) {
+        for (size_t a = 0; a < acts.size(); ++a) {
+            std::string targetStr = acts[a]["target"].asString();
+            size_t bPos = targetStr.find("/B0");
+            if (bPos != std::string::npos && bPos + 11 <= targetStr.size()) {
+                actionAsin = targetStr.substr(bPos + 1, 10);
+            }
+            if (cleanGid.empty()) {
+                cleanGid = extractProductIdFromString(targetStr);
+            }
+            std::string actPayload = acts[a]["payload"].asString();
+            if (!actPayload.empty()) {
+                JsonValue ap = JsonValue::parse(actPayload);
+                if (cleanGid.empty()) {
+                    cleanGid = ap["productId"].asString();
+                    if (cleanGid.empty()) cleanGid = extractProductIdFromString(actPayload);
+                }
+            }
+        }
     }
 
     if (cleanGid.empty()) {
-
-        const auto& acts = sw["actions"];
-
-        if (acts.isArray()) {
-
-            for (size_t a = 0; a < acts.size(); ++a) {
-
-                cleanGid = extractProductIdFromString(acts[a]["target"].asString());
-
-                if (!cleanGid.empty()) break;
-
-                std::string actPayload = acts[a]["payload"].asString();
-
-                if (!actPayload.empty()) {
-
-                    JsonValue ap = JsonValue::parse(actPayload);
-
-                    cleanGid = ap["productId"].asString();
-
-                    if (cleanGid.empty()) cleanGid = extractProductIdFromString(actPayload);
-
-                    if (!cleanGid.empty()) break;
-
-                }
-
-            }
-
-        }
-
+        cleanGid = extractProductIdFromString(swId);
+    }
+    if (cleanGid.empty() && !actionAsin.empty()) {
+        cleanGid = actionAsin;
     }
 
     if (cleanGid.empty()) {
@@ -619,6 +610,12 @@ bool parseGameTileFromWidget(const luna::util::JsonValue& sw,
     outTile.heroColor = colColor;
 
     LunaCatalogMetadataDB::enrich(outTile);
+    if ((outTile.videoUrl.empty() || outTile.backdropUrl.empty()) && !actionAsin.empty() && actionAsin != outTile.id) {
+        std::string savedId = outTile.id;
+        outTile.id = actionAsin;
+        LunaCatalogMetadataDB::enrich(outTile);
+        outTile.id = savedId;
+    }
     if (outTile.backdropUrl.empty()) {
         outTile.backdropUrl = outTile.coverUrl;
     }
@@ -965,11 +962,11 @@ std::vector<luna::display::LunaCollection> LunaSessionClient::fetchPageCollectio
 
     if (pageType == "landing_home" && pageId == "default") {
 
-        payload = "{\"featureScheme\":\"\",\"serviceToken\":\"eyJlbmNyeXB0UGFnZUlkIjpmYWxzZSwicGFnZUlkIjoiZGVmYXVsdCIsInBhZ2VUeXBlIjoibGFuZGluZ19ob21lIn0=\"}";
+        payload = "{\"featureScheme\":\"WEB_V1\",\"serviceToken\":\"eyJlbmNyeXB0UGFnZUlkIjpmYWxzZSwicGFnZUlkIjoiZGVmYXVsdCIsInBhZ2VUeXBlIjoibGFuZGluZ19ob21lIn0=\"}";
 
     } else {
 
-        payload = "{\"featureScheme\":\"\",\"pageContext\":{\"encryptPageId\":false,\"pageId\":\"" +
+        payload = "{\"featureScheme\":\"WEB_V1\",\"pageContext\":{\"encryptPageId\":false,\"pageId\":\"" +
 
                   pageId + "\",\"pageType\":\"" + pageType + "\"}}";
 
@@ -1792,7 +1789,7 @@ bool LunaSessionClient::resolveGameDetails(const std::string& gameId,
 
     std::string pageUrl = m_proxyHost + "/getPage";
 
-    std::string detailPayload = "{\"featureScheme\":\"\",\"pageContext\":{\"encryptPageId\":false,\"pageId\":\"" +
+    std::string detailPayload = "{\"featureScheme\":\"WEB_V1\",\"pageContext\":{\"encryptPageId\":false,\"pageId\":\"" +
 
                                 gameId + "\",\"pageType\":\"game_detail\",\"productStage\":\"Release\"}}";
 

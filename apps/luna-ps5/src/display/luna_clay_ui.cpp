@@ -730,15 +730,16 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                             }));
                         }
 
-                        // Fila 5: Los 3 Botones de Consola PS5 con Iconos Gráficos DualSense (✕, □, △)
+                        // Fila 5: Los 4 Botones de Consola PS5 con Iconos Gráficos DualSense (✕, □, ▶, △)
                         bool btn0Foc = isHeroActive && (props.heroBtnIdx == 0);
                         bool btn1Foc = isHeroActive && (props.heroBtnIdx == 1);
                         bool btn2Foc = isHeroActive && (props.heroBtnIdx == 2);
+                        bool btn3Foc = isHeroActive && (props.heroBtnIdx == 3);
 
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(52) },
-                                .childGap = 16,
+                                .childGap = 12,
                                 .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
@@ -746,10 +747,10 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                             // Botón 1: (Icono Gráfico ✕) Jugar ahora
                             CLAY_AUTO_ID({
                                 .layout = {
-                                    .sizing = { CLAY_SIZING_FIXED(210), CLAY_SIZING_FIXED(50) },
-                                    .padding = { 16, 20, 0, 0 },
+                                    .sizing = { CLAY_SIZING_FIXED(196), CLAY_SIZING_FIXED(50) },
+                                    .padding = { 14, 18, 0, 0 },
                                     .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
-                                    .childGap = 12,
+                                    .childGap = 10,
                                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                                 },
                                 .backgroundColor = btn0Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -757,22 +758,22 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                 .border = { .color = btn0Foc ? Clay_Color{0, 112, 209, 255} : Clay_Color{44, 54, 80, 255}, .width = LUNA_BORDER(btn0Foc ? 2 : 1) }
                             }) {
                                 CLAY_AUTO_ID({
-                                    .layout = { .sizing = { CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(28) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                                    .layout = { .sizing = { CLAY_SIZING_FIXED(26), CLAY_SIZING_FIXED(26) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
                                     .custom = { .customData = clay.allocControllerButton(DualSenseBtn::Cross, btn0Foc) }
                                 }) {}
                                 CLAY_TEXT(CLAY_STRING("Jugar ahora"), CLAY_TEXT_CONFIG({
                                     .textColor = btn0Foc ? Clay_Color{7, 9, 17, 255} : Clay_Color{255, 255, 255, 255},
-                                    .fontSize = 17
+                                    .fontSize = 16
                                 }));
                             }
 
                             // Botón 2: (Icono Gráfico □) Ficha del juego
                             CLAY_AUTO_ID({
                                 .layout = {
-                                    .sizing = { CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(50) },
-                                    .padding = { 16, 20, 0, 0 },
+                                    .sizing = { CLAY_SIZING_FIXED(196), CLAY_SIZING_FIXED(50) },
+                                    .padding = { 14, 18, 0, 0 },
                                     .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
-                                    .childGap = 12,
+                                    .childGap = 10,
                                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                                 },
                                 .backgroundColor = btn1Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -780,22 +781,22 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                 .border = { .color = btn1Foc ? Clay_Color{0, 112, 209, 255} : Clay_Color{44, 54, 80, 255}, .width = LUNA_BORDER(btn1Foc ? 2 : 1) }
                             }) {
                                 CLAY_AUTO_ID({
-                                    .layout = { .sizing = { CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(28) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                                    .layout = { .sizing = { CLAY_SIZING_FIXED(26), CLAY_SIZING_FIXED(26) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
                                     .custom = { .customData = clay.allocControllerButton(DualSenseBtn::Square, btn1Foc) }
                                 }) {}
                                 CLAY_TEXT(CLAY_STRING("Ficha del juego"), CLAY_TEXT_CONFIG({
                                     .textColor = btn1Foc ? Clay_Color{7, 9, 17, 255} : Clay_Color{240, 244, 255, 255},
-                                    .fontSize = 16
+                                    .fontSize = 15
                                 }));
                             }
 
-                            // Botón 3: (Icono Gráfico △) Favorito
+                            // Botón 3: (Icono ▶) Ver tráiler (pantalla completa)
                             CLAY_AUTO_ID({
                                 .layout = {
-                                    .sizing = { CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(50) },
-                                    .padding = { 16, 20, 0, 0 },
+                                    .sizing = { CLAY_SIZING_FIXED(176), CLAY_SIZING_FIXED(50) },
+                                    .padding = { 14, 18, 0, 0 },
                                     .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
-                                    .childGap = 12,
+                                    .childGap = 10,
                                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                                 },
                                 .backgroundColor = btn2Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -803,12 +804,35 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                 .border = { .color = btn2Foc ? Clay_Color{0, 112, 209, 255} : Clay_Color{44, 54, 80, 255}, .width = LUNA_BORDER(btn2Foc ? 2 : 1) }
                             }) {
                                 CLAY_AUTO_ID({
-                                    .layout = { .sizing = { CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(28) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
-                                    .custom = { .customData = clay.allocControllerButton(DualSenseBtn::Triangle, btn2Foc) }
+                                    .layout = { .sizing = { CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                                    .custom = { .customData = clay.allocInterfaceIcon(DualSenseBtn::Play, btn2Foc ? 0xFF0070D1 : 0xFF38BDF8) }
+                                }) {}
+                                CLAY_TEXT(CLAY_STRING("Ver trailer"), CLAY_TEXT_CONFIG({
+                                    .textColor = btn2Foc ? Clay_Color{7, 9, 17, 255} : Clay_Color{240, 244, 255, 255},
+                                    .fontSize = 15
+                                }));
+                            }
+
+                            // Botón 4: (Icono Gráfico △) Favorito
+                            CLAY_AUTO_ID({
+                                .layout = {
+                                    .sizing = { CLAY_SIZING_FIXED(164), CLAY_SIZING_FIXED(50) },
+                                    .padding = { 14, 18, 0, 0 },
+                                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                                    .childGap = 10,
+                                    .layoutDirection = CLAY_LEFT_TO_RIGHT
+                                },
+                                .backgroundColor = btn3Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
+                                .cornerRadius = CLAY_CORNER_RADIUS(25),
+                                .border = { .color = btn3Foc ? Clay_Color{0, 112, 209, 255} : Clay_Color{44, 54, 80, 255}, .width = LUNA_BORDER(btn3Foc ? 2 : 1) }
+                            }) {
+                                CLAY_AUTO_ID({
+                                    .layout = { .sizing = { CLAY_SIZING_FIXED(26), CLAY_SIZING_FIXED(26) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                                    .custom = { .customData = clay.allocControllerButton(DualSenseBtn::Triangle, btn3Foc) }
                                 }) {}
                                 CLAY_TEXT(CLAY_STRING("Favorito"), CLAY_TEXT_CONFIG({
-                                    .textColor = btn2Foc ? Clay_Color{7, 9, 17, 255} : Clay_Color{240, 244, 255, 255},
-                                    .fontSize = 16
+                                    .textColor = btn3Foc ? Clay_Color{7, 9, 17, 255} : Clay_Color{240, 244, 255, 255},
+                                    .fontSize = 15
                                 }));
                             }
                         }

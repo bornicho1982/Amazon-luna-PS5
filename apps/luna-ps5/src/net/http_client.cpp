@@ -65,6 +65,7 @@ public:
 };
 
 static AtomicRecursiveLock g_httpLock;
+static AtomicRecursiveLock g_mediaHttpLock;
 
 #if !defined(_WIN32)
 int g_netPoolId = -1;
@@ -72,6 +73,55 @@ int g_sslCtxId = -1;
 int g_httpCtxId = -1;
 int g_tmplId = -1;
 bool g_initialized = false;
+
+int g_mediaNetPoolId = -1;
+int g_mediaSslCtxId = -1;
+int g_mediaHttpCtxId = -1;
+int g_mediaTmplId = -1;
+bool g_mediaInitialized = false;
+
+static bool initMediaHttpContext() {
+    if (g_mediaInitialized) return true;
+
+    sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
+    sceSysmoduleLoadModule(SCE_SYSMODULE_SSL);
+    sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP);
+
+    sceNetInit();
+
+    g_mediaNetPoolId = sceNetPoolCreate("luna_media", 4 * 1024 * 1024, 0);
+    if (g_mediaNetPoolId < 0) {
+        char dynamicName[32];
+        std::snprintf(dynamicName, sizeof(dynamicName), "lmed_%u", static_cast<unsigned>(time(nullptr) & 0xFFFF));
+        g_mediaNetPoolId = sceNetPoolCreate(dynamicName, 2 * 1024 * 1024, 0);
+    }
+
+    g_mediaSslCtxId = sceSslInit(2 * 1024 * 1024);
+    if (g_mediaSslCtxId < 0) {
+        g_mediaSslCtxId = sceSslInit(1024 * 1024);
+    }
+
+    g_mediaHttpCtxId = sceHttpInit(g_mediaNetPoolId, g_mediaSslCtxId, 4 * 1024 * 1024);
+    if (g_mediaHttpCtxId < 0) {
+        g_mediaHttpCtxId = sceHttpInit(g_mediaNetPoolId, g_mediaSslCtxId, 2 * 1024 * 1024);
+    }
+
+    if (g_mediaHttpCtxId >= 0) {
+        g_mediaTmplId = sceHttpCreateTemplate(g_mediaHttpCtxId, "Mozilla/5.0 (PlayStation 5 1.0) AppleWebKit/605.1.15 (KHTML, like Gecko)", SCE_HTTP_VERSION_1_1, 1);
+        if (g_mediaTmplId >= 0) {
+            sceHttpsDisableOption(g_mediaTmplId, 0x01);
+            sceHttpsDisableOption(g_mediaTmplId, 0x02);
+            sceHttpSetAutoRedirect(g_mediaTmplId, 1);
+            sceHttpSetResolveTimeOut(g_mediaTmplId, 8000000);
+            sceHttpSetResolveRetry(g_mediaTmplId, 2);
+            sceHttpSetConnectTimeOut(g_mediaTmplId, 12000000);
+            sceHttpSetSendTimeOut(g_mediaTmplId, 10000000);
+            sceHttpSetRecvTimeOut(g_mediaTmplId, 15000000);
+            g_mediaInitialized = true;
+        }
+    }
+    return g_mediaInitialized;
+}
 #endif
 
 #if defined(_WIN32)
@@ -106,19 +156,22 @@ bool HttpClient::init() {
 
     sceNetInit();
 
-    g_netPoolId = sceNetPoolCreate("luna_net", 1024 * 1024, 0);
+    g_netPoolId = sceNetPoolCreate("luna_net", 4 * 1024 * 1024, 0);
     if (g_netPoolId < 0) {
         char dynamicName[32];
         std::snprintf(dynamicName, sizeof(dynamicName), "luna_%u", static_cast<unsigned>(time(nullptr) & 0xFFFF));
-        g_netPoolId = sceNetPoolCreate(dynamicName, 1024 * 1024, 0);
+        g_netPoolId = sceNetPoolCreate(dynamicName, 2 * 1024 * 1024, 0);
     }
 
-    g_sslCtxId = sceSslInit(1024 * 1024);
+    g_sslCtxId = sceSslInit(2 * 1024 * 1024);
     if (g_sslCtxId < 0) {
-        g_sslCtxId = sceSslInit(512 * 1024);
+        g_sslCtxId = sceSslInit(1024 * 1024);
     }
 
-    g_httpCtxId = sceHttpInit(g_netPoolId, g_sslCtxId, 1024 * 1024);
+    g_httpCtxId = sceHttpInit(g_netPoolId, g_sslCtxId, 4 * 1024 * 1024);
+    if (g_httpCtxId < 0) {
+        g_httpCtxId = sceHttpInit(g_netPoolId, g_sslCtxId, 2 * 1024 * 1024);
+    }
 
     if (g_httpCtxId >= 0) {
         g_tmplId = sceHttpCreateTemplate(g_httpCtxId, "Mozilla/5.0 (PlayStation 5 1.0) AppleWebKit/605.1.15 (KHTML, like Gecko)", SCE_HTTP_VERSION_1_1, 1);
@@ -324,9 +377,12 @@ HttpResponse HttpClient::getIntoBuffer(const std::string& url,
                                       size_t maxCap,
                                       size_t& outSize,
                                       std::atomic<bool>* cancelFlag,
-                                      const std::vector<std::pair<std::string, std::string>>& headers) {
+                                      const std::vector<std::pair<std::string, std::string>>& headers,
+                                      std::atomic<size_t>* liveOutSize) {
+    AtomicRecursiveGuard mediaLock(g_mediaHttpLock);
     HttpResponse resp;
     outSize = 0;
+    if (liveOutSize) liveOutSize->store(0, std::memory_order_release);
     if (!outBuf || maxCap == 0) {
         resp.error = "Invalid output buffer";
         return resp;
@@ -416,6 +472,7 @@ HttpResponse HttpClient::getIntoBuffer(const std::string& url,
             DWORD dwDownloaded = 0;
             if (WinHttpReadData(hRequest, outBuf + outSize, toRead, &dwDownloaded)) {
                 outSize += dwDownloaded;
+                if (liveOutSize) liveOutSize->store(outSize, std::memory_order_release);
                 if (dwDownloaded == 0) break;
             } else {
                 break;
@@ -431,15 +488,15 @@ HttpResponse HttpClient::getIntoBuffer(const std::string& url,
     return resp;
 
 #else
-    if (!init()) {
+    if (!initMediaHttpContext()) {
         char errBuf[128];
-        std::snprintf(errBuf, sizeof(errBuf), "HttpClient init error (pool=%d, ssl=%d, http=%d, tmpl=%d)",
-                      g_netPoolId, g_sslCtxId, g_httpCtxId, g_tmplId);
+        std::snprintf(errBuf, sizeof(errBuf), "MediaHttp init error (pool=%d, ssl=%d, http=%d, tmpl=%d)",
+                      g_mediaNetPoolId, g_mediaSslCtxId, g_mediaHttpCtxId, g_mediaTmplId);
         resp.error = errBuf;
         return resp;
     }
 
-    int connId = sceHttpCreateConnectionWithURL(g_tmplId, url.c_str(), 0);
+    int connId = sceHttpCreateConnectionWithURL(g_mediaTmplId, url.c_str(), 0);
     if (connId < 0) {
         resp.error = "sceHttpCreateConnectionWithURL failed: " + std::to_string(connId);
         return resp;
@@ -459,8 +516,8 @@ HttpResponse HttpClient::getIntoBuffer(const std::string& url,
     sceHttpsDisableOption(reqId, 0x01);
     sceHttpsDisableOption(reqId, 0x02);
     sceHttpSetAutoRedirect(reqId, 1);
-    sceHttpSetSendTimeOut(reqId, 10000000);
-    sceHttpSetRecvTimeOut(reqId, 20000000);
+    sceHttpSetSendTimeOut(reqId, 8000000);
+    sceHttpSetRecvTimeOut(reqId, 12000000);
 
     for (const auto& h : headers) {
         std::string k = trimString(h.first);
@@ -485,6 +542,7 @@ HttpResponse HttpClient::getIntoBuffer(const std::string& url,
             int readBytes = sceHttpReadData(reqId, outBuf + outSize, toRead);
             if (readBytes <= 0) break;
             outSize += static_cast<size_t>(readBytes);
+            if (liveOutSize) liveOutSize->store(outSize, std::memory_order_release);
         }
     } else {
         resp.error = "sceHttpSendRequest failed: " + std::to_string(sendRes);

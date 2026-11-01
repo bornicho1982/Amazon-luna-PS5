@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -30,6 +31,14 @@ public:
     void stop();
 
     bool hasFrame() const { return hasDecodedFrame_.load(); }
+    bool isDownloading() const { return isDownloading_.load(); }
+    bool isPaused() const { return paused_.load(); }
+    void setPaused(bool p) { paused_.store(p); }
+    void togglePause() { paused_.store(!paused_.load()); }
+    void seekRelative(int deltaSamples);
+    float getProgress() const;
+    size_t getDownloadedBytes() const { return downloadedBytes_.load(); }
+
     const uint32_t* getFrameRgba() const;
     int getWidth() const { return frameWidth_; }
     int getHeight() const { return frameHeight_; }
@@ -38,16 +47,27 @@ public:
 private:
     bool parseMp4(const uint8_t* data, size_t size);
     void reset();
+    void workerLoop();
+#if !defined(_WIN32)
+    static void* pthreadEntry(void* arg);
+    void* nativeThread_ = nullptr;
+#endif
 
     std::string currentUrl_;
-    std::string downloadingUrl_;
+    std::string pendingUrl_;
+    std::atomic<bool> hasNewRequest_{false};
+    std::atomic<bool> workerRunning_{false};
     std::atomic<bool> isDownloading_{false};
     std::atomic<bool> isReady_{false};
     std::atomic<bool> hasDecodedFrame_{false};
     std::atomic<bool> cancelDownload_{false};
+    std::atomic<bool> needsDecoderReset_{false};
+    std::atomic<bool> paused_{false};
+    std::atomic<size_t> downloadedBytes_{0};
 
     std::thread downloadThread_;
-    std::mutex downloadMutex_;
+    mutable std::mutex downloadMutex_;
+    std::condition_variable cv_;
 
     const uint8_t* mp4DataPtr_ = nullptr;
     size_t mp4DataSize_ = 0;
