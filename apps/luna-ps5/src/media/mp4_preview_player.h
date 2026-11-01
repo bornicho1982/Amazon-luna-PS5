@@ -11,6 +11,10 @@
 #include <thread>
 #include "media/media_decoder.h"
 
+namespace luna::audio {
+class AudioManager;
+}
+
 namespace luna::media {
 
 struct Mp4Sample {
@@ -33,10 +37,16 @@ public:
     bool hasFrame() const { return hasDecodedFrame_.load(); }
     bool isDownloading() const { return isDownloading_.load(); }
     bool isPaused() const { return paused_.load(); }
-    void setPaused(bool p) { paused_.store(p); }
-    void togglePause() { paused_.store(!paused_.load()); }
+    void setPaused(bool p);
+    void togglePause();
+    void setMuted(bool m);
+    bool isMuted() const { return muted_.load(); }
+    void setAudioManager(luna::audio::AudioManager* audioMgr) { audioManager_ = audioMgr; }
     void seekRelative(int deltaSamples);
     float getProgress() const;
+    float getBufferedProgress() const;
+    int getCurrentSeconds() const;
+    int getTotalSeconds() const;
     size_t getDownloadedBytes() const { return downloadedBytes_.load(); }
 
     const uint32_t* getFrameRgba() const;
@@ -63,7 +73,10 @@ private:
     std::atomic<bool> cancelDownload_{false};
     std::atomic<bool> needsDecoderReset_{false};
     std::atomic<bool> paused_{false};
+    std::atomic<bool> muted_{true};
     std::atomic<size_t> downloadedBytes_{0};
+    luna::audio::AudioManager* audioManager_ = nullptr;
+    void* aacDecoder_ = nullptr;
 
     std::thread downloadThread_;
     mutable std::mutex downloadMutex_;
@@ -73,7 +86,10 @@ private:
     size_t mp4DataSize_ = 0;
     std::vector<uint8_t> spsPpsAnnexB_;
     std::vector<Mp4Sample> samples_;
+    std::vector<Mp4Sample> audioSamples_;
     size_t currentSampleIdx_ = 0;
+    size_t fastForwardTargetIdx_ = 0;
+    size_t currentAudioIdx_ = 0;
 
     std::chrono::steady_clock::time_point lastFrameTime_;
     int frameIntervalMs_ = 33; // ~30 FPS

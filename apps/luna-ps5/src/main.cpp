@@ -83,6 +83,7 @@ int main(int argc, char* argv[]) {
     // 3. Inicializar subsistema de audio (48 kHz stereo)
     luna::audio::AudioManager audio;
     audio.init(48000, 2);
+    luna::media::Mp4PreviewPlayer::instance().setAudioManager(&audio);
 
     // 4. Inicializar decodificadores de medios (H.264 Hardware Vdec2 + Audio)
     luna::media::VideoDecoder videoDecoder;
@@ -1164,12 +1165,8 @@ int main(int argc, char* argv[]) {
                                 } else if (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) {
                                     int maxC = (selectedRowIdx < numRows) ? static_cast<int>(curCols[selectedRowIdx].items.size()) : 1;
                                     if (selectedRowIdx == 0 && curCols[0].isHeroRotator) {
-                                        if (heroBtnIdx > 0) {
-                                            heroBtnIdx--;
-                                        } else {
-                                            rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % std::max(1, maxC);
-                                            heroBtnIdx = 0;
-                                        }
+                                        rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % std::max(1, maxC);
+                                        heroBtnIdx = 0;
                                     } else if (rowSelectedCol[selectedRowIdx] > 0) {
                                         rowSelectedCol[selectedRowIdx]--;
                                     }
@@ -1184,16 +1181,8 @@ int main(int argc, char* argv[]) {
                                 } else if (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) {
                                     int maxC = (selectedRowIdx < numRows) ? static_cast<int>(curCols[selectedRowIdx].items.size()) : 1;
                                     if (selectedRowIdx == 0 && curCols[0].isHeroRotator) {
-                                        bool isLunaPrem = (rowSelectedCol[0] == 0);
-                                        if (!curCols.empty() && !curCols[0].items.empty() && rowSelectedCol[0] < static_cast<int>(curCols[0].items.size())) {
-                                            if (curCols[0].items[rowSelectedCol[0]].title == "Luna Premium") isLunaPrem = true;
-                                        }
-                                        if (heroBtnIdx < 3 && !isLunaPrem) {
-                                            heroBtnIdx++;
-                                        } else {
-                                            rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
-                                            heroBtnIdx = 0;
-                                        }
+                                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
+                                        heroBtnIdx = 0;
                                     } else if (rowSelectedCol[selectedRowIdx] + 1 < maxC) {
                                         rowSelectedCol[selectedRowIdx]++;
                                     }
@@ -1373,11 +1362,25 @@ int main(int argc, char* argv[]) {
 
                 // Si el juego enfocado aún no tiene tráiler o metadatos completos, resolver dinámicamente en segundo plano
                 const auto hoverIdleMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTileChangeTime).count();
+
+                // Auto-avance suave del carrusel Hero cada 16s cuando el usuario está en el Banner y no pulsa botones
+                if (selectedRowIdx == 0 && !curCols.empty() && curCols[0].isHeroRotator &&
+                    curCols[0].items.size() > 1 && !profileMenuOpen && !searchOpen && hoverIdleMs >= 16000) {
+                    int maxHero = static_cast<int>(curCols[0].items.size());
+                    if (!rowSelectedCol.empty()) {
+                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % maxHero;
+                        prevHoverCol = rowSelectedCol[0];
+                        activeHeroTile = &curCols[0].items[rowSelectedCol[0]];
+                    }
+                    lastTileChangeTime = now;
+                }
+
                 if (activeHeroTile != nullptr && hoverIdleMs >= 180 && (!activeHeroTile->detailsLoaded || activeHeroTile->videoUrl.empty())) {
                     sessionClient.requestAsyncGameDetails(activeHeroTile, cbl.getAccessToken(), cbl.getDeviceSerial());
                 }
 
-                // Reproducir el tráiler oficial en la mitad derecha del Banner Superior (100% streaming HTTP RAM)
+                // Reproducir el tráiler oficial en la mitad derecha del Banner Superior (silenciado en el Banner, con sonido en Pantalla Completa)
+                luna::media::Mp4PreviewPlayer::instance().setMuted(true);
                 if (activeHeroTile != nullptr && !activeHeroTile->videoUrl.empty() && !profileMenuOpen && !searchOpen) {
                     if (hoverIdleMs >= 200 || luna::media::Mp4PreviewPlayer::instance().currentUrl() == activeHeroTile->videoUrl) {
                         luna::media::Mp4PreviewPlayer::instance().setVideoUrl(activeHeroTile->videoUrl);
@@ -1584,11 +1587,13 @@ int main(int argc, char* argv[]) {
 
                 if (pressedNow & luna::input::PAD_CIRCLE) {
                     luna::media::Mp4PreviewPlayer::instance().setPaused(false);
+                    luna::media::Mp4PreviewPlayer::instance().setMuted(true);
                     appState = mediaViewerFromCatalog ? AppState::Catalog : AppState::GameDetail;
                     break;
                 }
 
                 if (hasTrailer && (mediaViewerIdx < 0 || numScreens == 0)) {
+                    luna::media::Mp4PreviewPlayer::instance().setMuted(false);
                     luna::media::Mp4PreviewPlayer::instance().setVideoUrl(currentDetailGame.videoUrl);
                     luna::media::Mp4PreviewPlayer::instance().update(&videoDecoder);
 
@@ -1598,11 +1603,13 @@ int main(int argc, char* argv[]) {
                         luna::media::Mp4PreviewPlayer::instance().seekRelative(-150); // -5s
                     } else if (pressedNow & luna::input::PAD_R1) {
                         luna::media::Mp4PreviewPlayer::instance().seekRelative(150);  // +5s
-                    } else if (((pressedNow & luna::input::PAD_RIGHT) || (pressedNow & luna::input::PAD_LEFT)) && numScreens > 0) {
+                    } else if (((pressedNow & luna::input::PAD_SQUARE) || (pressedNow & luna::input::PAD_RIGHT) || (pressedNow & luna::input::PAD_LEFT)) && numScreens > 0) {
+                        luna::media::Mp4PreviewPlayer::instance().setMuted(true);
                         mediaViewerIdx = 0;
                     }
                 } else {
-                    if (pressedNow & luna::input::PAD_R3 && hasTrailer) {
+                    luna::media::Mp4PreviewPlayer::instance().setMuted(true);
+                    if (((pressedNow & luna::input::PAD_R3) || (pressedNow & luna::input::PAD_SQUARE)) && hasTrailer) {
                         mediaViewerIdx = -1;
                     } else if (numScreens > 0) {
                         if ((pressedNow & luna::input::PAD_LEFT) || (pressedNow & luna::input::PAD_L1)) {

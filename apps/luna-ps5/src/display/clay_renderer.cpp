@@ -327,12 +327,49 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                                           custom.tile->title.find("100 juegos") != std::string::npos);
 
                     if (isPremiumHero) {
-                        const uint8_t* heroRgba = display_->getHeroBannerRgba();
-                        if (heroRgba) {
-                            drawAspectFill(heroRgba, display_->getHeroBannerWidth(), display_->getHeroBannerHeight());
-                        } else {
-                            display_->fillRect(x, y, w, h, 0xFF0E1320);
+                        // Draw bespoke native PS5 "Luna Premium" showcase artwork (cosmic purple/cyan gradient + game showcase)
+                        for (int dy = 0; dy < h; ++dy) {
+                            float ty = static_cast<float>(dy) / static_cast<float>(std::max(1, h));
+                            for (int dx = 0; dx < w; ++dx) {
+                                float tx = static_cast<float>(dx) / static_cast<float>(std::max(1, w));
+                                float glow1 = std::max(0.0f, 1.0f - std::hypot((tx - 0.62f) * 1.4f, (ty - 0.38f) * 1.1f));
+                                float glow2 = std::max(0.0f, 1.0f - std::hypot((tx - 0.35f) * 1.3f, (ty - 0.72f) * 1.2f));
+                                int r = std::clamp(static_cast<int>(18.0f + glow1 * 96.0f + glow2 * 22.0f), 0, 255);
+                                int g = std::clamp(static_cast<int>(16.0f + glow1 * 32.0f + glow2 * 98.0f), 0, 255);
+                                int b = std::clamp(static_cast<int>(42.0f + glow1 * 175.0f + glow2 * 165.0f), 0, 255);
+                                uint32_t col = 0xFF000000U | (static_cast<uint32_t>(r) << 16) |
+                                                             (static_cast<uint32_t>(g) << 8)  |
+                                                              static_cast<uint32_t>(b);
+                                display_->putPixel(x + dx, y + dy, col);
+                            }
                         }
+
+                        // Decorative tilted/staggered showcase cards on the right side
+                        struct ShowcaseTile { int ox, oy, cw, ch; uint32_t bg, accent; const char* tag; const char* name; };
+                        const ShowcaseTile kTiles[3] = {
+                            { 160, 74,  210, 286, 0xFF1A1438, 0xFF8B5CF6, "ACCION",    "1080p 60 FPS" },
+                            { 400, 48,  230, 314, 0xFF0F2442, 0xFF38BDF8, "LUNA+",     "+100 JUEGOS"  },
+                            { 660, 82,  210, 286, 0xFF172836, 0xFF10B981, "CO-OP",     "SIN DESCARGAS"}
+                        };
+                        for (int ti = 0; ti < 3; ++ti) {
+                            const auto& st = kTiles[ti];
+                            int tx = x + st.ox, ty = y + st.oy;
+                            display_->blendRectUniform(tx + 8, ty + 10, st.cw, st.ch, 0xFF05070E, 140);
+                            display_->drawRoundedRect(tx, ty, st.cw, st.ch, 16, st.bg);
+                            display_->drawRoundedBorder(tx, ty, st.cw, st.ch, 16, 2, st.accent);
+                            display_->drawRoundedRect(tx + 18, ty + 18, 86, 24, 6, st.accent);
+                            display_->drawTextPx(tx + 28, ty + 23, 11, st.tag, 0xFF070911);
+                            display_->drawLunaLogoIcon(tx + (st.cw - 56) / 2, ty + st.ch / 2 - 36, 56);
+                            int nw = display_->getFontRenderer().measureText(st.name, 16);
+                            display_->drawTextPx(tx + (st.cw - nw) / 2, ty + st.ch - 48, 16, st.name, 0xFFFFFFFF);
+                        }
+
+                        // Top-right official badge
+                        int badgeW = 248, badgeH = 30;
+                        int bx = x + w - badgeW - 24, by = y + 18;
+                        display_->drawRoundedRect(bx, by, badgeW, badgeH, 8, 0xD8140C2E);
+                        display_->drawRoundedBorder(bx, by, badgeW, badgeH, 8, 1, 0xFF8B5CF6);
+                        display_->drawTextPx(bx + 16, by + 7, 12, "SUSCRIPCI\xC3\x93N LUNA PREMIUM", 0xFFE9D5FF);
                     } else if (!artUrl.empty()) {
                         luna::util::ImageLoader::instance().requestImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
                         auto artImg = luna::util::ImageLoader::instance().getImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
@@ -363,24 +400,14 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                     }
                 }
 
-                // Clean 150px Hermite cubic gradient blend on the left edge into PS5 Dark Crystal (#0E1320)
-                int fadeW = std::min(150, w);
+                // Clean 160px Hermite cubic alpha gradient blend on the left edge into PS5 Dark Crystal (#0E1320)
+                int fadeW = std::min(160, w);
                 for (int fx = 0; fx < fadeW; ++fx) {
                     float t = static_cast<float>(fx) / static_cast<float>(fadeW);
                     float alphaF = 1.0f - (t * t * (3.0f - 2.0f * t));
                     uint8_t alpha = static_cast<uint8_t>(std::clamp(alphaF * 255.0f, 0.0f, 255.0f));
                     if (alpha > 0) {
-                        display_->fillRect(x + fx, y, 1, h, (static_cast<uint32_t>(alpha) << 24) | 0x000E1320);
-                    }
-                }
-
-                // Subtle bottom vignette (48px) so right-side framing looks cinema-grade
-                int botH = std::min(48, h);
-                for (int fy = 0; fy < botH; ++fy) {
-                    float t = static_cast<float>(fy) / static_cast<float>(botH);
-                    uint8_t alpha = static_cast<uint8_t>(t * t * 140.0f);
-                    if (alpha > 0) {
-                        display_->fillRect(x, y + h - botH + fy, w, 1, (static_cast<uint32_t>(alpha) << 24) | 0x00070911);
+                        display_->blendRectUniform(x + fx, y, 1, h, 0xFF0E1320, alpha);
                     }
                 }
 
@@ -462,9 +489,12 @@ void ClayRenderer::renderCommands(Clay_RenderCommandArray commands) {
         switch (cmd->commandType) {
             case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
                 uint32_t argb = clayColorToArgb(cmd->renderData.rectangle.backgroundColor);
-                if ((argb >> 24) == 0) break; // Transparent
+                uint8_t alpha = static_cast<uint8_t>((argb >> 24) & 0xFF);
+                if (alpha == 0) break; // Transparent
                 int r = static_cast<int>(cmd->renderData.rectangle.cornerRadius.topLeft);
-                if (r > 0) {
+                if (alpha < 255 && r == 0) {
+                    display_->blendRectUniform(x, y, w, h, argb | 0xFF000000U, alpha);
+                } else if (r > 0) {
                     display_->drawRoundedRect(x, y, w, h, r, argb);
                 } else {
                     display_->fillRect(x, y, w, h, argb);

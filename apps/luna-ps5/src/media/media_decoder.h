@@ -30,7 +30,7 @@ public:
     void shutdown();
     void resetStreamState();
 
-    bool decode(const uint8_t* h264Data, size_t size, uint64_t pts, DecodedVideoFrame& outFrame);
+    bool decode(const uint8_t* h264Data, size_t size, uint64_t pts, DecodedVideoFrame& outFrame, bool copyPlanesToCpu = true);
     bool needsKeyframe() const { return needsKeyframe_.load(); }
     bool isHardwareAccelerated() const { return hwActive_; }
     uint32_t getLastReturnCode() const { return lastDecodeRc_.load(); }

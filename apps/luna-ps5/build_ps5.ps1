@@ -69,7 +69,16 @@ try {
         -I"src" -c "src\platform\libc_compat.c" -o "ps5\obj\libc_compat.o"
     if ($LASTEXITCODE -ne 0) { throw "Error compilando libc_compat.c" }
 
-    $objs = @("ps5\obj\app_crt.o", "ps5\obj\app_cpp_runtime.o", "ps5\obj\qrcodegen.o", "ps5\obj\libc_compat.o")
+    New-Item -ItemType Directory -Path "ps5\obj\helix_aac" -Force | Out-Null
+    $aacObjs = @()
+    foreach ($aacFile in Get-ChildItem "src\media\helix_aac\*.c") {
+        $aacObj = "ps5\obj\helix_aac\$($aacFile.BaseName).o"
+        & clang -target x86_64-sie-ps5 -isysroot "$sdkDir" -isystem "$sdkDir\target\include" -std=c11 -O2 -fPIC -fno-plt -ffunction-sections -fdata-sections -Wno-everything -DUSE_DEFAULT_STDLIB -I"src\media\helix_aac" -c $aacFile.FullName -o $aacObj
+        if ($LASTEXITCODE -ne 0) { throw "Error compilando $($aacFile.Name)" }
+        $aacObjs += $aacObj
+    }
+
+    $objs = @("ps5\obj\app_crt.o", "ps5\obj\app_cpp_runtime.o", "ps5\obj\qrcodegen.o", "ps5\obj\libc_compat.o") + $aacObjs
     foreach ($s in $sources) {
         $outName = $s.Replace("/", "_")
         $objPath = "ps5\obj\$outName.o"
@@ -81,7 +90,7 @@ try {
             -fexceptions -fcxx-exceptions -frtti -fno-stack-protector -fno-plt -femulated-tls `
             -ffunction-sections -fdata-sections `
             -DLUNA_TARGET_PS5=1 `
-            -I"src" `
+            -I"src" -I"src\media\helix_aac" `
             -I"ps5\include" `
             -I"$here\..\..\tools\reference\xbox-cloud-gaming-ps5\deps\libdatachannel\include" `
             -I"$here\..\..\tools\reference\xbox-cloud-gaming-ps5\deps\mbedtls\include" `

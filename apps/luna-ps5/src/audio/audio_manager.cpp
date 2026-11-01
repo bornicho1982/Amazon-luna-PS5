@@ -101,6 +101,11 @@ void AudioManager::outputPcm(const int16_t* pcmData, size_t sampleCount) {
 #endif
 }
 
+void AudioManager::clearQueue() {
+    std::lock_guard<std::mutex> lock(queueMutex_);
+    queue_.clear();
+}
+
 void AudioManager::audioLoop() {
 #if defined(LUNA_TARGET_PS5)
     std::vector<int16_t> s16Grain(kGrainFrames * 2, 0);

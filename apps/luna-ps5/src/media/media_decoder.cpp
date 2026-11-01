@@ -279,7 +279,7 @@ void VideoDecoder::shutdown() {
     }
 }
 
-bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, DecodedVideoFrame& outFrame) {
+bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, DecodedVideoFrame& outFrame, bool copyPlanesToCpu) {
     if (!isReady_ || !h264Data || size < 4) return false;
     std::lock_guard<std::mutex> lock(decodeMutex_);
 
@@ -346,13 +346,22 @@ bool VideoDecoder::decode(const uint8_t* h264Data, size_t size, uint64_t pts, De
         const auto* rawBuf = static_cast<const uint8_t*>(info.buffer);
         int w = static_cast<int>(info.width);
         int rawH = static_cast<int>(info.height);
-        int h = (rawH == 1088) ? 1080 : rawH;
+        int h = (rawH == 1088) ? 1080 : (rawH == 736 ? 720 : (rawH == 544 ? 540 : rawH));
         int codedH = (rawH + 15) & ~15;
         int pitch = static_cast<int>(info.pitchBytes ? info.pitchBytes : info.pitch);
         if (pitch < w) pitch = w;
 
         if (info.bufferSize > 0 && static_cast<size_t>(pitch) * (codedH + h / 2) > info.bufferSize) {
             codedH = rawH;
+        }
+        if (!copyPlanesToCpu) {
+            outFrame.width = w;
+            outFrame.height = h;
+            outFrame.pts = pts;
+            decodedFrames_.fetch_add(1);
+            return true;
+        }
+        if (false) {
         }
 
         if (planeY_.size() < static_cast<size_t>(w * h)) {

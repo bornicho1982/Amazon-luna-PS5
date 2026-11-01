@@ -1,4 +1,5 @@
 #include "display/display_manager.h"
+#include "display/ps5_controller_icons.h"
 #include "display/clay_renderer.h"
 #include "display/luna_clay_ui.h"
 #include "media/mp4_preview_player.h"
@@ -1955,23 +1956,83 @@ void DisplayManager::drawMediaViewerScreen(const GameTile& game,
             drawTextPx(760, 520, 26, "Cargando tr\xC3\xA1iler en streaming HD...", 0xFF38BDF8);
         }
 
-        // Top & bottom cinema HUD bars
-        blendRectUniform(0, 0, 1920, 84, 0xFF070911, 200);
-        blendRectUniform(0, 964, 1920, 116, 0xFF070911, 215);
+        // Top & bottom PS5 Studio Cinema HUD bars
+        blendRectUniform(0, 0, 1920, 82, 0xFF070911, 200);
+        blendRectUniform(0, 932, 1920, 148, 0xFF070911, 228);
+        fillRect(0, 932, 1920, 1, 0xFF1E293B);
 
         drawTextPx(64, 26, 28, game.title, 0xFFFFFFFF);
-        std::string stateBadge = player.isPaused() ? "PAUSADO" : "TR\xC3\x81ILER OFICIAL HD (1080p)";
-        drawRoundedRect(1560, 22, 296, 38, 8, player.isPaused() ? 0xFFD97706 : 0xFF0070D1);
-        drawTextPx(1582, 30, 16, stateBadge, 0xFFFFFFFF);
 
-        // Progress bar
-        int barX = 64, barY = 984, barW = 1792, barH = 8;
+        // Audio status badge in top-right
+        drawRoundedRect(1268, 22, 272, 38, 8, 0xFF0F2922);
+        drawRoundedBorder(1268, 22, 272, 38, 8, 1, 0xFF10B981);
+        drawTextPx(1290, 31, 15, "SONIDO ACTIVO \xE2\x80\xA2 48 kHz Est\xC3\xA9reo", 0xFF34D399);
+
+        std::string stateBadge = player.isPaused() ? "PAUSADO" : "TR\xC3\x81ILER OFICIAL HD (1080p)";
+        drawRoundedRect(1556, 22, 300, 38, 8, player.isPaused() ? 0xFFD97706 : 0xFF0070D1);
+        drawTextPx(1580, 31, 15, stateBadge, 0xFFFFFFFF);
+
+        // Row 1 of bottom deck: Play/Pause indicator + Timecode + Buffered & Active Scrubber Bar
+        drawRoundedRect(64, 948, 36, 36, 18, 0xFF151D2E);
+        drawRoundedBorder(64, 948, 36, 36, 18, 1, 0xFF38BDF8);
+        if (player.isPaused()) {
+            fillRect(77, 959, 4, 14, 0xFFFBBF24);
+            fillRect(84, 959, 4, 14, 0xFFFBBF24);
+        } else {
+            PS5ControllerIcons::drawInterfaceIcon(*this, 83, 966, 16, DualSenseBtn::Play, 0xFF38BDF8);
+        }
+
+        int curSec = player.getCurrentSeconds();
+        int totSec = player.getTotalSeconds();
+        char timeBuf[32];
+        std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d / %02d:%02d",
+                      curSec / 60, curSec % 60, totSec / 60, totSec % 60);
+        drawTextPx(114, 956, 16, timeBuf, 0xFFE2E8F0);
+
+        int barX = 246, barY = 962, barW = 1610, barH = 8;
         drawRoundedRect(barX, barY, barW, barH, 4, 0xFF1E293B);
+        int bufW = std::clamp(static_cast<int>(player.getBufferedProgress() * static_cast<float>(barW)), 8, barW);
+        drawRoundedRect(barX, barY, bufW, barH, 4, 0xFF334155);
         int fillW = std::clamp(static_cast<int>(player.getProgress() * static_cast<float>(barW)), 8, barW);
         drawRoundedRect(barX, barY, fillW, barH, 4, 0xFF38BDF8);
+        drawRoundedRect(barX + fillW - 7, barY - 4, 16, 16, 8, 0xFFFFFFFF);
+        drawRoundedBorder(barX + fillW - 7, barY - 4, 16, 16, 8, 2, 0xFF0070D1);
 
-        std::string ctrlHint = "[(X)] Pausa / Reproducir     [L1 / R1] -5s / +5s     [\xE2\x97\x80 / \xE2\x96\xB6] Ver capturas     [(O)] Volver";
-        drawTextPx(64, 1018, 18, ctrlHint, 0xFFE2E8F0);
+        // Row 2 of bottom deck: Pill Controls with Real DualSense Vector Icons
+        int pillY = 1004, pillH = 48;
+
+        // Pill 1: (X) Pausar / Reanudar
+        drawRoundedRect(64, pillY, 240, pillH, 24, 0xFF151D2E);
+        drawRoundedBorder(64, pillY, 240, pillH, 24, 1, 0xFF2C3A56);
+        PS5ControllerIcons::drawButton(*this, 64 + 28, pillY + 24, 28, DualSenseBtn::Cross, false);
+        drawTextPx(64 + 52, pillY + 14, 16, player.isPaused() ? "Reanudar video" : "Pausar video", 0xFFFFFFFF);
+
+        // Pill 2: [L1] Retroceder 5s
+        drawRoundedRect(322, pillY, 232, pillH, 24, 0xFF151D2E);
+        drawRoundedBorder(322, pillY, 232, pillH, 24, 1, 0xFF2C3A56);
+        PS5ControllerIcons::drawBumper(*this, 322 + 16, pillY + 12, 42, 24, false, false);
+        drawTextPx(322 + 68, pillY + 14, 16, "Retroceder 5s", 0xFFE2E8F0);
+
+        // Pill 3: [R1] Avanzar 5s
+        drawRoundedRect(572, pillY, 212, pillH, 24, 0xFF151D2E);
+        drawRoundedBorder(572, pillY, 212, pillH, 24, 1, 0xFF2C3A56);
+        PS5ControllerIcons::drawBumper(*this, 572 + 16, pillY + 12, 42, 24, true, false);
+        drawTextPx(572 + 68, pillY + 14, 16, "Avanzar 5s", 0xFFE2E8F0);
+
+        // Pill 4: (Square) Ver capturas (if available)
+        if (numScreens > 0) {
+            drawRoundedRect(802, pillY, 216, pillH, 24, 0xFF151D2E);
+            drawRoundedBorder(802, pillY, 216, pillH, 24, 1, 0xFF2C3A56);
+            PS5ControllerIcons::drawButton(*this, 802 + 28, pillY + 24, 28, DualSenseBtn::Square, false);
+            drawTextPx(802 + 52, pillY + 14, 16, "Ver capturas", 0xFFE2E8F0);
+        }
+
+        // Pill 5: (O) Volver (Right-aligned)
+        drawRoundedRect(1692, pillY, 164, pillH, 24, 0xFF151D2E);
+        drawRoundedBorder(1692, pillY, 164, pillH, 24, 1, 0xFF2C3A56);
+        PS5ControllerIcons::drawButton(*this, 1692 + 28, pillY + 24, 28, DualSenseBtn::Circle, false);
+        drawTextPx(1692 + 52, pillY + 14, 16, "Volver", 0xFFFFFFFF);
+
         present();
         return;
     }
@@ -2007,15 +2068,38 @@ void DisplayManager::drawMediaViewerScreen(const GameTile& game,
         luna::util::ImageLoader::instance().requestImage(game.screenshotUrls[currentMediaIdx - 1], luna::util::ImagePreset::PanoramicDetail);
     }
 
-    blendRectUniform(0, 0, 1920, 84, 0xFF070911, 200);
-    blendRectUniform(0, 990, 1920, 90, 0xFF070911, 210);
+    blendRectUniform(0, 0, 1920, 82, 0xFF070911, 200);
+    blendRectUniform(0, 982, 1920, 98, 0xFF070911, 225);
+    fillRect(0, 982, 1920, 1, 0xFF1E293B);
 
-    drawTextPx(68, 26, 28, game.title, 0xFFFFFFFF);
+    drawTextPx(64, 26, 28, game.title, 0xFFFFFFFF);
     std::string countStr = "Captura " + std::to_string(currentMediaIdx + 1) + " de " + std::to_string(numScreens);
-    drawTextPx(1620, 30, 20, countStr, 0xFFFCD34D);
+    drawRoundedRect(1600, 22, 256, 38, 8, 0xFF151D2E);
+    drawRoundedBorder(1600, 22, 256, 38, 8, 1, 0xFF38BDF8);
+    drawTextPx(1624, 31, 16, countStr, 0xFFFCD34D);
 
-    std::string ctrlHint = "[\xE2\x97\x80 / L1] Anterior      [\xE2\x96\xB6 / R1] Siguiente      [R3] Ver Tr\xC3\xA1iler HD      [(O)] Volver";
-    drawTextPx(68, 1025, 18, ctrlHint, 0xFFE2E8F0);
+    int pillY = 1006, pillH = 48;
+    drawRoundedRect(64, pillY, 200, pillH, 24, 0xFF151D2E);
+    drawRoundedBorder(64, pillY, 200, pillH, 24, 1, 0xFF2C3A56);
+    PS5ControllerIcons::drawBumper(*this, 64 + 16, pillY + 12, 42, 24, false, false);
+    drawTextPx(64 + 68, pillY + 14, 16, "Anterior", 0xFFE2E8F0);
+
+    drawRoundedRect(282, pillY, 206, pillH, 24, 0xFF151D2E);
+    drawRoundedBorder(282, pillY, 206, pillH, 24, 1, 0xFF2C3A56);
+    PS5ControllerIcons::drawBumper(*this, 282 + 16, pillY + 12, 42, 24, true, false);
+    drawTextPx(282 + 68, pillY + 14, 16, "Siguiente", 0xFFE2E8F0);
+
+    if (hasTrailer) {
+        drawRoundedRect(506, pillY, 224, pillH, 24, 0xFF151D2E);
+        drawRoundedBorder(506, pillY, 224, pillH, 24, 1, 0xFF2C3A56);
+        PS5ControllerIcons::drawButton(*this, 506 + 28, pillY + 24, 28, DualSenseBtn::Square, false);
+        drawTextPx(506 + 52, pillY + 14, 16, "Ver Tr\xC3\xA1iler HD", 0xFF38BDF8);
+    }
+
+    drawRoundedRect(1692, pillY, 164, pillH, 24, 0xFF151D2E);
+    drawRoundedBorder(1692, pillY, 164, pillH, 24, 1, 0xFF2C3A56);
+    PS5ControllerIcons::drawButton(*this, 1692 + 28, pillY + 24, 28, DualSenseBtn::Circle, false);
+    drawTextPx(1692 + 52, pillY + 14, 16, "Volver", 0xFFFFFFFF);
 
     present();
 }

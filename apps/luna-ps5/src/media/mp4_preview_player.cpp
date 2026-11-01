@@ -1,4 +1,6 @@
 #include "media/mp4_preview_player.h"
+#include "audio/audio_manager.h"
+#include "media/helix_aac/aacdec.h"
 #include "net/http_client.h"
 #include "util/crash_logger.h"
 #include <fstream>
@@ -42,6 +44,8 @@ void* Mp4PreviewPlayer::pthreadEntry(void* arg) {
 
 alignas(64) static uint8_t g_mp4DownloadBuffer[16 * 1024 * 1024]; // 16 MB static buffer in .bss (0 bytes heap malloc)
 alignas(64) static uint32_t g_frameRgbaBuffer[960 * 540];         // 2 MB static frame buffer in .bss
+alignas(64) static uint8_t g_aacDecoderArena[128 * 1024];         // 128 KB static AAC-LC decoder state in .bss
+alignas(16) static int16_t g_aacPcmBuffer[4096];                  // Static PCM output buffer in .bss
 
 Mp4PreviewPlayer& Mp4PreviewPlayer::instance() {
     static Mp4PreviewPlayer s_instance;
@@ -94,6 +98,9 @@ void Mp4PreviewPlayer::stop() {
     isReady_.store(false);
     hasDecodedFrame_.store(false);
     paused_.store(false);
+    if (audioManager_) {
+        audioManager_->clearQueue();
+    }
     {
         std::lock_guard<std::mutex> lk(downloadMutex_);
         pendingUrl_.clear();
@@ -102,13 +109,39 @@ void Mp4PreviewPlayer::stop() {
     }
 }
 
+void Mp4PreviewPlayer::setPaused(bool p) {
+    paused_.store(p);
+    if (p && audioManager_) {
+        audioManager_->clearQueue();
+    }
+}
+
+void Mp4PreviewPlayer::togglePause() {
+    bool next = !paused_.load();
+    setPaused(next);
+}
+
+void Mp4PreviewPlayer::setMuted(bool m) {
+    bool prev = muted_.exchange(m);
+    if (!prev && m && audioManager_) {
+        audioManager_->clearQueue();
+    }
+}
+
 void Mp4PreviewPlayer::reset() {
     mp4DataPtr_ = nullptr;
     mp4DataSize_ = 0;
     spsPpsAnnexB_.clear();
     samples_.clear();
+    audioSamples_.clear();
     currentSampleIdx_ = 0;
+    fastForwardTargetIdx_ = 0;
+    currentAudioIdx_ = 0;
+    aacDecoder_ = nullptr;
     annexBBuffer_.clear();
+    if (audioManager_) {
+        audioManager_->clearQueue();
+    }
 }
 
 const uint32_t* Mp4PreviewPlayer::getFrameRgba() const {
@@ -120,35 +153,85 @@ const uint32_t* Mp4PreviewPlayer::getFrameRgba() const {
 void Mp4PreviewPlayer::seekRelative(int deltaSamples) {
     std::lock_guard<std::mutex> lk(downloadMutex_);
     if (!isReady_.load() || samples_.empty()) return;
-    int total = static_cast<int>(samples_.size());
-    int target = static_cast<int>(currentSampleIdx_) + deltaSamples;
-    if (target < 0) target = 0;
-    if (target >= total) target = 0;
 
-    // Snap to nearest preceding keyframe so H.264 hardware decoder can decode cleanly
-    int kf = target;
-    while (kf > 0 && !samples_[kf].isKeyframe) {
-        kf--;
-    }
     size_t dl = downloadedBytes_.load(std::memory_order_acquire);
-    if (samples_[kf].offset + samples_[kf].size <= dl) {
-        currentSampleIdx_ = static_cast<size_t>(kf);
-    } else {
-        currentSampleIdx_ = 0;
+    size_t maxPlayableSample = 0;
+    for (size_t i = 0; i < samples_.size(); ++i) {
+        if (samples_[i].offset + samples_[i].size <= dl) {
+            maxPlayableSample = i;
+        } else {
+            break;
+        }
+    }
+    if (maxPlayableSample == 0) return;
+
+    if (deltaSamples > 0) {
+        size_t baseIdx = std::max(currentSampleIdx_, fastForwardTargetIdx_);
+        size_t target = std::min(baseIdx + static_cast<size_t>(deltaSamples), maxPlayableSample);
+        if (target <= currentSampleIdx_) {
+            return; // Already at or near end of buffered stream; never jump backwards!
+        }
+
+        // Find highest keyframe <= target
+        size_t kf = target;
+        while (kf > 0 && !samples_[kf].isKeyframe) {
+            kf--;
+        }
+        // Only jump to keyframe if it is strictly ahead of currentSampleIdx_
+        if (kf > currentSampleIdx_) {
+            currentSampleIdx_ = kf;
+            needsDecoderReset_.store(true);
+        }
+        fastForwardTargetIdx_ = target;
+    } else if (deltaSamples < 0) {
+        int rawTarget = static_cast<int>(currentSampleIdx_) + deltaSamples;
+        size_t target = static_cast<size_t>(std::clamp(rawTarget, 0, static_cast<int>(maxPlayableSample)));
+        size_t kf = target;
+        while (kf > 0 && !samples_[kf].isKeyframe) {
+            kf--;
+        }
+        currentSampleIdx_ = kf;
+        fastForwardTargetIdx_ = target;
+        needsDecoderReset_.store(true);
+    }
+
+    if (!audioSamples_.empty() && !samples_.empty()) {
+        currentAudioIdx_ = (fastForwardTargetIdx_ * audioSamples_.size()) / samples_.size();
+    }
+    if (aacDecoder_) {
+        AACFlushCodec(aacDecoder_);
+    }
+    if (audioManager_) {
+        audioManager_->clearQueue();
     }
 }
 
 float Mp4PreviewPlayer::getProgress() const {
     if (!isReady_.load() || samples_.empty()) return 0.0f;
+    return std::clamp(static_cast<float>(currentSampleIdx_) / static_cast<float>(samples_.size()), 0.0f, 1.0f);
+}
+
+float Mp4PreviewPlayer::getBufferedProgress() const {
+    if (!isReady_.load() || samples_.empty()) return 0.0f;
     size_t dl = downloadedBytes_.load(std::memory_order_acquire);
     size_t playableSamples = samples_.size();
     for (size_t i = 0; i < samples_.size(); ++i) {
         if (samples_[i].offset + samples_[i].size > dl) {
-            playableSamples = std::max<size_t>(1, i);
+            playableSamples = i;
             break;
         }
     }
-    return std::clamp(static_cast<float>(currentSampleIdx_) / static_cast<float>(playableSamples), 0.0f, 1.0f);
+    return std::clamp(static_cast<float>(playableSamples) / static_cast<float>(samples_.size()), 0.0f, 1.0f);
+}
+
+int Mp4PreviewPlayer::getCurrentSeconds() const {
+    if (!isReady_.load()) return 0;
+    return static_cast<int>(currentSampleIdx_ / 30);
+}
+
+int Mp4PreviewPlayer::getTotalSeconds() const {
+    if (!isReady_.load() || samples_.empty()) return 0;
+    return std::max(1, static_cast<int>(samples_.size() / 30));
 }
 
 void Mp4PreviewPlayer::setVideoUrl(const std::string& url) {
@@ -273,11 +356,13 @@ bool Mp4PreviewPlayer::parseMp4(const uint8_t* data, size_t size) {
         return false;
     }
 
-    // Find video trak inside moov
+    // Find video and audio traks inside moov
     size_t moovEnd = moovStart + moovSize;
     size_t curTrak = moovStart + moovHdr;
     size_t videoTrakStart = 0, videoTrakSize = 0, videoTrakHdr = 0;
+    size_t audioTrakStart = 0, audioTrakSize = 0, audioTrakHdr = 0;
     bool foundVideoTrak = false;
+    bool foundAudioTrak = false;
 
     while (curTrak + 8 <= moovEnd) {
         size_t tkStart = 0, tkSize = 0, tkHdr = 0;
@@ -289,12 +374,16 @@ bool Mp4PreviewPlayer::parseMp4(const uint8_t* data, size_t size) {
             size_t hdlrStart = 0, hdlrSize = 0, hdlrHdr = 0;
             if (findBox("hdlr", mdiaStart + mdiaHdr, mdiaStart + mdiaSize, hdlrStart, hdlrSize, hdlrHdr)) {
                 if (hdlrSize >= hdlrHdr + 12) {
-                    if (std::memcmp(data + hdlrStart + hdlrHdr + 8, "vide", 4) == 0) {
+                    if (std::memcmp(data + hdlrStart + hdlrHdr + 8, "vide", 4) == 0 && !foundVideoTrak) {
                         videoTrakStart = tkStart;
                         videoTrakSize = tkSize;
                         videoTrakHdr = tkHdr;
                         foundVideoTrak = true;
-                        break;
+                    } else if (std::memcmp(data + hdlrStart + hdlrHdr + 8, "soun", 4) == 0 && !foundAudioTrak) {
+                        audioTrakStart = tkStart;
+                        audioTrakSize = tkSize;
+                        audioTrakHdr = tkHdr;
+                        foundAudioTrak = true;
                     }
                 }
             }
@@ -459,6 +548,110 @@ bool Mp4PreviewPlayer::parseMp4(const uint8_t* data, size_t size) {
         }
     }
 
+    // Parse audio trak sample table (AAC-LC 48kHz stereo) if present
+    audioSamples_.clear();
+    currentAudioIdx_ = 0;
+    aacDecoder_ = nullptr;
+    if (foundAudioTrak) {
+        size_t aMdiaStart = 0, aMdiaSize = 0, aMdiaHdr = 0;
+        size_t aMinfStart = 0, aMinfSize = 0, aMinfHdr = 0;
+        size_t aStblStart = 0, aStblSize = 0, aStblHdr = 0;
+        if (findBox("mdia", audioTrakStart + audioTrakHdr, audioTrakStart + audioTrakSize, aMdiaStart, aMdiaSize, aMdiaHdr) &&
+            findBox("minf", aMdiaStart + aMdiaHdr, aMdiaStart + aMdiaSize, aMinfStart, aMinfSize, aMinfHdr) &&
+            findBox("stbl", aMinfStart + aMinfHdr, aMinfStart + aMinfSize, aStblStart, aStblSize, aStblHdr)) {
+
+            size_t aStszStart = 0, aStszSize = 0, aStszHdr = 0;
+            size_t aStscStart = 0, aStscSize = 0, aStscHdr = 0;
+            if (findBox("stsz", aStblStart + aStblHdr, aStblStart + aStblSize, aStszStart, aStszSize, aStszHdr) &&
+                findBox("stsc", aStblStart + aStblHdr, aStblStart + aStblSize, aStscStart, aStscSize, aStscHdr)) {
+
+                const uint8_t* aStszData = data + aStszStart + aStszHdr;
+                uint32_t aDefSize = readBigU32(aStszData + 4);
+                uint32_t aSampleCount = readBigU32(aStszData + 8);
+                if (aSampleCount > 0 && aSampleCount <= 100000) {
+                    std::vector<uint32_t> aSampleSizes(aSampleCount);
+                    bool stszOk = true;
+                    if (aDefSize != 0) {
+                        std::fill(aSampleSizes.begin(), aSampleSizes.end(), aDefSize);
+                    } else if (aStszSize >= aStszHdr + 12 + aSampleCount * 4) {
+                        for (uint32_t i = 0; i < aSampleCount; ++i) {
+                            aSampleSizes[i] = readBigU32(aStszData + 12 + i * 4);
+                        }
+                    } else {
+                        stszOk = false;
+                    }
+
+                    std::vector<uint64_t> aChunkOffsets;
+                    size_t aStcoStart = 0, aStcoSize = 0, aStcoHdr = 0;
+                    if (stszOk && findBox("stco", aStblStart + aStblHdr, aStblStart + aStblSize, aStcoStart, aStcoSize, aStcoHdr)) {
+                        const uint8_t* aStcoData = data + aStcoStart + aStcoHdr;
+                        uint32_t aChunkCount = readBigU32(aStcoData + 4);
+                        aChunkOffsets.resize(aChunkCount);
+                        for (uint32_t i = 0; i < aChunkCount; ++i) {
+                            aChunkOffsets[i] = readBigU32(aStcoData + 8 + i * 4);
+                        }
+                    } else if (stszOk) {
+                        size_t aCo64Start = 0, aCo64Size = 0, aCo64Hdr = 0;
+                        if (findBox("co64", aStblStart + aStblHdr, aStblStart + aStblSize, aCo64Start, aCo64Size, aCo64Hdr)) {
+                            const uint8_t* aCo64Data = data + aCo64Start + aCo64Hdr;
+                            uint32_t aChunkCount = readBigU32(aCo64Data + 4);
+                            aChunkOffsets.resize(aChunkCount);
+                            for (uint32_t i = 0; i < aChunkCount; ++i) {
+                                aChunkOffsets[i] = readBigU64(aCo64Data + 8 + i * 8);
+                            }
+                        }
+                    }
+
+                    if (!aChunkOffsets.empty()) {
+                        const uint8_t* aStscData = data + aStscStart + aStscHdr;
+                        uint32_t aStscCount = readBigU32(aStscData + 4);
+                        std::vector<StscEntry> aStscEntries(aStscCount);
+                        for (uint32_t i = 0; i < aStscCount; ++i) {
+                            aStscEntries[i].firstChunk = readBigU32(aStscData + 8 + i * 12);
+                            aStscEntries[i].samplesPerChunk = readBigU32(aStscData + 8 + i * 12 + 4);
+                        }
+
+                        audioSamples_.reserve(aSampleCount);
+                        size_t curASample = 0;
+                        for (size_t chunkIdx = 0; chunkIdx < aChunkOffsets.size(); ++chunkIdx) {
+                            uint32_t chunkNum = static_cast<uint32_t>(chunkIdx + 1);
+                            uint32_t spc = 1;
+                            for (const auto& entry : aStscEntries) {
+                                if (chunkNum >= entry.firstChunk) {
+                                    spc = entry.samplesPerChunk;
+                                } else {
+                                    break;
+                                }
+                            }
+                            uint64_t chunkOff = aChunkOffsets[chunkIdx];
+                            for (uint32_t s = 0; s < spc && curASample < aSampleCount; ++s) {
+                                Mp4Sample asmp{};
+                                asmp.offset = chunkOff;
+                                asmp.size = aSampleSizes[curASample];
+                                asmp.isKeyframe = true;
+                                audioSamples_.push_back(asmp);
+                                chunkOff += asmp.size;
+                                curASample++;
+                            }
+                        }
+
+                        if (!audioSamples_.empty()) {
+                            std::memset(g_aacDecoderArena, 0, sizeof(g_aacDecoderArena));
+                            aacDecoder_ = AACInitDecoderPre(g_aacDecoderArena, sizeof(g_aacDecoderArena));
+                            if (aacDecoder_) {
+                                AACFrameInfo aacInfo{};
+                                aacInfo.nChans = 2;
+                                aacInfo.sampRateCore = 48000;
+                                aacInfo.profile = AAC_PROFILE_LC;
+                                AACSetRawBlockParams(aacDecoder_, 0, &aacInfo);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     return !samples_.empty();
 }
 
@@ -475,11 +668,13 @@ void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
                     mp4DataPtr_ = g_mp4DownloadBuffer;
                     mp4DataSize_ = dl;
                     currentSampleIdx_ = 0;
+                    fastForwardTargetIdx_ = 0;
+                    currentAudioIdx_ = 0;
                     lastFrameTime_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(frameIntervalMs_);
                     needsDecoderReset_.store(true);
                     isReady_.store(true);
-                    luna::util::CrashLogger::log("[Mp4PreviewPlayer] Progressive start! Parsed %zu samples at %zu KB downloaded",
-                                                 samples_.size(), dl / 1024);
+                    luna::util::CrashLogger::log("[Mp4PreviewPlayer] Progressive start! Parsed %zu video + %zu audio samples at %zu KB",
+                                                 samples_.size(), audioSamples_.size(), dl / 1024);
                 }
             }
         }
@@ -491,10 +686,13 @@ void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
     std::lock_guard<std::mutex> lk(downloadMutex_);
     if (!isReady_.load() || samples_.empty() || !mp4DataPtr_) return;
 
+    const bool isFastForwarding = (currentSampleIdx_ < fastForwardTargetIdx_);
     auto now = std::chrono::steady_clock::now();
-    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFrameTime_).count();
-    if (elapsedMs < frameIntervalMs_) {
-        return;
+    if (!isFastForwarding) {
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFrameTime_).count();
+        if (elapsedMs < frameIntervalMs_) {
+            return;
+        }
     }
     lastFrameTime_ = now;
 
@@ -505,21 +703,25 @@ void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
     size_t availableBytes = downloadedBytes_.load(std::memory_order_acquire);
     if (availableBytes == 0) return;
 
-    // On initial frames before first decoded picture, feed up to 4 samples to prime hardware DPB without waiting
-    int maxSteps = hasDecodedFrame_.load() ? 1 : 4;
+    int maxSteps = isFastForwarding ? 35 : (hasDecodedFrame_.load() ? 1 : 4);
     for (int step = 0; step < maxSteps; ++step) {
         if (currentSampleIdx_ >= samples_.size()) {
             currentSampleIdx_ = 0;
+            fastForwardTargetIdx_ = 0;
+            currentAudioIdx_ = 0;
         }
 
         const auto& sample = samples_[currentSampleIdx_];
         if (sample.offset + sample.size > availableBytes) {
             if (isDownloading_.load()) {
                 // Buffering: wait for HTTP stream to deliver this sample
+                fastForwardTargetIdx_ = currentSampleIdx_;
                 return;
             } else {
                 // Download reached 16 MB cap or EOF: wrap immediately to beginning of trailer
                 currentSampleIdx_ = 0;
+                fastForwardTargetIdx_ = 0;
+                currentAudioIdx_ = 0;
                 if (samples_[0].offset + samples_[0].size > availableBytes) return;
             }
         }
@@ -552,12 +754,16 @@ void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
         }
 
         currentSampleIdx_ = (currentSampleIdx_ + 1) % samples_.size();
+        const bool reachedTarget = (currentSampleIdx_ >= fastForwardTargetIdx_);
+        if (reachedTarget) {
+            fastForwardTargetIdx_ = 0;
+        }
 
         if (!annexBBuffer_.empty()) {
             DecodedVideoFrame outFrame{};
             uint64_t pts = currentSampleIdx_ * 33333; // 30 FPS PTS
-            if (decoder->decode(annexBBuffer_.data(), annexBBuffer_.size(), pts, outFrame)) {
-                if (outFrame.width > 0 && outFrame.height > 0 && outFrame.y && outFrame.u && outFrame.v) {
+            if (decoder->decode(annexBBuffer_.data(), annexBBuffer_.size(), pts, outFrame, reachedTarget)) {
+                if (reachedTarget && outFrame.width > 0 && outFrame.height > 0 && outFrame.y && outFrame.u && outFrame.v) {
                     const int dw = frameWidth_;
                     const int dh = frameHeight_;
                     const int sw = outFrame.width;
@@ -600,6 +806,38 @@ void Mp4PreviewPlayer::update(VideoDecoder* decoder) {
                     hasDecodedFrame_.store(true);
                     break;
                 }
+            }
+        }
+    }
+
+    // Decode synchronized AAC-LC audio frames when unmuted (Fullscreen mode)
+    if (!audioSamples_.empty() && !samples_.empty() && aacDecoder_ && currentSampleIdx_ >= fastForwardTargetIdx_) {
+        size_t targetAudioIdx = (currentSampleIdx_ * audioSamples_.size()) / samples_.size();
+        if (muted_.load() || !audioManager_) {
+            currentAudioIdx_ = targetAudioIdx;
+        } else {
+            if (currentAudioIdx_ + 8 < targetAudioIdx || currentAudioIdx_ > targetAudioIdx + 8) {
+                currentAudioIdx_ = targetAudioIdx;
+                AACFlushCodec(aacDecoder_);
+            }
+            int decodedAudioFrames = 0;
+            while (currentAudioIdx_ <= targetAudioIdx + 1 && currentAudioIdx_ < audioSamples_.size() && decodedAudioFrames < 3) {
+                const auto& asmp = audioSamples_[currentAudioIdx_];
+                if (asmp.offset + asmp.size > availableBytes) {
+                    break;
+                }
+                unsigned char* inptr = const_cast<unsigned char*>(mp4DataPtr_ + asmp.offset);
+                int bytesLeft = static_cast<int>(asmp.size);
+                int err = AACDecode(aacDecoder_, &inptr, &bytesLeft, g_aacPcmBuffer);
+                if (err == 0) {
+                    AACFrameInfo aacInfo{};
+                    AACGetLastFrameInfo(aacDecoder_, &aacInfo);
+                    if (aacInfo.outputSamps > 0 && aacInfo.nChans > 0) {
+                        audioManager_->outputPcm(g_aacPcmBuffer, static_cast<size_t>(aacInfo.outputSamps / aacInfo.nChans));
+                    }
+                }
+                currentAudioIdx_++;
+                decodedAudioFrames++;
             }
         }
     }

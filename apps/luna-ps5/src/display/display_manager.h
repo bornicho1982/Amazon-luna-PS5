@@ -238,6 +238,7 @@ public:
     void putPixel(int x, int y, uint32_t colorArgb);
     uint32_t getPixel(int x, int y) const;
     void blendPixel(int x, int y, uint32_t colorArgb, uint8_t alpha);
+    void blendRectUniform(int x, int y, int w, int h, uint32_t colorArgb, uint8_t alpha);
 
     bool isReady() const { return isReady_; }
 
@@ -268,7 +269,6 @@ private:
     int heroBannerHeight_ = 0;
     void loadStaticHeroBanner();
 
-    void blendRectUniform(int x, int y, int w, int h, uint32_t colorArgb, uint8_t alpha);
     float detailScrollY_ = 0.0f;
     std::string searchQuery_;
     bool deferPresent_ = false;

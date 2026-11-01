@@ -18,6 +18,7 @@ public:
     void shutdown();
 
     void outputPcm(const int16_t* pcmData, size_t sampleCount);
+    void clearQueue();
 
     bool isReady() const { return isReady_.load(); }
 
