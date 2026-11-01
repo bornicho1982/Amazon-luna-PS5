@@ -1259,7 +1259,8 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
                                         int searchLetterIdx,
                                         int searchGridIdx,
                                         const std::vector<GameTile>& filteredGames,
-                                        bool hoverCardOpen) {
+                                        bool hoverCardOpen,
+                                        const std::vector<std::string>* favoriteIds) {
     if (!isReady_) return;
     HomeScreenProps props{
         .collections = collections,
@@ -1282,7 +1283,8 @@ void DisplayManager::drawLunaHomeScreen(const std::vector<LunaCollection>& colle
         .searchGridIdx = searchGridIdx,
         .filteredGames = filteredGames,
         .hoverCardOpen = hoverCardOpen,
-        .searchQuery = searchQuery_
+        .searchQuery = searchQuery_,
+        .favoriteIds = favoriteIds
     };
     LunaClayUI::renderHomeScreen(*this, props);
 }

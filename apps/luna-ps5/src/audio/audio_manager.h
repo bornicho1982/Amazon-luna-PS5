@@ -19,6 +19,7 @@ public:
 
     void outputPcm(const int16_t* pcmData, size_t sampleCount);
     void clearQueue();
+    size_t getQueuedSamples() const;
 
     bool isReady() const { return isReady_.load(); }
 
@@ -31,8 +32,9 @@ private:
     int audioFormat_ = 1; // 1 = S16Stereo, 4 = FloatStereo
     std::atomic<bool> isReady_{false};
     std::atomic<bool> running_{false};
-    std::mutex queueMutex_;
+    mutable std::mutex queueMutex_;
     std::deque<int16_t> queue_;
+    bool buffering_ = true;
     std::thread audioThread_;
 };
 

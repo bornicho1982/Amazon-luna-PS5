@@ -19,8 +19,9 @@ namespace luna::audio {
 
 namespace {
 constexpr uint32_t kGrainFrames = 256;
-constexpr size_t kMaxQueuedSamples = 48000 * 2 / 4; // Max ~250ms stereo samples
-constexpr size_t kTrimToSamples = 48000 * 2 / 10;   // Trim to ~100ms on overflow
+constexpr size_t kMaxQueuedSamples = 48000 * 2;     // Max ~1000ms stereo samples
+constexpr size_t kTrimToSamples = 48000 * 2 / 2;    // Trim to ~500ms on overflow
+constexpr size_t kPreRollSamples = 2048 * 2;        // ~42ms stereo pre-roll to prevent underrun stutter
 } // namespace
 
 AudioManager::AudioManager() = default;
@@ -104,6 +105,12 @@ void AudioManager::outputPcm(const int16_t* pcmData, size_t sampleCount) {
 void AudioManager::clearQueue() {
     std::lock_guard<std::mutex> lock(queueMutex_);
     queue_.clear();
+    buffering_ = true;
+}
+
+size_t AudioManager::getQueuedSamples() const {
+    std::lock_guard<std::mutex> lock(queueMutex_);
+    return queue_.size();
 }
 
 void AudioManager::audioLoop() {
@@ -121,19 +128,18 @@ void AudioManager::audioLoop() {
         {
             std::lock_guard<std::mutex> lock(queueMutex_);
             const size_t needed = kGrainFrames * 2;
-            if (queue_.size() >= needed) {
+            if (buffering_) {
+                if (queue_.size() >= kPreRollSamples) {
+                    buffering_ = false;
+                }
+            }
+            if (!buffering_ && queue_.size() >= needed) {
                 for (size_t i = 0; i < needed; ++i) {
                     s16Grain[i] = queue_[i];
                 }
                 queue_.erase(queue_.begin(), queue_.begin() + static_cast<std::ptrdiff_t>(needed));
-            } else if (!queue_.empty()) {
-                const size_t avail = queue_.size();
-                for (size_t i = 0; i < avail; ++i) {
-                    s16Grain[i] = queue_[i];
-                }
-                std::fill(s16Grain.begin() + static_cast<std::ptrdiff_t>(avail), s16Grain.end(), 0);
-                queue_.clear();
             } else {
+                buffering_ = true;
                 std::fill(s16Grain.begin(), s16Grain.end(), 0);
             }
         }

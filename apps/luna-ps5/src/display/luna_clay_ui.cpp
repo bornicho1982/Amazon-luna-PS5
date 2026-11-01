@@ -849,25 +849,43 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                     }));
                                 }
 
-                                // Botón 4: (Icono Gráfico △) Favorito
+                                // Botón 4: (Icono Gráfico △) Favorito / En Favoritos
+                                bool isHeroFav = false;
+                                if (props.favoriteIds) {
+                                    for (const auto& fid : *props.favoriteIds) {
+                                        if (fid == activeGame->id) {
+                                            isHeroFav = true;
+                                            break;
+                                        }
+                                    }
+                                }
                                 CLAY_AUTO_ID({
                                     .layout = {
-                                        .sizing = { CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(48) },
+                                        .sizing = { CLAY_SIZING_FIXED(isHeroFav ? 178.0f : 160.0f), CLAY_SIZING_FIXED(48) },
                                         .padding = { 14, 16, 0, 0 },
                                         .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .childGap = 10,
                                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                                     },
-                                    .backgroundColor = btn3Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
+                                    .backgroundColor = btn3Foc
+                                        ? Clay_Color{255, 255, 255, 255}
+                                        : (isHeroFav ? Clay_Color{16, 62, 52, 255} : Clay_Color{26, 33, 51, 255}),
                                     .cornerRadius = CLAY_CORNER_RADIUS(24),
-                                    .border = { .color = btn3Foc ? Clay_Color{0, 112, 209, 255} : Clay_Color{44, 54, 80, 255}, .width = LUNA_BORDER(btn3Foc ? 2 : 1) }
+                                    .border = {
+                                        .color = btn3Foc
+                                            ? Clay_Color{0, 112, 209, 255}
+                                            : (isHeroFav ? Clay_Color{16, 185, 129, 255} : Clay_Color{44, 54, 80, 255}),
+                                        .width = LUNA_BORDER((btn3Foc || isHeroFav) ? 2 : 1)
+                                    }
                                 }) {
                                     CLAY_AUTO_ID({
                                         .layout = { .sizing = { CLAY_SIZING_FIXED(26), CLAY_SIZING_FIXED(26) }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
                                         .custom = { .customData = clay.allocControllerButton(DualSenseBtn::Triangle, btn3Foc) }
                                     }) {}
-                                    CLAY_TEXT(CLAY_STRING("Favorito"), CLAY_TEXT_CONFIG({
-                                        .textColor = btn3Foc ? Clay_Color{7, 9, 17, 255} : Clay_Color{240, 244, 255, 255},
+                                    CLAY_TEXT(isHeroFav ? CLAY_STRING("En Favoritos") : CLAY_STRING("Favorito"), CLAY_TEXT_CONFIG({
+                                        .textColor = btn3Foc
+                                            ? Clay_Color{7, 9, 17, 255}
+                                            : (isHeroFav ? Clay_Color{110, 231, 183, 255} : Clay_Color{240, 244, 255, 255}),
                                         .fontSize = 15
                                     }));
                                 }
@@ -890,7 +908,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                     .cornerRadius = CLAY_CORNER_RADIUS(11),
                                     .border = { .color = isHeroActive ? Clay_Color{56, 189, 248, 255} : Clay_Color{44, 55, 78, 255}, .width = LUNA_BORDER(1) }
                                 }) {
-                                    CLAY_TEXT(CLAY_STRING("< / >  Deslizar"), CLAY_TEXT_CONFIG({
+                                    CLAY_TEXT(CLAY_STRING("Joystick: Deslizar   |   Cruceta: Botones"), CLAY_TEXT_CONFIG({
                                         .textColor = { 255, 255, 255, 255 },
                                         .fontSize = 11
                                     }));

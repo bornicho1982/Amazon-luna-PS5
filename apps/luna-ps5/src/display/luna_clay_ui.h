@@ -29,6 +29,7 @@ struct HomeScreenProps {
     const std::vector<GameTile>& filteredGames;
     bool hoverCardOpen = false;
     std::string searchQuery;
+    const std::vector<std::string>* favoriteIds = nullptr;
 };
 
 struct GameDetailProps {

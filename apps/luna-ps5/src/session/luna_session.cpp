@@ -677,9 +677,6 @@ LunaSessionClient::LunaSessionClient() {
                 std::string playToken, buildId, profileId;
                 resolveGameDetails(tileToResolve->id, token, serial, playToken, buildId, profileId, tileToResolve);
                 tileToResolve->detailsLoaded = true;
-                if (!tileToResolve->videoUrl.empty()) {
-                    luna::media::Mp4PreviewPlayer::instance().setVideoUrl(tileToResolve->videoUrl);
-                }
             }
         }
     });

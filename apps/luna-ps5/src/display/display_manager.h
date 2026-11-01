@@ -145,7 +145,8 @@ public:
                             int searchLetterIdx = 0,
                             int searchGridIdx = 0,
                             const std::vector<GameTile>& filteredGames = {},
-                            bool hoverCardOpen = false);
+                            bool hoverCardOpen = false,
+                            const std::vector<std::string>* favoriteIds = nullptr);
 
     void drawGameDetailScreen(const GameTile& game,
                               const PlayerProfileInfo& profile,

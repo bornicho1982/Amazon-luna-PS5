@@ -66,6 +66,10 @@ private:
     std::string currentUrl_;
     std::string pendingUrl_;
     std::atomic<bool> hasNewRequest_{false};
+    std::atomic<bool> hasRangeRequest_{false};
+    std::atomic<uint64_t> pendingRangeOffset_{0};
+    std::atomic<uint64_t> windowBaseOffset_{0};
+    std::atomic<bool> reachedTrueEof_{false};
     std::atomic<bool> workerRunning_{false};
     std::atomic<bool> isDownloading_{false};
     std::atomic<bool> isReady_{false};
@@ -90,6 +94,8 @@ private:
     size_t currentSampleIdx_ = 0;
     size_t fastForwardTargetIdx_ = 0;
     size_t currentAudioIdx_ = 0;
+    int videoFps_ = 30;
+    int samplesPerTick_ = 1;
 
     std::chrono::steady_clock::time_point lastFrameTime_;
     int frameIntervalMs_ = 33; // ~30 FPS

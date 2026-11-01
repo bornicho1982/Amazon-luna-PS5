@@ -498,40 +498,42 @@ int main(int argc, char* argv[]) {
 
     std::vector<luna::display::LunaCollection> tabCollections[4];
 
-    auto rebuildTabCollections = [&]() {
-        // Tab 0: Inicio (landing_home real)
-        tabCollections[0] = sessionClient.getHomeCollections();
-        if (tabCollections[0].empty()) {
-            luna::display::LunaCollection fallbackRow;
-            fallbackRow.id = "fallback_row";
-            fallbackRow.title = "Destacados en Amazon Luna";
-            fallbackRow.items = games;
-            tabCollections[0].push_back(fallbackRow);
-        }
-
-        // Tab 1: GameNight (multistate_game_night real + colecciones multijugador y fiesta)
-        tabCollections[1] = sessionClient.getGameNightCollections();
-        if (tabCollections[1].empty()) {
-            luna::display::LunaCollection partyCol;
-            partyCol.id = "gamenight_party";
-            partyCol.title = "Juegos de fiesta y multijugador";
-            for (const auto& g : games) {
-                std::string desc = g.synopsis;
-                for (auto& ch : desc) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-                if (g.inputMethods.find("jugad") != std::string::npos ||
-                    desc.find("multijugador") != std::string::npos ||
-                    desc.find("multiplayer") != std::string::npos ||
-                    desc.find("party") != std::string::npos ||
-                    desc.find("coop") != std::string::npos ||
-                    desc.find("cooperativo") != std::string::npos ||
-                    g.title.find("Jackbox") != std::string::npos ||
-                    g.title.find("Party") != std::string::npos) {
-                    partyCol.items.push_back(g);
-                }
+    auto rebuildTabCollections = [&](bool preserveHomeAndGameNight = false) {
+        if (!preserveHomeAndGameNight || tabCollections[0].empty()) {
+            // Tab 0: Inicio (landing_home real)
+            tabCollections[0] = sessionClient.getHomeCollections();
+            if (tabCollections[0].empty()) {
+                luna::display::LunaCollection fallbackRow;
+                fallbackRow.id = "fallback_row";
+                fallbackRow.title = "Destacados en Amazon Luna";
+                fallbackRow.items = games;
+                tabCollections[0].push_back(fallbackRow);
             }
-            if (!partyCol.items.empty()) tabCollections[1].push_back(partyCol);
+
+            // Tab 1: GameNight (multistate_game_night real + colecciones multijugador y fiesta)
+            tabCollections[1] = sessionClient.getGameNightCollections();
+            if (tabCollections[1].empty()) {
+                luna::display::LunaCollection partyCol;
+                partyCol.id = "gamenight_party";
+                partyCol.title = "Juegos de fiesta y multijugador";
+                for (const auto& g : games) {
+                    std::string desc = g.synopsis;
+                    for (auto& ch : desc) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    if (g.inputMethods.find("jugad") != std::string::npos ||
+                        desc.find("multijugador") != std::string::npos ||
+                        desc.find("multiplayer") != std::string::npos ||
+                        desc.find("party") != std::string::npos ||
+                        desc.find("coop") != std::string::npos ||
+                        desc.find("cooperativo") != std::string::npos ||
+                        g.title.find("Jackbox") != std::string::npos ||
+                        g.title.find("Party") != std::string::npos) {
+                        partyCol.items.push_back(g);
+                    }
+                }
+                if (!partyCol.items.empty()) tabCollections[1].push_back(partyCol);
+            }
+            if (tabCollections[1].empty()) tabCollections[1] = tabCollections[0];
         }
-        if (tabCollections[1].empty()) tabCollections[1] = tabCollections[0];
 
         // Tab 2: Mi espacio (Jugados recientemente 16:9 + Mis juegos favoritos)
         tabCollections[2].clear();
@@ -575,10 +577,24 @@ int main(int argc, char* argv[]) {
         favCol.isHeroRotator = false;
         favCol.isRecentlyPlayed16_9 = false;
         for (const auto& favId : favoriteIds) {
+            bool foundFav = false;
             for (const auto& g : games) {
                 if (g.id == favId) {
                     favCol.items.push_back(g);
+                    foundFav = true;
                     break;
+                }
+            }
+            for (int tIdx = 0; tIdx < 2 && !foundFav; ++tIdx) {
+                for (const auto& c : tabCollections[tIdx]) {
+                    for (const auto& it : c.items) {
+                        if (it.id == favId) {
+                            favCol.items.push_back(it);
+                            foundFav = true;
+                            break;
+                        }
+                    }
+                    if (foundFav) break;
                 }
             }
         }
@@ -1092,13 +1108,6 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 } else {
-                    // Triangulo (△) -> Abrir Menu de Configuracion
-                    if (pressedNow & luna::input::PAD_TRIANGLE) {
-                        appState = AppState::Settings;
-                        settingsSelectedIdx = 0;
-                        break;
-                    }
-
                     // L1 / R1 para cambiar de pestaña en cualquier momento
                     if (pressedNow & luna::input::PAD_L1) {
                         activeTabIdx = (activeTabIdx + static_cast<int>(kNavTabs.size()) - 1) % static_cast<int>(kNavTabs.size());
@@ -1121,8 +1130,12 @@ int main(int argc, char* argv[]) {
 
                     if (navElapsedMs > navThresholdMs) {
                         bool moved = false;
-                        bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -13000);
-                        bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 13000);
+                        bool dpadLeft = (padState.buttons & luna::input::PAD_LEFT) != 0;
+                        bool dpadRight = (padState.buttons & luna::input::PAD_RIGHT) != 0;
+                        bool stickLeft = (padState.leftX < -13000) || (padState.rightX < -13000);
+                        bool stickRight = (padState.leftX > 13000) || (padState.rightX > 13000);
+                        bool moveLeft = dpadLeft || stickLeft;
+                        bool moveRight = dpadRight || stickRight;
                         bool moveUp = (padState.buttons & luna::input::PAD_UP) || (padState.leftY < -13000);
                         bool moveDown = (padState.buttons & luna::input::PAD_DOWN) || (padState.leftY > 13000);
 
@@ -1156,6 +1169,36 @@ int main(int argc, char* argv[]) {
                                 selectedRowIdx++;
                                 focusZone = 2;
                                 moved = true;
+                            } else if (selectedRowIdx == 0 && !curCols.empty() && curCols[0].isHeroRotator && activeTabIdx != 3) {
+                                int maxC = static_cast<int>(curCols[0].items.size());
+                                int curSlide = (!rowSelectedCol.empty()) ? std::clamp(rowSelectedCol[0], 0, std::max(0, maxC - 1)) : 0;
+                                bool isPremSlide = (!curCols[0].items.empty() &&
+                                                   (curCols[0].items[curSlide].title.find("Luna Premium") != std::string::npos ||
+                                                    curCols[0].items[curSlide].id.find("luna_premium") != std::string::npos));
+                                // Joystick L/R desliza el juego del Banner; Cruceta (Botonera) L/R elige entre los 4 botones de acción
+                                if (stickLeft || (dpadLeft && isPremSlide)) {
+                                    if (!rowSelectedCol.empty()) {
+                                        rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % std::max(1, maxC);
+                                    }
+                                    heroBtnIdx = 0;
+                                    moved = true;
+                                } else if (stickRight || (dpadRight && isPremSlide)) {
+                                    if (!rowSelectedCol.empty()) {
+                                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
+                                    }
+                                    heroBtnIdx = 0;
+                                    moved = true;
+                                } else if (dpadLeft) {
+                                    if (heroBtnIdx > 0) {
+                                        heroBtnIdx--;
+                                        moved = true;
+                                    }
+                                } else if (dpadRight) {
+                                    if (heroBtnIdx < 3) {
+                                        heroBtnIdx++;
+                                        moved = true;
+                                    }
+                                }
                             } else if (moveLeft) {
                                 if (activeTabIdx == 3) {
                                     if (!rowSelectedCol.empty() && rowSelectedCol[0] > 0) {
@@ -1163,14 +1206,10 @@ int main(int argc, char* argv[]) {
                                         moved = true;
                                     }
                                 } else if (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) {
-                                    int maxC = (selectedRowIdx < numRows) ? static_cast<int>(curCols[selectedRowIdx].items.size()) : 1;
-                                    if (selectedRowIdx == 0 && curCols[0].isHeroRotator) {
-                                        rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % std::max(1, maxC);
-                                        heroBtnIdx = 0;
-                                    } else if (rowSelectedCol[selectedRowIdx] > 0) {
+                                    if (rowSelectedCol[selectedRowIdx] > 0) {
                                         rowSelectedCol[selectedRowIdx]--;
+                                        moved = true;
                                     }
-                                    moved = true;
                                 }
                             } else if (moveRight) {
                                 if (activeTabIdx == 3) {
@@ -1180,13 +1219,10 @@ int main(int argc, char* argv[]) {
                                     }
                                 } else if (selectedRowIdx < static_cast<int>(rowSelectedCol.size())) {
                                     int maxC = (selectedRowIdx < numRows) ? static_cast<int>(curCols[selectedRowIdx].items.size()) : 1;
-                                    if (selectedRowIdx == 0 && curCols[0].isHeroRotator) {
-                                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
-                                        heroBtnIdx = 0;
-                                    } else if (rowSelectedCol[selectedRowIdx] + 1 < maxC) {
+                                    if (rowSelectedCol[selectedRowIdx] + 1 < maxC) {
                                         rowSelectedCol[selectedRowIdx]++;
+                                        moved = true;
                                     }
-                                    moved = true;
                                 }
                             }
                         }
@@ -1266,10 +1302,14 @@ int main(int argc, char* argv[]) {
                                         mediaViewerFromCatalog = true;
                                         appState = AppState::MediaViewer;
                                     } else {
-                                        toggleFavorite(focusedGame->id);
-                                        g_lastStatusText = isFavorite(focusedGame->id)
-                                            ? ("Añadido a Favoritos: " + focusedGame->title)
-                                            : ("Quitado de Favoritos: " + focusedGame->title);
+                                        std::string favTargetId = focusedGame->id;
+                                        std::string favTargetTitle = focusedGame->title;
+                                        toggleFavorite(favTargetId);
+                                        rebuildTabCollections(true);
+                                        syncRowSelectionSize();
+                                        g_lastStatusText = isFavorite(favTargetId)
+                                            ? ("Añadido a Mis juegos favoritos: " + favTargetTitle)
+                                            : ("Quitado de Mis juegos favoritos: " + favTargetTitle);
                                     }
                                 }
                             } else {
@@ -1308,10 +1348,14 @@ int main(int argc, char* argv[]) {
 
                     // Boton TRIANGULO: Añadir / Quitar de Favoritos
                     if ((pressedNow & luna::input::PAD_TRIANGLE) && focusedGame && focusedGame->title != "Luna Premium") {
-                        toggleFavorite(focusedGame->id);
-                        g_lastStatusText = isFavorite(focusedGame->id)
-                            ? ("Añadido a Favoritos: " + focusedGame->title)
-                            : ("Quitado de Favoritos: " + focusedGame->title);
+                        std::string favTargetId = focusedGame->id;
+                        std::string favTargetTitle = focusedGame->title;
+                        toggleFavorite(favTargetId);
+                        rebuildTabCollections(true);
+                        syncRowSelectionSize();
+                        g_lastStatusText = isFavorite(favTargetId)
+                            ? ("Añadido a Mis juegos favoritos: " + favTargetTitle)
+                            : ("Quitado de Mis juegos favoritos: " + favTargetTitle);
                         break;
                     }
 
@@ -1363,9 +1407,12 @@ int main(int argc, char* argv[]) {
                 // Si el juego enfocado aún no tiene tráiler o metadatos completos, resolver dinámicamente en segundo plano
                 const auto hoverIdleMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTileChangeTime).count();
 
-                // Auto-avance suave del carrusel Hero cada 16s cuando el usuario está en el Banner y no pulsa botones
+                // Auto-avance suave del carrusel Hero: esperar a que termine el tráiler (o 16s si no hay tráiler)
+                bool trailerStillPlaying = (activeHeroTile != nullptr && !activeHeroTile->videoUrl.empty() &&
+                                            luna::media::Mp4PreviewPlayer::instance().getProgress() < 0.96f);
                 if (selectedRowIdx == 0 && !curCols.empty() && curCols[0].isHeroRotator &&
-                    curCols[0].items.size() > 1 && !profileMenuOpen && !searchOpen && hoverIdleMs >= 16000) {
+                    curCols[0].items.size() > 1 && !profileMenuOpen && !searchOpen &&
+                    hoverIdleMs >= 16000 && !trailerStillPlaying) {
                     int maxHero = static_cast<int>(curCols[0].items.size());
                     if (!rowSelectedCol.empty()) {
                         rowSelectedCol[0] = (rowSelectedCol[0] + 1) % maxHero;
@@ -1411,7 +1458,8 @@ int main(int argc, char* argv[]) {
                     searchLetterIdx,
                     searchGridIdx,
                     filteredGames,
-                    false
+                    false,
+                    &favoriteIds
                 );
                 break;
             }
