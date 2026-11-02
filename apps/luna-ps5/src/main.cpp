@@ -483,6 +483,7 @@ int main(int argc, char* argv[]) {
     auto updateFilteredGames = [&]() {
         filteredGames.clear();
         const std::string q = toLowerStr(searchQuery);
+        const bool showAll = (q.empty() || q.find("todos") != std::string::npos);
         for (const auto& g : games) {
             if (g.title.find("Luna Premium") != std::string::npos ||
                 g.id.find("luna_premium") != std::string::npos ||
@@ -490,8 +491,24 @@ int main(int argc, char* argv[]) {
                 g.id.find("promo_") != std::string::npos) {
                 continue;
             }
-            if (!q.empty() && toLowerStr(g.title).find(q) == std::string::npos) continue;
+            if (!showAll &&
+                toLowerStr(g.title).find(q) == std::string::npos &&
+                toLowerStr(g.genres).find(q) == std::string::npos &&
+                toLowerStr(g.category).find(q) == std::string::npos) {
+                continue;
+            }
             filteredGames.push_back(g);
+        }
+        if (filteredGames.empty() && !q.empty()) {
+            // Fallback if category keyword has accents or variations
+            for (const auto& g : games) {
+                if (g.title.find("Luna Premium") == std::string::npos &&
+                    g.id.find("luna_premium") == std::string::npos &&
+                    g.id.find("channel.") == std::string::npos &&
+                    g.id.find("promo_") == std::string::npos) {
+                    filteredGames.push_back(g);
+                }
+            }
         }
         searchGridIdx = 0;
     };
@@ -502,12 +519,86 @@ int main(int argc, char* argv[]) {
         if (!preserveHomeAndGameNight || tabCollections[0].empty()) {
             // Tab 0: Inicio (landing_home real)
             tabCollections[0] = sessionClient.getHomeCollections();
-            if (tabCollections[0].empty()) {
-                luna::display::LunaCollection fallbackRow;
-                fallbackRow.id = "fallback_row";
-                fallbackRow.title = "Destacados en Amazon Luna";
-                fallbackRow.items = games;
-                tabCollections[0].push_back(fallbackRow);
+            if (tabCollections[0].size() <= 1 && !games.empty()) {
+                tabCollections[0].clear();
+                auto makeSlice = [&](size_t offset, size_t count) {
+                    std::vector<luna::display::GameTile> out;
+                    for (size_t i = 0; i < count && i < games.size(); ++i) {
+                        out.push_back(games[(offset + i) % games.size()]);
+                    }
+                    return out;
+                };
+
+                luna::display::LunaCollection heroRow;
+                heroRow.id = "hero_rotator";
+                heroRow.title = "Destacados";
+                heroRow.isHeroRotator = true;
+                heroRow.items = makeSlice(0, 6);
+                tabCollections[0].push_back(heroRow);
+
+                luna::display::LunaCollection rankRow;
+                rankRow.id = "most_popular_games";
+                rankRow.title = "Las mejores novedades en juegos";
+                rankRow.isRankings = true;
+                rankRow.items = makeSlice(0, 10);
+                tabCollections[0].push_back(rankRow);
+
+                luna::display::LunaCollection contRow;
+                contRow.id = "recently_played";
+                contRow.title = "Seguir jugando";
+                contRow.items = makeSlice(2, 8);
+                tabCollections[0].push_back(contRow);
+
+                luna::display::LunaCollection recentRow;
+                recentRow.id = "newly_added";
+                recentRow.title = "A\xC3\xB1" "adidos recientemente";
+                recentRow.items = makeSlice(4, 10);
+                tabCollections[0].push_back(recentRow);
+
+                luna::display::LunaCollection promo1;
+                promo1.id = "home_1";
+                promo1.title = "Personajes emblem\xC3\xA1ticos. Nuevas aventuras.";
+                promo1.subtitle = "Hay leyendas que no dejan de mejorar. Ad\xC3\xA9ntrate en mundos inolvidables, conoce a quienes los han hecho posibles y descubre qu\xC3\xA9 viene despu\xC3\xA9s.";
+                promo1.isPartnerRow = true;
+                promo1.items = makeSlice(1, 8);
+                tabCollections[0].push_back(promo1);
+
+                luna::display::LunaCollection editorsRow;
+                editorsRow.id = "editors_picks";
+                editorsRow.title = "Selecciones del editor";
+                editorsRow.items = makeSlice(3, 10);
+                tabCollections[0].push_back(editorsRow);
+
+                luna::display::LunaCollection worldsRow;
+                worldsRow.id = "immersive_worlds";
+                worldsRow.title = "Aventuras en mundos inmersivos";
+                worldsRow.items = makeSlice(5, 10);
+                tabCollections[0].push_back(worldsRow);
+
+                luna::display::LunaCollection promo2;
+                promo2.id = "home_2";
+                promo2.title = "Jugad juntos est\xC3\xA9is donde est\xC3\xA9is";
+                promo2.subtitle = "Juega con amigos y familiares, aunque no est\xC3\xA9is en la misma habitaci\xC3\xB3n. Descubre juegos creados para disfrutar en compa\xC3\xB1\xC3\xAD" "a.";
+                promo2.isPartnerRow = true;
+                promo2.items = makeSlice(2, 9);
+                tabCollections[0].push_back(promo2);
+
+                luna::display::LunaCollection catRow;
+                catRow.id = "category_carousel";
+                catRow.title = "Explorar categor\xC3\xAD" "as";
+                catRow.isCategoryCarousel = true;
+                static const char* kCatNames[] = {
+                    "Todos los juegos", "Acci\xC3\xB3n", "Aventura", "Arcade", "Lucha",
+                    "Terror", "Fiesta", "L\xC3\xB3gica", "Carreras", "JUEGOS DE ROL",
+                    "Plataformas", "Estrategia", "Deportes", "Retro", "Familiar"
+                };
+                for (const char* cn : kCatNames) {
+                    luna::display::GameTile ct;
+                    ct.id = std::string("cat_") + cn;
+                    ct.title = cn;
+                    catRow.items.push_back(ct);
+                }
+                tabCollections[0].push_back(catRow);
             }
 
             // Tab 1: GameNight (multistate_game_night real + colecciones multijugador y fiesta)
@@ -1312,6 +1403,15 @@ int main(int argc, char* argv[]) {
                                             : ("Quitado de Mis juegos favoritos: " + favTargetTitle);
                                     }
                                 }
+                            } else if (selectedRowIdx >= 0 && selectedRowIdx < static_cast<int>(curCols.size()) &&
+                                       curCols[selectedRowIdx].isCategoryCarousel) {
+                                // Abrir pantalla de juegos de la categoría seleccionada
+                                searchQuery = (focusedGame->title.find("Todos") != std::string::npos) ? "" : focusedGame->title;
+                                luna::util::ImageLoader::instance().prioritizeOrClearPending();
+                                updateFilteredGames();
+                                searchOpen = true;
+                                searchZone = filteredGames.empty() ? 0 : 1;
+                                searchGridIdx = 0;
                             } else {
                                 openGameDetail(*focusedGame);
                             }

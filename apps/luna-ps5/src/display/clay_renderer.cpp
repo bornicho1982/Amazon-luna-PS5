@@ -252,6 +252,9 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                     if (!artUrl.empty()) {
                         luna::util::ImageLoader::instance().requestImage(artUrl, luna::util::ImagePreset::HorizontalCard16_9);
                         auto img = luna::util::ImageLoader::instance().getImage(artUrl, luna::util::ImagePreset::HorizontalCard16_9);
+                        if (!img || !img->ready) {
+                            img = luna::util::ImageLoader::instance().getImage(custom.tile->coverUrl, luna::util::ImagePreset::VerticalPoster);
+                        }
                         if (img && img->ready && !img->rgba.empty() && img->width > 0 && img->height > 0) {
                             display_->drawPreScaledImage(x, y, img->rgba.data(), w, h, img->width, img->height);
                         } else {
@@ -260,8 +263,89 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                     } else {
                         display_->fillRect(x, y, w, h, 0xFF0E1320);
                     }
+                    // Center translucent play badge when static backdrop is shown
+                    int cx = x + w / 2, cy = y + h / 2;
+                    display_->drawRoundedRect(cx - 20, cy - 20, 40, 40, 20, 0xB0070911);
+                    display_->drawRoundedBorder(cx - 20, cy - 20, 40, 40, 20, 1, 0xFF38BDF8);
+                    display_->drawPlayTriangleIcon(cx + 2, cy, 8, 0xFFFFFFFF);
+                }
+                // Bottom-right speaker/mute badge in Pop-out Preview Card
+                int spkX = x + w - 34, spkY = y + h - 34;
+                display_->drawRoundedRect(spkX, spkY, 26, 26, 13, 0xCC0A0E17);
+                display_->drawRoundedBorder(spkX, spkY, 26, 26, 13, 1, 0xFF414752);
+                display_->drawPlayTriangleIcon(spkX + 11, spkY + 13, 5, 0xFFFFFFFF);
+                if (player.isMuted()) {
+                    display_->drawTextPx(spkX + 15, spkY + 7, 10, "x", 0xFFEF4444);
                 }
             }
+            break;
+        }
+        case CustomElementType::PartnerBannerBg: {
+            std::string bannerTitle(custom.text);
+            bool isMultiplayerPromo = (bannerTitle.find("Jugad") != std::string::npos || bannerTitle == "home_2");
+            if (isMultiplayerPromo) {
+                // Rich purple/violet gradient (#4C1D95 -> #6D28D9 -> #9333EA) matching Stitch Banner 2
+                for (int dy = 0; dy < h; ++dy) {
+                    for (int dx = 0; dx < w; ++dx) {
+                        float tx = static_cast<float>(dx) / static_cast<float>(std::max(1, w));
+                        int r = static_cast<int>(76.0f + tx * 71.0f);
+                        int g = static_cast<int>(29.0f + tx * 22.0f);
+                        int b = static_cast<int>(149.0f + tx * 85.0f);
+                        uint32_t col = 0xFF000000U | (static_cast<uint32_t>(std::clamp(r, 0, 255)) << 16) |
+                                                     (static_cast<uint32_t>(std::clamp(g, 0, 255)) << 8)  |
+                                                      static_cast<uint32_t>(std::clamp(b, 0, 255));
+                        display_->putPixel(x + dx, y + dy, col);
+                    }
+                }
+                // 2x2 decorative photo mosaic on top-right of the banner
+                int mosX = x + w - 500;
+                int mosY = y + 18;
+                int cellW = 220, cellH = 82, gap = 10;
+                const uint32_t kCellCols[4] = { 0xFF2E1065, 0xFF3B0764, 0xFF4C1D95, 0xFF581C87 };
+                const char* kCellLabels[4] = { "CO-OP ONLINE", "PARTY 4P", "LUNA COUCH", "GAME NIGHT" };
+                for (int idx = 0; idx < 4; ++idx) {
+                    int colIdx = idx % 2;
+                    int rowIdx = idx / 2;
+                    int cx = mosX + colIdx * (cellW + gap);
+                    int cy = mosY + rowIdx * (cellH + gap);
+                    display_->drawRoundedRect(cx, cy, cellW, cellH, 10, kCellCols[idx]);
+                    display_->drawRoundedBorder(cx, cy, cellW, cellH, 10, 1, 0xFFA855F7);
+                    display_->drawRoundedRect(cx + 16, cy + (cellH - 24) / 2, 32, 24, 6, 0xFF0070D1);
+                    display_->drawTextPx(cx + 22, cy + (cellH - 12) / 2, 12, "GN", 0xFFFFFFFF);
+                    display_->drawTextPx(cx + 58, cy + (cellH - 14) / 2, 14, kCellLabels[idx], 0xFFF3E8FF);
+                }
+            } else {
+                // Dark midnight blue gradient (#0C1220 -> #121C33 -> #1C2C4F) + panoramic artwork on right for Banner 1
+                for (int dy = 0; dy < h; ++dy) {
+                    for (int dx = 0; dx < w; ++dx) {
+                        float tx = static_cast<float>(dx) / static_cast<float>(std::max(1, w));
+                        int r = static_cast<int>(12.0f + tx * 16.0f);
+                        int g = static_cast<int>(18.0f + tx * 26.0f);
+                        int b = static_cast<int>(32.0f + tx * 47.0f);
+                        uint32_t col = 0xFF000000U | (static_cast<uint32_t>(std::clamp(r, 0, 255)) << 16) |
+                                                     (static_cast<uint32_t>(std::clamp(g, 0, 255)) << 8)  |
+                                                      static_cast<uint32_t>(std::clamp(b, 0, 255));
+                        display_->putPixel(x + dx, y + dy, col);
+                    }
+                }
+                if (custom.tile && !custom.tile->backdropUrl.empty()) {
+                    luna::util::ImageLoader::instance().requestImage(custom.tile->backdropUrl, luna::util::ImagePreset::PanoramicDetail);
+                    auto artImg = luna::util::ImageLoader::instance().getImage(custom.tile->backdropUrl, luna::util::ImagePreset::PanoramicDetail);
+                    if (artImg && artImg->ready && !artImg->rgba.empty() && artImg->width > 0 && artImg->height > 0) {
+                        int artW = (w * 60) / 100;
+                        int artX = x + w - artW;
+                        display_->drawPreScaledImage(artX, y, artImg->rgba.data(), artW, h, artImg->width, artImg->height);
+                        // Smooth left fade into #0E1628
+                        int fadeW = 240;
+                        for (int fx = 0; fx < fadeW; ++fx) {
+                            float t = static_cast<float>(fx) / static_cast<float>(fadeW);
+                            uint8_t alpha = static_cast<uint8_t>(std::clamp((1.0f - t) * 255.0f, 0.0f, 255.0f));
+                            display_->blendRectUniform(artX + fx, y, 1, h, 0xFF10192E, alpha);
+                        }
+                    }
+                }
+            }
+            display_->drawRoundedBorder(x, y, w, h, 20, 1, isMultiplayerPromo ? 0xFF9333EA : 0xFF2B3B5E);
             break;
         }
         case CustomElementType::SpotlightArt: {
@@ -269,7 +353,6 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                 // Helper to draw an image or video frame with Aspect-Fill (center crop) instead of stretching
                 auto drawAspectFill = [&](const uint8_t* rgba, int srcW, int srcH) {
                     if (!rgba || srcW <= 0 || srcH <= 0 || w <= 0 || h <= 0) return;
-                    // If source is a vertical poster (3:4), draw dark background and center the poster on the right
                     if (srcW < srcH) {
                         display_->fillRect(x, y, w, h, 0xFF0E1320);
                         int fitH = h;
@@ -309,14 +392,6 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                     if (vPix) {
                         drawAspectFill(reinterpret_cast<const uint8_t*>(vPix), player.getWidth(), player.getHeight());
                         drewVideo = true;
-
-                        // Discrete Trailer indicator & R3 fullscreen hint in top right corner
-                        int badgeW = 240, badgeH = 28;
-                        int bx = x + w - badgeW - 24, by = y + 18;
-                        display_->drawRoundedRect(bx, by, badgeW, badgeH, 6, 0xD8070911);
-                        display_->drawRoundedBorder(bx, by, badgeW, badgeH, 6, 1, 0xFF0070D1);
-                        display_->drawPlayTriangleIcon(bx + 16, by + 14, 5, 0xFF38BDF8);
-                        display_->drawTextPx(bx + 28, by + 6, 12, "TR\xC3\x81ILER  \xE2\x80\xA2  [R3] Pantalla completa", 0xFFFFFFFF);
                     }
                 }
                 if (!drewVideo) {
@@ -327,7 +402,6 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                                           custom.tile->title.find("100 juegos") != std::string::npos);
 
                     if (isPremiumHero) {
-                        // Draw bespoke native PS5 "Luna Premium" showcase artwork (cosmic purple/cyan gradient + game showcase)
                         for (int dy = 0; dy < h; ++dy) {
                             float ty = static_cast<float>(dy) / static_cast<float>(std::max(1, h));
                             for (int dx = 0; dx < w; ++dx) {
@@ -344,7 +418,6 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                             }
                         }
 
-                        // Decorative tilted/staggered showcase cards on the right side
                         struct ShowcaseTile { int ox, oy, cw, ch; uint32_t bg, accent; const char* tag; const char* name; };
                         const ShowcaseTile kTiles[3] = {
                             { 160, 74,  210, 286, 0xFF1A1438, 0xFF8B5CF6, "ACCION",    "1080p 60 FPS" },
@@ -363,13 +436,6 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                             int nw = display_->getFontRenderer().measureText(st.name, 16);
                             display_->drawTextPx(tx + (st.cw - nw) / 2, ty + st.ch - 48, 16, st.name, 0xFFFFFFFF);
                         }
-
-                        // Top-right official badge
-                        int badgeW = 248, badgeH = 30;
-                        int bx = x + w - badgeW - 24, by = y + 18;
-                        display_->drawRoundedRect(bx, by, badgeW, badgeH, 8, 0xD8140C2E);
-                        display_->drawRoundedBorder(bx, by, badgeW, badgeH, 8, 1, 0xFF8B5CF6);
-                        display_->drawTextPx(bx + 16, by + 7, 12, "SUSCRIPCI\xC3\x93N LUNA PREMIUM", 0xFFE9D5FF);
                     } else if (!artUrl.empty()) {
                         luna::util::ImageLoader::instance().requestImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
                         auto artImg = luna::util::ImageLoader::instance().getImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
@@ -389,15 +455,6 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                     } else {
                         display_->fillRect(x, y, w, h, 0xFF0E1320);
                     }
-
-                    // Show discrete buffering indicator when trailer is streaming into RAM
-                    if (!custom.tile->videoUrl.empty() && player.isDownloading() && player.currentUrl() == custom.tile->videoUrl) {
-                        int badgeW = 190, badgeH = 26;
-                        int bx = x + w - badgeW - 24, by = y + 18;
-                        display_->drawRoundedRect(bx, by, badgeW, badgeH, 6, 0xCC070911);
-                        display_->drawRoundedBorder(bx, by, badgeW, badgeH, 6, 1, 0xFF38BDF8);
-                        display_->drawTextPx(bx + 12, by + 5, 12, "Cargando tr\xC3\xA1iler HD...", 0xFF38BDF8);
-                    }
                 }
 
                 // Clean 160px Hermite cubic alpha gradient blend on the left edge into PS5 Dark Crystal (#0E1320)
@@ -411,9 +468,52 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                     }
                 }
 
-                // Clip top-right and bottom-right corners (radius 22px) to screen background #070911
+                // Stitch v2 Bottom Video Timeline & Controls HUD (NO top frame/header!)
+                int hudH = 68;
+                int hudY = y + h - hudH;
+                for (int dy = 0; dy < hudH; ++dy) {
+                    float t = static_cast<float>(dy) / static_cast<float>(hudH);
+                    uint8_t alpha = static_cast<uint8_t>(std::clamp(t * 210.0f, 0.0f, 210.0f));
+                    display_->blendRectUniform(x + 40, hudY + dy, w - 40, 1, 0xFF070911, alpha);
+                }
+
+                // Timeline progress bar + MM:SS / MM:SS
+                int barX = x + 64;
+                int barY = y + h - 46;
+                int barW = w - 180;
+                int barH = 4;
+                display_->drawRoundedRect(barX, barY, barW, barH, 2, 0xFF303444);
+                float prog = drewVideo ? std::clamp(player.getProgress(), 0.05f, 1.0f) : 0.35f;
+                int fillW = std::max(8, static_cast<int>(static_cast<float>(barW) * prog));
+                display_->drawRoundedRect(barX, barY, fillW, barH, 2, 0xFF38BDF8);
+
+                int curSec = drewVideo ? player.getCurrentSeconds() : 42;
+                int totSec = drewVideo ? std::max(1, player.getTotalSeconds()) : 135;
+                char timeBuf[32];
+                std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d / %02d:%02d",
+                              curSec / 60, curSec % 60, totSec / 60, totSec % 60);
+                display_->drawTextPx(barX + barW + 12, barY - 5, 11, timeBuf, 0xFF94A3B8);
+
+                // Bottom-left pill: (R3) Pantalla Completa
+                int pillX = barX, pillY = y + h - 32;
+                display_->drawRoundedRect(pillX, pillY, 174, 24, 6, 0xCC161B2A);
+                display_->drawRoundedBorder(pillX, pillY, 174, 24, 6, 1, 0xFF414752);
+                display_->drawRoundedRect(pillX + 6, pillY + 4, 26, 16, 4, 0xFF2A2D3D);
+                display_->drawTextPx(pillX + 11, pillY + 6, 10, "R3", 0xFF38BDF8);
+                display_->drawTextPx(pillX + 38, pillY + 6, 11, "Pantalla Completa", 0xFFE2E8F0);
+
+                // Bottom-right speaker + Audio en Pantalla Completa
+                int audX = x + w - 216, audY = pillY + 5;
+                display_->drawPlayTriangleIcon(audX + 4, audY + 7, 5, 0xFF38BDF8);
+                display_->drawTextPx(audX + 14, audY, 11,
+                                     (!custom.tile->videoUrl.empty() && player.isDownloading() && !drewVideo)
+                                         ? "Cargando tr\xC3\xA1iler HD..."
+                                         : "Audio en Pantalla Completa",
+                                     0xFFCBD5E1);
+
+                // Clip top-right and bottom-right corners (radius 22px) to screen background #0A0E17
                 const int cornerR = 22;
-                const uint32_t screenBg = 0xFF070911;
+                const uint32_t screenBg = 0xFF0A0E17;
                 int trCx = x + w - cornerR;
                 int brCx = x + w - cornerR;
                 int brCy = y + h - cornerR;
@@ -450,7 +550,7 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                 }
 
                 // Re-draw outer card border for SpotlightStage
-                uint32_t borderColor = custom.inFocus ? 0xFF0070D1 : 0xFF222C42;
+                uint32_t borderColor = custom.inFocus ? 0xFF38BDF8 : 0xFF222C42;
                 int borderThick = custom.inFocus ? 2 : 1;
                 display_->drawRoundedBorder(x - 880, y, 1824, h, 22, borderThick, borderColor);
             }

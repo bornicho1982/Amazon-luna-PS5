@@ -28,7 +28,8 @@ enum class CustomElementType : uint8_t {
     ControllerButton,   // DualSense Cross, Circle, Square, Triangle
     Bumper,             // DualSense L1 or R1 bumper
     OptionsButton,      // DualSense Options pill button
-    InterfaceIcon       // Search, Star, Play
+    InterfaceIcon,      // Search, Star, Play
+    PartnerBannerBg     // Panoramic background for Partner Upsell banners
 };
 
 struct ClayCustomElement {
