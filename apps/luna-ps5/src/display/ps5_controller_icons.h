@@ -14,6 +14,8 @@ enum class DualSenseBtn : uint8_t {
     Triangle,    // △ PS5 Triangle (Cyan Green / White)
     L1,          // DualSense L1 bumper silhouette
     R1,          // DualSense R1 bumper silhouette
+    L3,          // DualSense L3 thumbstick
+    R3,          // DualSense R3 thumbstick
     Options,     // DualSense Options pill button
     Search,      // Vector magnifying glass
     Star,        // Favorite 5-point star
@@ -23,8 +25,11 @@ enum class DualSenseBtn : uint8_t {
 
 class PS5ControllerIcons {
 public:
-    // Draws standard circular PS5 DualSense action button (Cross, Circle, Square, Triangle)
+    // Draws standard circular PS5 DualSense action button (Cross, Circle, Square, Triangle, L3, R3)
     static void drawButton(DisplayManager& disp, int cx, int cy, int size, DualSenseBtn btn, bool inFocus = false);
+
+    // Draws DualSense L3 or R3 analog thumbstick with concave cap and text
+    static void drawThumbstick(DisplayManager& disp, int cx, int cy, int size, bool isR3, bool inFocus = false);
 
     // Draws DualSense L1 or R1 bumper with asymmetric rounded corners and crisp text
     static void drawBumper(DisplayManager& disp, int x, int y, int w, int h, bool isR1, bool inFocus = false);

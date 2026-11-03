@@ -105,19 +105,46 @@ static void renderCleanOrPopoutGameCard(DisplayManager& disp, ClayRenderer& clay
         return;
     }
 
-    // Pop-out Preview Card (300 x 304 px) matching Stitch v2 specification
+    // Pop-out Preview Card (310 x 304 px) showing real game data from Amazon Luna
     int pegiAge = 12;
     if (tile.pegiRating.find("18") != std::string::npos) pegiAge = 18;
     else if (tile.pegiRating.find("16") != std::string::npos) pegiAge = 16;
     else if (tile.pegiRating.find("7") != std::string::npos) pegiAge = 7;
     else if (tile.pegiRating.find("3") != std::string::npos) pegiAge = 3;
 
-    std::string pub = tile.publisher.empty() ? (tile.developer.empty() ? "Ubisoft" : tile.developer) : tile.publisher;
-    if (pub == "Amazon Luna") pub = "Ubisoft";
+    std::string pub = tile.publisher.empty() ? (tile.developer.empty() ? "Amazon Luna" : tile.developer) : tile.publisher;
+    std::string inputDesc = tile.inputMethods.empty() ? "Mando, Teclado y rat\xC3\xB3n" : tile.inputMethods;
+
+    // Real genre pills parsed dynamically from tile.genres
+    std::vector<std::string> realGenres;
+    if (!tile.genres.empty()) {
+        size_t start = 0;
+        while (start < tile.genres.size()) {
+            size_t pos = tile.genres.find(" • ", start);
+            if (pos == std::string::npos) pos = tile.genres.find(", ", start);
+            if (pos == std::string::npos) {
+                realGenres.push_back(tile.genres.substr(start));
+                break;
+            }
+            realGenres.push_back(tile.genres.substr(start, pos - start));
+            start = (tile.genres[pos] == ',') ? pos + 2 : pos + 3;
+            if (realGenres.size() >= 2) break;
+        }
+    }
+    if (realGenres.empty()) {
+        realGenres.push_back("Acci\xC3\xB3n");
+        realGenres.push_back("Aventura");
+    }
+
+    std::string playBtnText = tile.buttonText.empty() ? "JUGAR AHORA" : tile.buttonText;
+    if (playBtnText.find("JUGAR") == std::string::npos && playBtnText.find("Jugar") == std::string::npos) {
+        playBtnText = "JUGAR AHORA";
+    }
+    std::string playLabel = "\xE2\x96\xB6  " + playBtnText;
 
     CLAY_AUTO_ID({
         .layout = {
-            .sizing = { CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(304) },
+            .sizing = { CLAY_SIZING_FIXED(310), CLAY_SIZING_FIXED(304) },
             .padding = { 10, 10, 10, 10 },
             .childGap = 8,
             .layoutDirection = CLAY_TOP_TO_BOTTOM
@@ -126,16 +153,16 @@ static void renderCleanOrPopoutGameCard(DisplayManager& disp, ClayRenderer& clay
         .cornerRadius = CLAY_CORNER_RADIUS(16),
         .border = { .color = { 56, 189, 248, 255 }, .width = LUNA_BORDER(2) } // #38BDF8
     }) {
-        // 1. Top 16:9 Live Video Trailer / Backdrop Box (280 x 148 px)
+        // 1. Top 16:9 Live Video Trailer / Backdrop Box (290 x 148 px)
         CLAY_AUTO_ID({
-            .layout = { .sizing = { CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(148) } },
+            .layout = { .sizing = { CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(148) } },
             .custom = { .customData = clay.allocCustom(CustomElementType::Mp4PreviewPlayer, "", 0xFFFFFFFF, &tile, frameCount, true) }
         }) {}
 
         // 2. Center Wide Pill Button: "▶ JUGAR AHORA"
         CLAY_AUTO_ID({
             .layout = {
-                .sizing = { CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(34) },
+                .sizing = { CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(34) },
                 .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                 .childGap = 8,
                 .layoutDirection = CLAY_LEFT_TO_RIGHT
@@ -143,16 +170,16 @@ static void renderCleanOrPopoutGameCard(DisplayManager& disp, ClayRenderer& clay
             .backgroundColor = { 213, 227, 255, 255 }, // #D5E3FF
             .cornerRadius = CLAY_CORNER_RADIUS(17)
         }) {
-            CLAY_TEXT(CLAY_STRING("\xE2\x96\xB6  JUGAR AHORA"), CLAY_TEXT_CONFIG({
+            CLAY_TEXT(ClayRenderer::toClayString(playLabel), CLAY_TEXT_CONFIG({
                 .textColor = { 0, 48, 96, 255 }, // #003060
                 .fontSize = 13
             }));
         }
 
-        // 3. Bottom Metadata + Genre Pills + Official PEGI Badge
+        // 3. Bottom Metadata + Real Genre Pills + Official PEGI Badge
         CLAY_AUTO_ID({
             .layout = {
-                .sizing = { CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(84) },
+                .sizing = { CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(84) },
                 .childGap = 4,
                 .layoutDirection = CLAY_TOP_TO_BOTTOM
             }
@@ -161,15 +188,15 @@ static void renderCleanOrPopoutGameCard(DisplayManager& disp, ClayRenderer& clay
                 .textColor = { 255, 255, 255, 255 },
                 .fontSize = 15
             }));
-            CLAY_TEXT(ClayRenderer::toClayString("Mando, Teclado y rat\xC3\xB3n  \xE2\x80\xA2  " + utf8SafeTruncate(pub, 16)), CLAY_TEXT_CONFIG({
+            CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(inputDesc, 22) + "  \xE2\x80\xA2  " + utf8SafeTruncate(pub, 14)), CLAY_TEXT_CONFIG({
                 .textColor = { 148, 163, 184, 255 },
                 .fontSize = 11
             }));
 
-            // Bottom row: Genre pills on left + PEGI badge on right
+            // Bottom row: Real Genre pills on left + PEGI badge on right
             CLAY_AUTO_ID({
                 .layout = {
-                    .sizing = { CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(36) },
+                    .sizing = { CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(36) },
                     .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                     .childGap = 6,
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
@@ -183,21 +210,15 @@ static void renderCleanOrPopoutGameCard(DisplayManager& disp, ClayRenderer& clay
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     }
                 }) {
-                    CLAY_AUTO_ID({
-                        .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(22) }, .padding = { 8, 8, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
-                        .backgroundColor = { 42, 45, 61, 255 },
-                        .cornerRadius = CLAY_CORNER_RADIUS(6),
-                        .border = { .color = { 65, 71, 82, 255 }, .width = LUNA_BORDER(1) }
-                    }) {
-                        CLAY_TEXT(CLAY_STRING("Acci\xC3\xB3n"), CLAY_TEXT_CONFIG({ .textColor = { 226, 232, 240, 255 }, .fontSize = 11 }));
-                    }
-                    CLAY_AUTO_ID({
-                        .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(22) }, .padding = { 8, 8, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
-                        .backgroundColor = { 42, 45, 61, 255 },
-                        .cornerRadius = CLAY_CORNER_RADIUS(6),
-                        .border = { .color = { 65, 71, 82, 255 }, .width = LUNA_BORDER(1) }
-                    }) {
-                        CLAY_TEXT(CLAY_STRING("Aventura"), CLAY_TEXT_CONFIG({ .textColor = { 226, 232, 240, 255 }, .fontSize = 11 }));
+                    for (const auto& g : realGenres) {
+                        CLAY_AUTO_ID({
+                            .layout = { .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(22) }, .padding = { 8, 8, 0, 0 }, .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER } },
+                            .backgroundColor = { 42, 45, 61, 255 },
+                            .cornerRadius = CLAY_CORNER_RADIUS(6),
+                            .border = { .color = { 65, 71, 82, 255 }, .width = LUNA_BORDER(1) }
+                        }) {
+                            CLAY_TEXT(ClayRenderer::toClayString(utf8SafeTruncate(g, 14)), CLAY_TEXT_CONFIG({ .textColor = { 226, 232, 240, 255 }, .fontSize = 11 }));
+                        }
                     }
                 }
 
@@ -757,7 +778,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                             .padding = { 36, 24, 22, 18 },
                             .childGap = 10,
                             .layoutDirection = CLAY_TOP_TO_BOTTOM
-                        }
+                        },
+                        .custom = { .customData = clay.allocCustom(CustomElementType::HeroLeftBackdrop, "", 0xFFFFFFFF, activeGame, props.frameCount, isHeroActive) }
                     }) {
                         // Fila 1: Píldoras de estado (Suscripción + Distribuidora + Sello Oficial PEGI)
                         CLAY_AUTO_ID({
@@ -1131,7 +1153,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
 
                 // --- CASO 1: CATEGORY CAROUSEL ("Explorar categorías") ---
                 if (row.isCategoryCarousel) {
-                    int visibleCats = 9;
+                    int visibleCats = 10;
                     int startIdx = std::max(0, std::min(selectedCol - visibleCats / 2, std::max(0, totalItems - visibleCats)));
                     bool showLeft = (startIdx > 0 || selectedCol > 0);
                     bool showRight = (startIdx + visibleCats < totalItems || selectedCol < totalItems - 1);
@@ -1159,7 +1181,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                 bool isSel = isFocusedRow && (c == selectedCol);
                                 CLAY_AUTO_ID({
                                     .layout = {
-                                        .sizing = { CLAY_SIZING_FIXED(168), CLAY_SIZING_FIXED(152) },
+                                        .sizing = { CLAY_SIZING_FIXED(154), CLAY_SIZING_FIXED(152) },
                                         .padding = { 12, 12, 16, 16 },
                                         .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .childGap = 14,
@@ -1190,12 +1212,22 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 // --- CASO 2: BANNERS PROMOCIONALES INTERCALADOS ("Personajes emblemáticos" y "Jugad juntos") ---
                 if (row.isPartnerRow) {
                     GameTile promoTile;
-                    promoTile.backdropUrl = row.partnerPromoImage;
-                    if (promoTile.backdropUrl.empty() && !row.items.empty()) {
-                        promoTile.backdropUrl = row.items[0].backdropUrl;
+                    if (!row.items.empty()) {
+                        size_t rotIdx = (isFocusedRow && selectedCol >= 0 && selectedCol < static_cast<int>(row.items.size()))
+                            ? static_cast<size_t>(selectedCol)
+                            : (static_cast<size_t>(props.frameCount / 450) % row.items.size());
+                        const auto& targetItem = row.items[rotIdx];
+                        promoTile.backdropUrl = !targetItem.backdropUrl.empty()
+                            ? targetItem.backdropUrl
+                            : (!targetItem.screenshotUrls.empty() ? targetItem.screenshotUrls[0] : targetItem.coverUrl);
+                        if (promoTile.backdropUrl.empty() && !row.partnerPromoImage.empty()) {
+                            promoTile.backdropUrl = row.partnerPromoImage;
+                        }
+                    } else {
+                        promoTile.backdropUrl = row.partnerPromoImage;
                     }
 
-                    int visibleCards = isFocusedRow ? 6 : 7;
+                    int visibleCards = isFocusedRow ? 8 : 8;
                     int startIdx = std::max(0, std::min(selectedCol - visibleCards / 2, std::max(0, totalItems - visibleCards)));
                     bool showLeft = (startIdx > 0 || selectedCol > 0);
                     bool showRight = (startIdx + visibleCards < totalItems || selectedCol < totalItems - 1);
@@ -1209,11 +1241,11 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         },
                         .custom = { .customData = clay.allocCustom(CustomElementType::PartnerBannerBg, row.title, 0xFFFFFFFF, &promoTile, props.frameCount, isFocusedRow) }
                     }) {
-                        // Top Header + "Ver todos los juegos" Pill Button
+                        // Top Header (sin botón "Ver todos los juegos")
                         CLAY_AUTO_ID({
                             .layout = {
-                                .sizing = { CLAY_SIZING_FIXED(920), CLAY_SIZING_FIXED(112) },
-                                .childGap = 8,
+                                .sizing = { CLAY_SIZING_FIXED(980), CLAY_SIZING_FIXED(78) },
+                                .childGap = 6,
                                 .layoutDirection = CLAY_TOP_TO_BOTTOM
                             }
                         }) {
@@ -1222,18 +1254,6 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                 ? "Hay leyendas que no dejan de mejorar. Ad\xC3\xA9ntrate en mundos inolvidables y descubre qu\xC3\xA9 viene despu\xC3\xA9s."
                                 : utf8SafeTruncate(row.subtitle, 130)),
                                 CLAY_TEXT_CONFIG({ .textColor = { 226, 232, 240, 255 }, .fontSize = 14 }));
-
-                            CLAY_AUTO_ID({
-                                .layout = {
-                                    .sizing = { CLAY_SIZING_FIXED(176), CLAY_SIZING_FIXED(34) },
-                                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER }
-                                },
-                                .backgroundColor = { 22, 27, 42, 220 },
-                                .cornerRadius = CLAY_CORNER_RADIUS(8),
-                                .border = { .color = { 148, 163, 184, 140 }, .width = LUNA_BORDER(1) }
-                            }) {
-                                CLAY_TEXT(CLAY_STRING("Ver todos los juegos"), CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontSize = 13 }));
-                            }
                         }
 
                         // Integrated Bottom Carousel of Clean Cards + Pop-out Preview Card on Focus
@@ -1262,7 +1282,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 // --- CASO 3: RANKINGS ("Las mejores novedades en juegos" — Numeradas del 1 al 10) ---
                 if (row.isRankings) {
                     int maxRankItems = std::min(10, totalItems);
-                    int visibleRankings = 5;
+                    int visibleRankings = isFocusedRow ? 6 : 7;
                     int startIdx = std::max(0, std::min(selectedCol - visibleRankings / 2, std::max(0, maxRankItems - visibleRankings)));
                     bool showLeft = (startIdx > 0 || selectedCol > 0);
                     bool showRight = (startIdx + visibleRankings < maxRankItems || selectedCol < maxRankItems - 1);
@@ -1298,18 +1318,13 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                                     }
                                 }) {
-                                    // Giant stylized number 1..10 on the left of the card
+                                    // Giant stylized outlined number 1..10
                                     CLAY_AUTO_ID({
                                         .layout = {
-                                            .sizing = { CLAY_SIZING_FIXED(i == 9 ? 68.0f : 48.0f), CLAY_SIZING_FIXED(240) },
-                                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_BOTTOM }
-                                        }
-                                    }) {
-                                        CLAY_TEXT(ClayRenderer::toClayString(std::to_string(i + 1)), CLAY_TEXT_CONFIG({
-                                            .textColor = isSel ? Clay_Color{ 56, 189, 248, 255 } : Clay_Color{ 203, 213, 225, 220 },
-                                            .fontSize = 60
-                                        }));
-                                    }
+                                            .sizing = { CLAY_SIZING_FIXED(i == 9 ? 76.0f : 56.0f), CLAY_SIZING_FIXED(230) }
+                                        },
+                                        .custom = { .customData = clay.allocCustom(CustomElementType::RankNumber, std::to_string(i + 1), 0xFFFFFFFF, nullptr, 0, isSel) }
+                                    }) {}
 
                                     renderCleanOrPopoutGameCard(disp, clay, item, isSel, 185, 248, props.frameCount);
                                 }
@@ -1361,7 +1376,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 // --- CASO 5: CARRUSELES ESTANDAR DE JUEGOS VERTICALES LIMPIOS + POP-OUT PREVIEW ---
                 // ("Seguir jugando", "Añadidos recientemente", "Selecciones del editor", "Aventuras en mundos inmersivos")
                 {
-                    int visibleStd = isFocusedRow ? 6 : 8;
+                    int visibleStd = isFocusedRow ? 8 : 9;
                     int startIdx = std::max(0, std::min(selectedCol - visibleStd / 2, std::max(0, totalItems - visibleStd)));
                     bool showLeft = (startIdx > 0 || selectedCol > 0);
                     bool showRight = (startIdx + visibleStd < totalItems || selectedCol < totalItems - 1);

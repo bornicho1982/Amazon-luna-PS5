@@ -198,6 +198,37 @@ ClayImageElement* ClayRenderer::allocImage(const uint8_t* rgba, int width, int h
     return nullptr;
 }
 
+// Aspect-fill (center crop) blit of an RGBA source into a destination rectangle
+static void drawCoverRgba(DisplayManager* d, int x, int y, int w, int h,
+                          const uint8_t* rgba, int srcW, int srcH) {
+    if (!d || !rgba || srcW <= 0 || srcH <= 0 || w <= 0 || h <= 0) return;
+    float scale = std::max(static_cast<float>(w) / srcW, static_cast<float>(h) / srcH);
+    int cropW = std::clamp(static_cast<int>(w / scale), 1, srcW);
+    int cropH = std::clamp(static_cast<int>(h / scale), 1, srcH);
+    int cropX = (srcW - cropW) / 2;
+    int cropY = (srcH - cropH) / 2;
+    for (int dy = 0; dy < h; ++dy) {
+        int sy = std::min(srcH - 1, cropY + (dy * cropH) / h);
+        const uint8_t* row = rgba + static_cast<size_t>(sy) * srcW * 4;
+        for (int dx = 0; dx < w; ++dx) {
+            int sx = std::min(srcW - 1, cropX + (dx * cropW) / w);
+            const uint8_t* p = row + static_cast<size_t>(sx) * 4;
+            d->putPixel(x + dx, y + dy, 0xFF000000U | (uint32_t(p[0]) << 16) | (uint32_t(p[1]) << 8) | p[2]);
+        }
+    }
+}
+
+// Fetch the best available decoded image for a URL (panoramic first, then 16:9)
+static std::shared_ptr<const luna::util::DecodedImage> fetchWideImage(const std::string& url) {
+    if (url.empty()) return nullptr;
+    auto& loader = luna::util::ImageLoader::instance();
+    loader.requestImage(url, luna::util::ImagePreset::PanoramicDetail);
+    auto img = loader.getImage(url, luna::util::ImagePreset::PanoramicDetail);
+    if (!img || !img->ready) img = loader.getImage(url, luna::util::ImagePreset::HorizontalCard16_9);
+    if (img && img->ready && !img->rgba.empty() && img->width > 0 && img->height > 0) return img;
+    return nullptr;
+}
+
 void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Clay_BoundingBox& bb) {
     if (!display_) return;
     int x = static_cast<int>(bb.x);
@@ -281,71 +312,104 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
             break;
         }
         case CustomElementType::PartnerBannerBg: {
+            // Full-cover rotating artwork (tile chosen per frame by the layout) + legibility gradients
             std::string bannerTitle(custom.text);
             bool isMultiplayerPromo = (bannerTitle.find("Jugad") != std::string::npos || bannerTitle == "home_2");
-            if (isMultiplayerPromo) {
-                // Rich purple/violet gradient (#4C1D95 -> #6D28D9 -> #9333EA) matching Stitch Banner 2
-                for (int dy = 0; dy < h; ++dy) {
-                    for (int dx = 0; dx < w; ++dx) {
-                        float tx = static_cast<float>(dx) / static_cast<float>(std::max(1, w));
-                        int r = static_cast<int>(76.0f + tx * 71.0f);
-                        int g = static_cast<int>(29.0f + tx * 22.0f);
-                        int b = static_cast<int>(149.0f + tx * 85.0f);
-                        uint32_t col = 0xFF000000U | (static_cast<uint32_t>(std::clamp(r, 0, 255)) << 16) |
-                                                     (static_cast<uint32_t>(std::clamp(g, 0, 255)) << 8)  |
-                                                      static_cast<uint32_t>(std::clamp(b, 0, 255));
-                        display_->putPixel(x + dx, y + dy, col);
-                    }
+            uint32_t tint = isMultiplayerPromo ? 0xFF2E1065 : 0xFF0A0E17;
+            std::shared_ptr<const luna::util::DecodedImage> img;
+            if (custom.tile) {
+                img = fetchWideImage(custom.tile->backdropUrl);
+                if (!img && !custom.tile->screenshotUrls.empty()) img = fetchWideImage(custom.tile->screenshotUrls[0]);
+            }
+            if (img) {
+                drawCoverRgba(display_, x, y, w, h, img->rgba.data(), img->width, img->height);
+            } else {
+                display_->fillRect(x, y, w, h, isMultiplayerPromo ? 0xFF4C1D95 : 0xFF121C33);
+            }
+            // Left-to-right fade for title legibility (strong on the left 45%)
+            int fadeW = (w * 55) / 100;
+            for (int fx = 0; fx < fadeW; ++fx) {
+                float t = static_cast<float>(fx) / static_cast<float>(fadeW);
+                float a = 1.0f - t * t * (3.0f - 2.0f * t);
+                display_->blendRectUniform(x + fx, y, 1, h, tint, static_cast<uint8_t>(40 + a * 190.0f));
+            }
+            // Bottom fade behind the integrated card carousel
+            int bfH = h / 2;
+            for (int dy = 0; dy < bfH; ++dy) {
+                float t = static_cast<float>(dy) / static_cast<float>(bfH);
+                display_->blendRectUniform(x, y + h - bfH + dy, w, 1, 0xFF0A0E17, static_cast<uint8_t>(t * 200.0f));
+            }
+            display_->drawRoundedBorder(x, y, w, h, 20, custom.inFocus ? 2 : 1, custom.inFocus ? 0xFF38BDF8 : 0xFF2B3B5E);
+            break;
+        }
+        case CustomElementType::HeroLeftBackdrop: {
+            // Game artwork behind the hero text column; heavy dark veil on the left, fading out to the right
+            std::shared_ptr<const luna::util::DecodedImage> img;
+            if (custom.tile) {
+                bool isPremium = (custom.tile->backdropUrl == "local:luna_premium" ||
+                                  custom.tile->title.find("Luna Premium") != std::string::npos);
+                if (isPremium) {
+                    img = fetchWideImage("https://m.media-amazon.com/images/G/01/T/TC05316421/MonthlyPrime/LunaClientFGWPBannerOverride/Desktop_3532x380_esES.jpg");
+                } else {
+                    if (!custom.tile->screenshotUrls.empty()) img = fetchWideImage(custom.tile->screenshotUrls[0]);
+                    if (!img) img = fetchWideImage(custom.tile->backdropUrl);
                 }
-                // 2x2 decorative photo mosaic on top-right of the banner
-                int mosX = x + w - 500;
-                int mosY = y + 18;
-                int cellW = 220, cellH = 82, gap = 10;
-                const uint32_t kCellCols[4] = { 0xFF2E1065, 0xFF3B0764, 0xFF4C1D95, 0xFF581C87 };
-                const char* kCellLabels[4] = { "CO-OP ONLINE", "PARTY 4P", "LUNA COUCH", "GAME NIGHT" };
-                for (int idx = 0; idx < 4; ++idx) {
-                    int colIdx = idx % 2;
-                    int rowIdx = idx / 2;
-                    int cx = mosX + colIdx * (cellW + gap);
-                    int cy = mosY + rowIdx * (cellH + gap);
-                    display_->drawRoundedRect(cx, cy, cellW, cellH, 10, kCellCols[idx]);
-                    display_->drawRoundedBorder(cx, cy, cellW, cellH, 10, 1, 0xFFA855F7);
-                    display_->drawRoundedRect(cx + 16, cy + (cellH - 24) / 2, 32, 24, 6, 0xFF0070D1);
-                    display_->drawTextPx(cx + 22, cy + (cellH - 12) / 2, 12, "GN", 0xFFFFFFFF);
-                    display_->drawTextPx(cx + 58, cy + (cellH - 14) / 2, 14, kCellLabels[idx], 0xFFF3E8FF);
+            }
+            if (img) {
+                drawCoverRgba(display_, x, y, w, h, img->rgba.data(), img->width, img->height);
+                for (int fx = 0; fx < w; ++fx) {
+                    float t = static_cast<float>(fx) / static_cast<float>(std::max(1, w));
+                    // Dark veil on the left for maximum text contrast, softly lightening toward the seam
+                    display_->blendRectUniform(x + fx, y, 1, h, 0xFF0E1320, static_cast<uint8_t>(235.0f - t * 85.0f));
                 }
             } else {
-                // Dark midnight blue gradient (#0C1220 -> #121C33 -> #1C2C4F) + panoramic artwork on right for Banner 1
-                for (int dy = 0; dy < h; ++dy) {
-                    for (int dx = 0; dx < w; ++dx) {
-                        float tx = static_cast<float>(dx) / static_cast<float>(std::max(1, w));
-                        int r = static_cast<int>(12.0f + tx * 16.0f);
-                        int g = static_cast<int>(18.0f + tx * 26.0f);
-                        int b = static_cast<int>(32.0f + tx * 47.0f);
-                        uint32_t col = 0xFF000000U | (static_cast<uint32_t>(std::clamp(r, 0, 255)) << 16) |
-                                                     (static_cast<uint32_t>(std::clamp(g, 0, 255)) << 8)  |
-                                                      static_cast<uint32_t>(std::clamp(b, 0, 255));
-                        display_->putPixel(x + dx, y + dy, col);
+                display_->fillRect(x, y, w, h, 0xFF0E1320);
+            }
+
+            // Antialiased corner clipping for top-left and bottom-left (radius 22px) to screen background #0A0E17
+            const int cr = 22;
+            const uint32_t screenBg = 0xFF0A0E17;
+            for (int cy = 0; cy < cr; ++cy) {
+                for (int cx = 0; cx < cr; ++cx) {
+                    float dx = static_cast<float>(cr - 1 - cx) + 0.5f;
+                    float dy = static_cast<float>(cr - 1 - cy) + 0.5f;
+                    float dist = std::sqrt(dx * dx + dy * dy);
+                    if (dist > static_cast<float>(cr) - 1.0f) {
+                        float cov = std::clamp(dist - (static_cast<float>(cr) - 1.0f), 0.0f, 1.0f);
+                        int px = x + cx;
+                        int py = y + cy;
+                        if (cov >= 1.0f) display_->fillRect(px, py, 1, 1, screenBg);
+                        else display_->blendPixel(px, py, screenBg, static_cast<uint8_t>(cov * 255.0f));
                     }
-                }
-                if (custom.tile && !custom.tile->backdropUrl.empty()) {
-                    luna::util::ImageLoader::instance().requestImage(custom.tile->backdropUrl, luna::util::ImagePreset::PanoramicDetail);
-                    auto artImg = luna::util::ImageLoader::instance().getImage(custom.tile->backdropUrl, luna::util::ImagePreset::PanoramicDetail);
-                    if (artImg && artImg->ready && !artImg->rgba.empty() && artImg->width > 0 && artImg->height > 0) {
-                        int artW = (w * 60) / 100;
-                        int artX = x + w - artW;
-                        display_->drawPreScaledImage(artX, y, artImg->rgba.data(), artW, h, artImg->width, artImg->height);
-                        // Smooth left fade into #0E1628
-                        int fadeW = 240;
-                        for (int fx = 0; fx < fadeW; ++fx) {
-                            float t = static_cast<float>(fx) / static_cast<float>(fadeW);
-                            uint8_t alpha = static_cast<uint8_t>(std::clamp((1.0f - t) * 255.0f, 0.0f, 255.0f));
-                            display_->blendRectUniform(artX + fx, y, 1, h, 0xFF10192E, alpha);
-                        }
+
+                    float bdy = static_cast<float>(cy) + 0.5f;
+                    float bdist = std::sqrt(dx * dx + bdy * bdy);
+                    if (bdist > static_cast<float>(cr) - 1.0f) {
+                        float cov = std::clamp(bdist - (static_cast<float>(cr) - 1.0f), 0.0f, 1.0f);
+                        int px = x + cx;
+                        int py = y + h - cr + cy;
+                        if (cov >= 1.0f) display_->fillRect(px, py, 1, 1, screenBg);
+                        else display_->blendPixel(px, py, screenBg, static_cast<uint8_t>(cov * 255.0f));
                     }
                 }
             }
-            display_->drawRoundedBorder(x, y, w, h, 20, 1, isMultiplayerPromo ? 0xFF9333EA : 0xFF2B3B5E);
+            break;
+        }
+        case CustomElementType::RankNumber: {
+            // Big outlined number aligned to the bottom-right of its slot (Luna/Netflix top-10 style)
+            int fs = h;
+            std::string num(custom.text);
+            int tw = display_->getFontRenderer().measureText(num, fs);
+            int tx = x + w - tw;
+            int ty = y;
+            uint32_t stroke = custom.inFocus ? 0xFF38BDF8 : 0xFF94A3B8;
+            for (int ox = -3; ox <= 3; ++ox) {
+                for (int oy = -3; oy <= 3; ++oy) {
+                    if (ox * ox + oy * oy > 9 || (ox == 0 && oy == 0)) continue;
+                    display_->drawTextPx(tx + ox, ty + oy, fs, num, stroke);
+                }
+            }
+            display_->drawTextPx(tx, ty, fs, num, custom.inFocus ? 0xFF0A2A4A : 0xFF0A0E17);
             break;
         }
         case CustomElementType::SpotlightArt: {
@@ -402,39 +466,34 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                                           custom.tile->title.find("100 juegos") != std::string::npos);
 
                     if (isPremiumHero) {
-                        for (int dy = 0; dy < h; ++dy) {
-                            float ty = static_cast<float>(dy) / static_cast<float>(std::max(1, h));
-                            for (int dx = 0; dx < w; ++dx) {
-                                float tx = static_cast<float>(dx) / static_cast<float>(std::max(1, w));
-                                float glow1 = std::max(0.0f, 1.0f - std::hypot((tx - 0.62f) * 1.4f, (ty - 0.38f) * 1.1f));
-                                float glow2 = std::max(0.0f, 1.0f - std::hypot((tx - 0.35f) * 1.3f, (ty - 0.72f) * 1.2f));
-                                int r = std::clamp(static_cast<int>(18.0f + glow1 * 96.0f + glow2 * 22.0f), 0, 255);
-                                int g = std::clamp(static_cast<int>(16.0f + glow1 * 32.0f + glow2 * 98.0f), 0, 255);
-                                int b = std::clamp(static_cast<int>(42.0f + glow1 * 175.0f + glow2 * 165.0f), 0, 255);
-                                uint32_t col = 0xFF000000U | (static_cast<uint32_t>(r) << 16) |
-                                                             (static_cast<uint32_t>(g) << 8)  |
-                                                              static_cast<uint32_t>(b);
-                                display_->putPixel(x + dx, y + dy, col);
-                            }
-                        }
-
-                        struct ShowcaseTile { int ox, oy, cw, ch; uint32_t bg, accent; const char* tag; const char* name; };
-                        const ShowcaseTile kTiles[3] = {
-                            { 160, 74,  210, 286, 0xFF1A1438, 0xFF8B5CF6, "ACCION",    "1080p 60 FPS" },
-                            { 400, 48,  230, 314, 0xFF0F2442, 0xFF38BDF8, "LUNA+",     "+100 JUEGOS"  },
-                            { 660, 82,  210, 286, 0xFF172836, 0xFF10B981, "CO-OP",     "SIN DESCARGAS"}
+                        static const char* kPremiumHeroes[3] = {
+                            "https://m.media-amazon.com/images/G/01/T/TC05316421/MonthlyPrime/LunaClientFGWPBannerOverride/Desktop_3532x380_esES.jpg",
+                            "https://m.media-amazon.com/images/G/01/T/TC05316421/Evergreen/LunaClient/ContentHighlightRows/RemotePlay_Background_Desktop_2560x695.jpg",
+                            "https://m.media-amazon.com/images/G/01/T/TC05316421/Evergreen/LunaClient/ContentHighlightRows/GarfieldKart2_Background_Desktop_2560x695.jpg"
                         };
-                        for (int ti = 0; ti < 3; ++ti) {
-                            const auto& st = kTiles[ti];
-                            int tx = x + st.ox, ty = y + st.oy;
-                            display_->blendRectUniform(tx + 8, ty + 10, st.cw, st.ch, 0xFF05070E, 140);
-                            display_->drawRoundedRect(tx, ty, st.cw, st.ch, 16, st.bg);
-                            display_->drawRoundedBorder(tx, ty, st.cw, st.ch, 16, 2, st.accent);
-                            display_->drawRoundedRect(tx + 18, ty + 18, 86, 24, 6, st.accent);
-                            display_->drawTextPx(tx + 28, ty + 23, 11, st.tag, 0xFF070911);
-                            display_->drawLunaLogoIcon(tx + (st.cw - 56) / 2, ty + st.ch / 2 - 36, 56);
-                            int nw = display_->getFontRenderer().measureText(st.name, 16);
-                            display_->drawTextPx(tx + (st.cw - nw) / 2, ty + st.ch - 48, 16, st.name, 0xFFFFFFFF);
+                        size_t pIdx = (custom.frameCount / 600) % 3;
+                        const char* premUrl = kPremiumHeroes[pIdx];
+                        luna::util::ImageLoader::instance().requestImage(premUrl, luna::util::ImagePreset::PanoramicDetail);
+                        auto artImg = luna::util::ImageLoader::instance().getImage(premUrl, luna::util::ImagePreset::PanoramicDetail);
+                        if (artImg && artImg->ready && !artImg->rgba.empty() && artImg->width > 0 && artImg->height > 0) {
+                            drawAspectFill(artImg->rgba.data(), artImg->width, artImg->height);
+                        } else {
+                            // Atmospheric deep cosmic gradient base (no tilted cards!)
+                            for (int dy = 0; dy < h; ++dy) {
+                                float ty = static_cast<float>(dy) / static_cast<float>(std::max(1, h));
+                                for (int dx = 0; dx < w; ++dx) {
+                                    float tx = static_cast<float>(dx) / static_cast<float>(std::max(1, w));
+                                    float glow1 = std::max(0.0f, 1.0f - std::hypot((tx - 0.62f) * 1.4f, (ty - 0.38f) * 1.1f));
+                                    float glow2 = std::max(0.0f, 1.0f - std::hypot((tx - 0.35f) * 1.3f, (ty - 0.72f) * 1.2f));
+                                    int r = std::clamp(static_cast<int>(18.0f + glow1 * 96.0f + glow2 * 22.0f), 0, 255);
+                                    int g = std::clamp(static_cast<int>(16.0f + glow1 * 32.0f + glow2 * 98.0f), 0, 255);
+                                    int b = std::clamp(static_cast<int>(42.0f + glow1 * 175.0f + glow2 * 165.0f), 0, 255);
+                                    uint32_t col = 0xFF000000U | (static_cast<uint32_t>(r) << 16) |
+                                                                 (static_cast<uint32_t>(g) << 8)  |
+                                                                  static_cast<uint32_t>(b);
+                                    display_->putPixel(x + dx, y + dy, col);
+                                }
+                            }
                         }
                     } else if (!artUrl.empty()) {
                         luna::util::ImageLoader::instance().requestImage(artUrl, luna::util::ImagePreset::PanoramicDetail);
@@ -462,13 +521,18 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                 for (int fx = 0; fx < fadeW; ++fx) {
                     float t = static_cast<float>(fx) / static_cast<float>(fadeW);
                     float alphaF = 1.0f - (t * t * (3.0f - 2.0f * t));
-                    uint8_t alpha = static_cast<uint8_t>(std::clamp(alphaF * 255.0f, 0.0f, 255.0f));
+                    uint8_t alpha = static_cast<uint8_t>(std::clamp(alphaF * 150.0f, 0.0f, 150.0f));
                     if (alpha > 0) {
                         display_->blendRectUniform(x + fx, y, 1, h, 0xFF0E1320, alpha);
                     }
                 }
 
-                // Stitch v2 Bottom Video Timeline & Controls HUD (NO top frame/header!)
+                bool isPremiumCard = (custom.tile->backdropUrl == "local:luna_premium" ||
+                                      custom.tile->title.find("Luna Premium") != std::string::npos ||
+                                      custom.tile->title.find("100 juegos") != std::string::npos);
+
+                // Stitch v2 Bottom Video Timeline HUD (only for real game trailers, never on Luna Premium)
+                if (!isPremiumCard) {
                 int hudH = 68;
                 int hudY = y + h - hudH;
                 for (int dy = 0; dy < hudH; ++dy) {
@@ -483,33 +547,28 @@ void ClayRenderer::renderCustomElement(const ClayCustomElement& custom, const Cl
                 int barW = w - 180;
                 int barH = 4;
                 display_->drawRoundedRect(barX, barY, barW, barH, 2, 0xFF303444);
-                float prog = drewVideo ? std::clamp(player.getProgress(), 0.05f, 1.0f) : 0.35f;
-                int fillW = std::max(8, static_cast<int>(static_cast<float>(barW) * prog));
+                float prog = drewVideo ? std::clamp(player.getProgress(), 0.0f, 1.0f) : 0.0f;
+                int fillW = std::max(4, static_cast<int>(static_cast<float>(barW) * prog));
                 display_->drawRoundedRect(barX, barY, fillW, barH, 2, 0xFF38BDF8);
 
-                int curSec = drewVideo ? player.getCurrentSeconds() : 42;
-                int totSec = drewVideo ? std::max(1, player.getTotalSeconds()) : 135;
+                int curSec = drewVideo ? player.getCurrentSeconds() : 0;
+                int totSec = drewVideo ? std::max(1, player.getTotalSeconds()) : 0;
                 char timeBuf[32];
                 std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d / %02d:%02d",
                               curSec / 60, curSec % 60, totSec / 60, totSec % 60);
                 display_->drawTextPx(barX + barW + 12, barY - 5, 11, timeBuf, 0xFF94A3B8);
 
-                // Bottom-left pill: (R3) Pantalla Completa
-                int pillX = barX, pillY = y + h - 32;
-                display_->drawRoundedRect(pillX, pillY, 174, 24, 6, 0xCC161B2A);
-                display_->drawRoundedBorder(pillX, pillY, 174, 24, 6, 1, 0xFF414752);
-                display_->drawRoundedRect(pillX + 6, pillY + 4, 26, 16, 4, 0xFF2A2D3D);
-                display_->drawTextPx(pillX + 11, pillY + 6, 10, "R3", 0xFF38BDF8);
-                display_->drawTextPx(pillX + 38, pillY + 6, 11, "Pantalla Completa", 0xFFE2E8F0);
+                // Bottom-left: DualSense R3 thumbstick glyph + "Pantalla completa"
+                int pillX = barX, pillY = y + h - 34;
+                display_->drawRoundedRect(pillX, pillY, 178, 28, 14, 0xCC161B2A);
+                display_->drawRoundedBorder(pillX, pillY, 178, 28, 14, 1, 0xFF414752);
+                PS5ControllerIcons::drawThumbstick(*display_, pillX + 16, pillY + 14, 22, true, false);
+                display_->drawTextPx(pillX + 36, pillY + 7, 12, "Pantalla completa", 0xFFE2E8F0);
 
-                // Bottom-right speaker + Audio en Pantalla Completa
-                int audX = x + w - 216, audY = pillY + 5;
-                display_->drawPlayTriangleIcon(audX + 4, audY + 7, 5, 0xFF38BDF8);
-                display_->drawTextPx(audX + 14, audY, 11,
-                                     (!custom.tile->videoUrl.empty() && player.isDownloading() && !drewVideo)
-                                         ? "Cargando tr\xC3\xA1iler HD..."
-                                         : "Audio en Pantalla Completa",
-                                     0xFFCBD5E1);
+                if (!custom.tile->videoUrl.empty() && player.isDownloading() && !drewVideo) {
+                    display_->drawTextPx(x + w - 200, pillY + 7, 11, "Cargando tr\xC3\xA1iler HD...", 0xFF94A3B8);
+                }
+                }
 
                 // Clip top-right and bottom-right corners (radius 22px) to screen background #0A0E17
                 const int cornerR = 22;

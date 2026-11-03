@@ -29,7 +29,9 @@ enum class CustomElementType : uint8_t {
     Bumper,             // DualSense L1 or R1 bumper
     OptionsButton,      // DualSense Options pill button
     InterfaceIcon,      // Search, Star, Play
-    PartnerBannerBg     // Panoramic background for Partner Upsell banners
+    PartnerBannerBg,    // Panoramic background for Partner Upsell banners
+    HeroLeftBackdrop,   // Game artwork behind hero left column (fades into trailer)
+    RankNumber          // Large outlined ranking number (1..10)
 };
 
 struct ClayCustomElement {

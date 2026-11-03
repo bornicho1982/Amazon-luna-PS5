@@ -19,7 +19,42 @@ inline float distSegment(float px, float py, float ax, float ay, float bx, float
 
 } // namespace
 
+void PS5ControllerIcons::drawThumbstick(DisplayManager& disp, int cx, int cy, int size, bool isR3, bool inFocus) {
+    if (size <= 6) return;
+    int r = size / 2;
+    int innerR = (size * 7) / 20; // 70% diameter
+    int wellCol = inFocus ? 0xFF0070D1 : 0xFF182236;
+    int ringCol = inFocus ? 0xFF38BDF8 : 0xFF2C374E;
+    int capCol  = inFocus ? 0xFFFFFFFF : 0xFF0D121D;
+    int txtCol  = inFocus ? 0xFF070911 : 0xFFE2E8F0;
+
+    // 1. Outer well ring
+    disp.drawRoundedRect(cx - r, cy - r, size, size, r, wellCol);
+    disp.drawRoundedBorder(cx - r, cy - r, size, size, r, 1, ringCol);
+
+    // 2. Inner thumbstick cap
+    disp.drawRoundedRect(cx - innerR, cy - innerR, innerR * 2, innerR * 2, innerR, capCol);
+    disp.drawRoundedBorder(cx - innerR, cy - innerR, innerR * 2, innerR * 2, innerR, 1, ringCol);
+
+    // 3. 4 Rubber grip ticks (N, S, W, E)
+    int tickD = innerR - 2;
+    disp.putPixel(cx, cy - tickD, ringCol);
+    disp.putPixel(cx, cy + tickD, ringCol);
+    disp.putPixel(cx - tickD, cy, ringCol);
+    disp.putPixel(cx + tickD, cy, ringCol);
+
+    // 4. Center label L3 / R3
+    const char* txt = isR3 ? "R3" : "L3";
+    int fs = std::clamp((size * 4) / 10, 9, 13);
+    int tw = disp.getFontRenderer().measureText(txt, fs);
+    disp.drawTextPx(cx - tw / 2, cy - fs / 2 + 1, fs, txt, txtCol);
+}
+
 void PS5ControllerIcons::drawButton(DisplayManager& disp, int cx, int cy, int size, DualSenseBtn btn, bool inFocus) {
+    if (btn == DualSenseBtn::L3 || btn == DualSenseBtn::R3) {
+        drawThumbstick(disp, cx, cy, size, btn == DualSenseBtn::R3, inFocus);
+        return;
+    }
     if (size <= 4) return;
     float r = static_cast<float>(size) * 0.5f;
     int minX = static_cast<int>(std::floor(static_cast<float>(cx) - r - 1.0f));
