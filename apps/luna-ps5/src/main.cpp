@@ -2127,13 +2127,21 @@ int main(int argc, char* argv[]) {
 
                     std::lock_guard<std::mutex> lk(latestFrameMutex);
                     if (hasValidFrame) {
-                        display.presentYuv420WithHud(
+                        display.presentYuv420(
                             latestFrameY.data(), latestFrameU.data(), latestFrameV.data(),
                             latestStrideY, latestStrideU, latestStrideV,
-                            latestWidth, latestHeight,
-                            showHudNow, hudLine1, hudLine2,
-                            overlayOpen, overlaySelectedIdx, hudPinned, curGame.title
+                            latestWidth, latestHeight
                         );
+                        if (showHudNow) {
+                            display.drawStreamingDashboardScreenClay(
+                                curGame.title,
+                                "",
+                                "",
+                                "",
+                                luna::util::AppSettings::instance().getVideoQualityLabel(),
+                                rtcClient.isConnected()
+                            );
+                        }
                     }
                 }
                 break;
