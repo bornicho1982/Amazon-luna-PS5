@@ -45,8 +45,9 @@ Requires `C:\llvm-ps5\bin` and `C:\ps5-payload-sdk` (the script adds them to `PA
 - `src/audio/audio_manager.*` — Opus decode and PS5 audio output.
 - `tests/unit/` — observer pattern tests linked against `luna_core`.
 
-## Rules
+## Rules & Governance
 
+- **Read root governance first:** Always read `DIRECTIVAS.md`, `STATE.md`, and `ROADMAP.md` at the project root before making changes.
 - Keep `LUNA_SOURCES` in `apps/luna-ps5/CMakeLists.txt` in sync with the real source list, and keep tests linking `luna_core` instead of re-listing sources.
 - Do not invent WebRTC stubs: use the vendored libdatachannel/mbedTLS targets.
 - DTLS-SRTP is enabled on desktop through `apps/luna-ps5/cmake/luna_mbedtls_user_config.h` (`MBEDTLS_USER_CONFIG_FILE`). Do not edit vendored mbedTLS config.
