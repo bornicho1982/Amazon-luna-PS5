@@ -111,6 +111,9 @@ public:
                             uint64_t frameCount,
                             int accountsSubTab = 0);
 
+    void drawSettingsScreenClay(int selectedItemIdx,
+                                const std::string& statusText);
+
     // kind: 0 = Gestionar perfiles, 1 = Planes Luna, 2 = Distintivos, 3 = Stream
     void drawProfileScreen(int kind,
                            int sel,

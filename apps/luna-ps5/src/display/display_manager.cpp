@@ -1909,6 +1909,15 @@ void DisplayManager::drawSettingsScreen(int selectedItemIdx,
     present();
 }
 
+void DisplayManager::drawSettingsScreenClay(int selectedItemIdx,
+                                            const std::string& statusText) {
+    if (!isReady_ || !mappedMemory_) return;
+    luna::display::SettingsScreenProps props{
+        .selectedItemIdx = selectedItemIdx,
+        .statusText = statusText
+    };
+    luna::display::LunaClayUI::renderSettingsScreen(*this, props);
+}
 void DisplayManager::drawProfileScreen(int kind,
                                        int sel,
                                        int subTab,

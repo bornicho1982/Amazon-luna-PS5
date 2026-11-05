@@ -1790,7 +1790,7 @@ int main(int argc, char* argv[]) {
                         bluetoothModalOpen = false;
                     }
                     display.deferNextPresent();
-                    display.drawSettingsScreen(settingsSelectedIdx, g_lastStatusText, frameCount, accountsSubTab);
+                    display.drawSettingsScreenClay(settingsSelectedIdx, g_lastStatusText);
                     display.drawBluetoothGamepadModal(frameCount);
                     break;
                 }
@@ -1858,7 +1858,7 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                display.drawSettingsScreen(settingsSelectedIdx, g_lastStatusText, frameCount, accountsSubTab);
+                display.drawSettingsScreenClay(settingsSelectedIdx, g_lastStatusText);
                 break;
             }
 
