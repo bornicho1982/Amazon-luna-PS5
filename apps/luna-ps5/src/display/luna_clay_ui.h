@@ -83,6 +83,12 @@ struct StreamingDashboardScreenProps {
     bool showHud = true;
 };
 
+struct RemotePlayScreenProps {
+    const std::string& statusText;
+    const std::vector<LunaCollection>& collections;
+    int selectedIdx = 0;
+};
+
 class LunaClayUI {
 public:
     static void renderHomeScreen(DisplayManager& disp, const HomeScreenProps& props);
@@ -92,6 +98,7 @@ public:
     static void renderLoginScreen(DisplayManager& disp, const LoginScreenProps& props);
     static void renderMediaViewerScreen(DisplayManager& disp, const MediaViewerScreenProps& props);
     static void renderStreamingDashboardScreen(DisplayManager& disp, const StreamingDashboardScreenProps& props);
+    static void renderRemotePlayScreen(DisplayManager& disp, const RemotePlayScreenProps& props);
 };
 
 } // namespace luna::display

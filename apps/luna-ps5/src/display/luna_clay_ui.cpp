@@ -2296,4 +2296,92 @@ void LunaClayUI::renderStreamingDashboardScreen(DisplayManager& disp, const Stre
     clay.renderCommands(commands);
     disp.present();
 }
+void LunaClayUI::renderRemotePlayScreen(DisplayManager& disp, const RemotePlayScreenProps& props) {
+    disp.clear(0xFF0E0B16);
+    auto& clay = ClayRenderer::instance();
+    clay.beginFrame();
+
+    CLAY(CLAY_ID("RemoteRoot"), {
+        .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM },
+        .backgroundColor = { 14, 11, 22, 255 }
+    }) {
+        CLAY(CLAY_ID("TopBar"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(90) },
+                        .padding = { 50, 50, 0, 0 },
+                        .childGap = 16,
+                        .childAlignment = { .y = CLAY_ALIGN_Y_CENTER },
+                        .layoutDirection = CLAY_LEFT_TO_RIGHT },
+            .backgroundColor = { 24, 18, 38, 255 }
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString("Remote Play y Mi espacio"),
+                      CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 28 }));
+            CLAY(CLAY_ID("BackHint"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                            .childAlignment = { .x = CLAY_ALIGN_X_RIGHT, .y = CLAY_ALIGN_Y_CENTER } }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("[(O) Volver]"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 16 }));
+            }
+        }
+        CLAY(CLAY_ID("Sep"), { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(2) } },
+                              .backgroundColor = { 145, 70, 255, 255 } }) {}
+
+        CLAY(CLAY_ID("Body"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                        .padding = { 50, 50, 25, 25 },
+                        .childGap = 24,
+                        .layoutDirection = CLAY_TOP_TO_BOTTOM }
+        }) {
+            CLAY(CLAY_ID("SectionTitle"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) } }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("Juegos disponibles para Remote Play"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 22 }));
+            }
+            CLAY(CLAY_ID("CardsRow"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(260) },
+                            .childGap = 20,
+                            .layoutDirection = CLAY_LEFT_TO_RIGHT }
+            }) {
+                for (size_t i = 0; i < props.collections.size() && i < 6; ++i) {
+                    const auto& col = props.collections[i];
+                    CLAY(CLAY_IDI("Card", (int)i), {
+                        .layout = { .sizing = { CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(260) },
+                                    .childGap = 8,
+                                    .layoutDirection = CLAY_TOP_TO_BOTTOM }
+                    }) {
+                        CLAY(CLAY_IDI("Cover", (int)i), {
+                            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(180) } },
+                            .backgroundColor = { 28, 21, 46, 255 },
+                            .cornerRadius = CLAY_CORNER_RADIUS(12)
+                        }) {}
+                        CLAY_TEXT(ClayRenderer::toClayString(col.title.empty() ? "Juego" : col.title),
+                                  CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontSize = 14 }));
+                    }
+                }
+            }
+            CLAY(CLAY_ID("MySpace"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                            .childGap = 12,
+                            .layoutDirection = CLAY_TOP_TO_BOTTOM }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("Mi espacio"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 22 }));
+                CLAY(CLAY_ID("MySpaceList"), {
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                                .childGap = 8,
+                                .layoutDirection = CLAY_TOP_TO_BOTTOM }
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString("Tus juegos en la nube apareceran aqui."),
+                              CLAY_TEXT_CONFIG({ .textColor = { 148, 163, 184, 255 }, .fontSize = 14 }));
+                }
+            }
+        }
+    }
+
+    Clay_RenderCommandArray commands = Clay_EndLayout(0.0f);
+    clay.renderCommands(commands);
+    disp.present();
+}
 } // namespace luna::display
