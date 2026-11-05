@@ -146,6 +146,10 @@ public:
                                int currentMediaIdx,
                                uint64_t frameCount);
 
+    void drawMediaViewerScreenClay(const GameTile& game,
+                                   int currentMediaIdx,
+                                   uint64_t frameCount);
+
     void drawStartingSession(const GameTile& game,
                              const std::string& statusMsg,
                              uint64_t frameCount,

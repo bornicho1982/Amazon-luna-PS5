@@ -1780,7 +1780,7 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 }
-                display.drawMediaViewerScreen(currentDetailGame, mediaViewerIdx, frameCount);
+                display.drawMediaViewerScreenClay(currentDetailGame, mediaViewerIdx, frameCount);
                 break;
             }
 

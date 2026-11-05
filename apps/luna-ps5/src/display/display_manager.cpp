@@ -2097,6 +2097,23 @@ void DisplayManager::drawProfileScreen(int kind,
     present();
 }
 
+void DisplayManager::drawMediaViewerScreenClay(const GameTile& game,
+                                               int currentMediaIdx,
+                                               uint64_t frameCount) {
+    (void)currentMediaIdx;
+    (void)frameCount;
+    if (!isReady_ || !mappedMemory_) return;
+    luna::display::MediaViewerScreenProps props{
+        .statusText = "",
+        .gameTitle = game.title,
+        .developer = game.developer,
+        .currentTime = "",
+        .totalTime = "",
+        .isPaused = false,
+        .showControls = true
+    };
+    luna::display::LunaClayUI::renderMediaViewerScreen(*this, props);
+}
 void DisplayManager::drawMediaViewerScreen(const GameTile& game,
                                           int currentMediaIdx,
                                           uint64_t frameCount) {
