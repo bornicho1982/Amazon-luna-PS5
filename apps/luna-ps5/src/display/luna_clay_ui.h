@@ -44,10 +44,16 @@ struct GameDetailProps {
     bool isFavorite = false;
 };
 
+struct SettingsScreenProps {
+    int selectedItemIdx = 0;
+    const std::string& statusText;
+};
+
 class LunaClayUI {
 public:
     static void renderHomeScreen(DisplayManager& disp, const HomeScreenProps& props);
     static void renderGameDetail(DisplayManager& disp, const GameDetailProps& props);
+    static void renderSettingsScreen(DisplayManager& disp, const SettingsScreenProps& props);
 };
 
 } // namespace luna::display

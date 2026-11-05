@@ -1825,4 +1825,94 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
     disp.present();
 }
 
+void LunaClayUI::renderSettingsScreen(DisplayManager& disp, const SettingsScreenProps& props) {
+    disp.clear(0xFF0E0B16);
+    auto& clay = ClayRenderer::instance();
+    clay.beginFrame();
+
+    static const char* kTitles[10] = {
+        "Mandos", "Cuentas vinculadas", "Mi cuenta", "Control parental",
+        "Calidad de video", "Idioma", "Datos respaldados", "Descargar Luna",
+        "Ayuda y comentarios", "Acerca de y juridicos"
+    };
+
+    CLAY(CLAY_ID("SettingsRoot"), {
+        .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM },
+        .backgroundColor = { 14, 11, 22, 255 }
+    }) {
+        CLAY(CLAY_ID("TopBar"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(90) },
+                        .padding = { 50, 50, 0, 0 },
+                        .childGap = 16,
+                        .childAlignment = { .y = CLAY_ALIGN_Y_CENTER },
+                        .layoutDirection = CLAY_LEFT_TO_RIGHT },
+            .backgroundColor = { 24, 18, 38, 255 }
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString("Ajustes y Configuracion de Amazon Luna"),
+                      CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 28 }));
+        }
+        CLAY(CLAY_ID("Sep"), { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(2) } },
+                              .backgroundColor = { 145, 70, 255, 255 } }) {}
+
+        CLAY(CLAY_ID("Body"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                        .padding = { 50, 50, 25, 25 },
+                        .childGap = 30,
+                        .layoutDirection = CLAY_LEFT_TO_RIGHT }
+        }) {
+            CLAY(CLAY_ID("List"), {
+                .layout = { .sizing = { CLAY_SIZING_FIXED(750), CLAY_SIZING_GROW(0) },
+                            .childGap = 12,
+                            .layoutDirection = CLAY_TOP_TO_BOTTOM }
+            }) {
+                for (int i = 0; i < 10; ++i) {
+                    bool focused = (props.selectedItemIdx == i);
+                    Clay_Color bg = focused ? Clay_Color{ 145, 70, 255, 255 } : Clay_Color{ 28, 21, 46, 255 };
+                    Clay_Color border = focused ? Clay_Color{ 255, 255, 255, 255 } : Clay_Color{ 45, 34, 72, 255 };
+                    CLAY(CLAY_IDI("SettingRow", i), {
+                        .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(78) },
+                                    .padding = { 18, 18, 12, 12 },
+                                    .childGap = 12,
+                                    .childAlignment = { .y = CLAY_ALIGN_Y_CENTER },
+                                    .layoutDirection = CLAY_LEFT_TO_RIGHT },
+                        .backgroundColor = bg,
+                        .cornerRadius = CLAY_CORNER_RADIUS(12),
+                        .border = { .color = border, .width = { (uint16_t)(focused ? 3 : 1), (uint16_t)(focused ? 3 : 1), (uint16_t)(focused ? 3 : 1), (uint16_t)(focused ? 3 : 1), 0 } }
+                    }) {
+                        CLAY(CLAY_IDI("RowText", i), {
+                            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                                        .childGap = 2,
+                                        .layoutDirection = CLAY_TOP_TO_BOTTOM }
+                        }) {
+                            CLAY_TEXT(ClayRenderer::toClayString(kTitles[i]),
+                                      CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 16 }));
+                        }
+                    }
+                }
+            }
+
+            CLAY(CLAY_ID("DetailPanel"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                            .padding = { 40, 40, 32, 32 },
+                            .childGap = 16,
+                            .layoutDirection = CLAY_TOP_TO_BOTTOM },
+                .backgroundColor = { 22, 16, 36, 255 },
+                .cornerRadius = CLAY_CORNER_RADIUS(16),
+                .border = { .color = { 45, 34, 72, 255 }, .width = { 1, 1, 1, 1, 0 } }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString(kTitles[props.selectedItemIdx < 0 || props.selectedItemIdx > 9 ? 0 : props.selectedItemIdx]),
+                          CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 28 }));
+                CLAY(CLAY_ID("DetailSep"), { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1) } },
+                                            .backgroundColor = { 145, 70, 255, 255 } }) {}
+                CLAY_TEXT(ClayRenderer::toClayString(props.statusText.empty() ? std::string("Listo") : props.statusText),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 16 }));
+            }
+        }
+    }
+
+    Clay_RenderCommandArray commands = Clay_EndLayout(0.0f);
+    clay.renderCommands(commands);
+    disp.present();
+}
 } // namespace luna::display
