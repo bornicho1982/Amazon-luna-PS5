@@ -150,6 +150,13 @@ public:
                                    int currentMediaIdx,
                                    uint64_t frameCount);
 
+    void drawStreamingDashboardScreenClay(const std::string& gameTitle,
+                                          const std::string& ping,
+                                          const std::string& latency,
+                                          const std::string& bitrate,
+                                          const std::string& quality,
+                                          bool isConnected);
+
     void drawStartingSession(const GameTile& game,
                              const std::string& statusMsg,
                              uint64_t frameCount,

@@ -1946,6 +1946,25 @@ void DisplayManager::drawLoginScreenClay(const std::string& statusText,
     };
     luna::display::LunaClayUI::renderLoginScreen(*this, props);
 }
+void DisplayManager::drawStreamingDashboardScreenClay(const std::string& gameTitle,
+                                                     const std::string& ping,
+                                                     const std::string& latency,
+                                                     const std::string& bitrate,
+                                                     const std::string& quality,
+                                                     bool isConnected) {
+    if (!isReady_ || !mappedMemory_) return;
+    luna::display::StreamingDashboardScreenProps props{
+        .statusText = "",
+        .gameTitle = gameTitle,
+        .ping = ping,
+        .latency = latency,
+        .bitrate = bitrate,
+        .quality = quality,
+        .isConnected = isConnected,
+        .showHud = true
+    };
+    luna::display::LunaClayUI::renderStreamingDashboardScreen(*this, props);
+}
 void DisplayManager::drawProfileScreen(int kind,
                                        int sel,
                                        int subTab,
