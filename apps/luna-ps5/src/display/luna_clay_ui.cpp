@@ -2089,4 +2089,146 @@ void LunaClayUI::renderLoginScreen(DisplayManager& disp, const LoginScreenProps&
     clay.renderCommands(commands);
     disp.present();
 }
+void LunaClayUI::renderMediaViewerScreen(DisplayManager& disp, const MediaViewerScreenProps& props) {
+    disp.clear(0xFF000000);
+    auto& clay = ClayRenderer::instance();
+    clay.beginFrame();
+
+    CLAY(CLAY_ID("MediaRoot"), {
+        .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM }
+    }) {
+        // Top overlay (header HUD)
+        if (props.showControls) {
+            CLAY(CLAY_ID("TopOverlay"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(120) },
+                            .padding = { 50, 50, 30, 30 },
+                            .childGap = 16,
+                            .childAlignment = { .y = CLAY_ALIGN_Y_CENTER },
+                            .layoutDirection = CLAY_LEFT_TO_RIGHT },
+                .backgroundColor = { 0, 0, 0, 140 }
+            }) {
+                CLAY(CLAY_ID("BackBtn"), {
+                    .layout = { .sizing = { CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(48) },
+                                .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                    .backgroundColor = { 255, 255, 255, 40 },
+                    .cornerRadius = CLAY_CORNER_RADIUS(24)
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString("(O) Volver"),
+                              CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontSize = 14 }));
+                }
+                CLAY(CLAY_ID("TitleBlock"), {
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                                .childGap = 4,
+                                .layoutDirection = CLAY_TOP_TO_BOTTOM }
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString(props.gameTitle.empty() ? "Trailer" : props.gameTitle),
+                              CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 24 }));
+                    if (!props.developer.empty()) {
+                        CLAY_TEXT(ClayRenderer::toClayString(props.developer),
+                                  CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 14 }));
+                    }
+                    CLAY_TEXT(ClayRenderer::toClayString("Trailer Oficial"),
+                              CLAY_TEXT_CONFIG({ .textColor = { 0, 240, 255, 255 }, .fontSize = 12 }));
+                }
+                CLAY(CLAY_ID("Quality"), {
+                    .layout = { .sizing = { CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40) },
+                                .childAlignment = { .x = CLAY_ALIGN_X_RIGHT, .y = CLAY_ALIGN_Y_CENTER } }
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString("4K 60 FPS HDR10"),
+                              CLAY_TEXT_CONFIG({ .textColor = { 0, 240, 255, 255 }, .fontSize = 12 }));
+                }
+            }
+        }
+
+        // Spacer to push controls to bottom
+        CLAY(CLAY_ID("Spacer"), { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) } } }) {}
+
+        // Bottom controls overlay
+        if (props.showControls) {
+            CLAY(CLAY_ID("BottomOverlay"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(140) },
+                            .padding = { 50, 50, 20, 20 },
+                            .childGap = 16,
+                            .layoutDirection = CLAY_TOP_TO_BOTTOM },
+                .backgroundColor = { 0, 0, 0, 160 }
+            }) {
+                // Progress bar
+                CLAY(CLAY_ID("ProgressRow"), {
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(24) },
+                                .childGap = 12,
+                                .childAlignment = { .y = CLAY_ALIGN_Y_CENTER },
+                                .layoutDirection = CLAY_LEFT_TO_RIGHT }
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString(props.currentTime.empty() ? "00:00" : props.currentTime),
+                              CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontSize = 12 }));
+                    CLAY(CLAY_ID("ProgressBar"), {
+                        .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(6) } },
+                        .backgroundColor = { 60, 60, 60, 255 },
+                        .cornerRadius = CLAY_CORNER_RADIUS(3)
+                    }) {}
+                    CLAY_TEXT(ClayRenderer::toClayString(props.totalTime.empty() ? "00:00" : props.totalTime),
+                              CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontSize = 12 }));
+                }
+                // Buttons row
+                CLAY(CLAY_ID("ButtonsRow"), {
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56) },
+                                .childGap = 20,
+                                .childAlignment = { .y = CLAY_ALIGN_Y_CENTER },
+                                .layoutDirection = CLAY_LEFT_TO_RIGHT }
+                }) {
+                    CLAY(CLAY_ID("Rewind"), {
+                        .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(48) },
+                                    .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                        .backgroundColor = { 255, 255, 255, 40 },
+                        .cornerRadius = CLAY_CORNER_RADIUS(24)
+                    }) {
+                        CLAY_TEXT(ClayRenderer::toClayString("-15s"),
+                                  CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontSize = 12 }));
+                    }
+                    CLAY(CLAY_ID("PlayPause"), {
+                        .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(48) },
+                                    .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                        .backgroundColor = { 145, 70, 255, 255 },
+                        .cornerRadius = CLAY_CORNER_RADIUS(24)
+                    }) {
+                        CLAY_TEXT(ClayRenderer::toClayString(props.isPaused ? "Play" : "Pause"),
+                                  CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 14 }));
+                    }
+                    CLAY(CLAY_ID("Forward"), {
+                        .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(48) },
+                                    .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                        .backgroundColor = { 255, 255, 255, 40 },
+                        .cornerRadius = CLAY_CORNER_RADIUS(24)
+                    }) {
+                        CLAY_TEXT(ClayRenderer::toClayString("+15s"),
+                                  CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontSize = 12 }));
+                    }
+                    CLAY(CLAY_ID("Vol"), {
+                        .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(48) },
+                                    .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                        .backgroundColor = { 255, 255, 255, 40 },
+                        .cornerRadius = CLAY_CORNER_RADIUS(24)
+                    }) {
+                        CLAY_TEXT(ClayRenderer::toClayString("Vol"),
+                                  CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontSize = 12 }));
+                    }
+                    CLAY(CLAY_ID("StartGame"), {
+                        .layout = { .sizing = { CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(48) },
+                                    .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                        .backgroundColor = { 0, 240, 255, 255 },
+                        .cornerRadius = CLAY_CORNER_RADIUS(24)
+                    }) {
+                        CLAY_TEXT(ClayRenderer::toClayString("Iniciar juego"),
+                                  CLAY_TEXT_CONFIG({ .textColor = { 0, 0, 0, 255 }, .fontId = 1, .fontSize = 14 }));
+                    }
+                }
+            }
+        }
+    }
+
+    Clay_RenderCommandArray commands = Clay_EndLayout(0.0f);
+    clay.renderCommands(commands);
+    disp.present();
+}
 } // namespace luna::display

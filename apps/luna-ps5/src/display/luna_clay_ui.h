@@ -62,6 +62,16 @@ struct LoginScreenProps {
     bool waiting = true;
 };
 
+struct MediaViewerScreenProps {
+    const std::string& statusText;
+    const std::string& gameTitle;
+    const std::string& developer;
+    const std::string& currentTime;
+    const std::string& totalTime;
+    bool isPaused = false;
+    bool showControls = true;
+};
+
 class LunaClayUI {
 public:
     static void renderHomeScreen(DisplayManager& disp, const HomeScreenProps& props);
@@ -69,6 +79,7 @@ public:
     static void renderSettingsScreen(DisplayManager& disp, const SettingsScreenProps& props);
     static void renderErrorScreen(DisplayManager& disp, const ErrorScreenProps& props);
     static void renderLoginScreen(DisplayManager& disp, const LoginScreenProps& props);
+    static void renderMediaViewerScreen(DisplayManager& disp, const MediaViewerScreenProps& props);
 };
 
 } // namespace luna::display
