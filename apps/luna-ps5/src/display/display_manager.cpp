@@ -1918,6 +1918,17 @@ void DisplayManager::drawSettingsScreenClay(int selectedItemIdx,
     };
     luna::display::LunaClayUI::renderSettingsScreen(*this, props);
 }
+void DisplayManager::drawErrorScreenClay(const std::string& errorMessage,
+                                         const std::string& errorCode,
+                                         const std::string& statusText) {
+    if (!isReady_ || !mappedMemory_) return;
+    luna::display::ErrorScreenProps props{
+        .errorMessage = errorMessage,
+        .errorCode = errorCode,
+        .statusText = statusText
+    };
+    luna::display::LunaClayUI::renderErrorScreen(*this, props);
+}
 void DisplayManager::drawProfileScreen(int kind,
                                        int sel,
                                        int subTab,

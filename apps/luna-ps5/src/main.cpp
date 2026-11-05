@@ -52,7 +52,8 @@ enum class AppState {
     Settings,
     ProfileScreen,
     StartingSession,
-    Streaming
+    Streaming,
+    Error
 };
 
 } // namespace
@@ -2134,6 +2135,13 @@ int main(int argc, char* argv[]) {
                             overlayOpen, overlaySelectedIdx, hudPinned, curGame.title
                         );
                     }
+                }
+                break;
+            }
+            case AppState::Error: {
+                display.drawErrorScreenClay(g_lastStatusText, "ERR", g_lastStatusText);
+                if (pressedNow & luna::input::PAD_CIRCLE) {
+                    appState = AppState::Catalog;
                 }
                 break;
             }
