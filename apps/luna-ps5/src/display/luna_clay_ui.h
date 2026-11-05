@@ -55,12 +55,20 @@ struct ErrorScreenProps {
     const std::string& statusText;
 };
 
+struct LoginScreenProps {
+    const std::string& statusText;
+    const std::string& pinCode;
+    const std::string& countdown;
+    bool waiting = true;
+};
+
 class LunaClayUI {
 public:
     static void renderHomeScreen(DisplayManager& disp, const HomeScreenProps& props);
     static void renderGameDetail(DisplayManager& disp, const GameDetailProps& props);
     static void renderSettingsScreen(DisplayManager& disp, const SettingsScreenProps& props);
     static void renderErrorScreen(DisplayManager& disp, const ErrorScreenProps& props);
+    static void renderLoginScreen(DisplayManager& disp, const LoginScreenProps& props);
 };
 
 } // namespace luna::display

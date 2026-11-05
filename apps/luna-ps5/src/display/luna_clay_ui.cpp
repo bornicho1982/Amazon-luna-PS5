@@ -1998,4 +1998,95 @@ void LunaClayUI::renderErrorScreen(DisplayManager& disp, const ErrorScreenProps&
     clay.renderCommands(commands);
     disp.present();
 }
+void LunaClayUI::renderLoginScreen(DisplayManager& disp, const LoginScreenProps& props) {
+    disp.clear(0xFF0E0B16);
+    auto& clay = ClayRenderer::instance();
+    clay.beginFrame();
+
+    CLAY(CLAY_ID("LoginRoot"), {
+        .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                    .childGap = 24,
+                    .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM },
+        .backgroundColor = { 14, 11, 22, 255 }
+    }) {
+        CLAY(CLAY_ID("Logo"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(60) },
+                        .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString("Amazon Luna"),
+                      CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 32 }));
+        }
+        CLAY(CLAY_ID("Card"), {
+            .layout = { .sizing = { CLAY_SIZING_FIXED(900), CLAY_SIZING_FIXED(600) },
+                        .padding = { 40, 40, 40, 40 },
+                        .childGap = 20,
+                        .childAlignment = { .x = CLAY_ALIGN_X_CENTER },
+                        .layoutDirection = CLAY_TOP_TO_BOTTOM },
+            .backgroundColor = { 22, 16, 36, 255 },
+            .cornerRadius = CLAY_CORNER_RADIUS(20),
+            .border = { .color = { 45, 34, 72, 255 }, .width = { 1, 1, 1, 1, 0 } }
+        }) {
+            CLAY(CLAY_ID("StatusPill"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(40) },
+                            .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                .backgroundColor = { 0, 240, 255, 40 },
+                .cornerRadius = CLAY_CORNER_RADIUS(20)
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString(props.waiting ? "Esperando vinculacion..." : "Vinculado"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 0, 240, 255, 255 }, .fontId = 1, .fontSize = 16 }));
+            }
+            CLAY(CLAY_ID("QrBox"), {
+                .layout = { .sizing = { CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(280) },
+                            .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                .backgroundColor = { 255, 255, 255, 255 },
+                .cornerRadius = CLAY_CORNER_RADIUS(12)
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("QR"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 0, 0, 0, 255 }, .fontId = 1, .fontSize = 32 }));
+            }
+            if (!props.pinCode.empty()) {
+                CLAY(CLAY_ID("Pin"), {
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) },
+                                .childAlignment = { .x = CLAY_ALIGN_X_CENTER } }
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString("PIN: " + props.pinCode),
+                              CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 24 }));
+                }
+            }
+            if (!props.countdown.empty()) {
+                CLAY(CLAY_ID("Countdown"), {
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) },
+                                .childAlignment = { .x = CLAY_ALIGN_X_CENTER } }
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString("Expira en " + props.countdown),
+                              CLAY_TEXT_CONFIG({ .textColor = { 148, 163, 184, 255 }, .fontSize = 14 }));
+                }
+            }
+            CLAY(CLAY_ID("Steps"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) },
+                            .childGap = 8,
+                            .layoutDirection = CLAY_TOP_TO_BOTTOM }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("1. Abre la camara de tu movil"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 14 }));
+                CLAY_TEXT(ClayRenderer::toClayString("2. Escanea el codigo QR"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 14 }));
+                CLAY_TEXT(ClayRenderer::toClayString("3. Confirma con tu cuenta de Amazon"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 14 }));
+            }
+        }
+        CLAY(CLAY_ID("BackHint"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(40) },
+                        .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString("[(O) Volver al inicio]"),
+                      CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 16 }));
+        }
+    }
+
+    Clay_RenderCommandArray commands = Clay_EndLayout(0.0f);
+    clay.renderCommands(commands);
+    disp.present();
+}
 } // namespace luna::display
