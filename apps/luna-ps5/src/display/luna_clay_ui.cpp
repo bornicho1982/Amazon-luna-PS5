@@ -1915,4 +1915,87 @@ void LunaClayUI::renderSettingsScreen(DisplayManager& disp, const SettingsScreen
     clay.renderCommands(commands);
     disp.present();
 }
+void LunaClayUI::renderErrorScreen(DisplayManager& disp, const ErrorScreenProps& props) {
+    disp.clear(0xFF0E0B16);
+    auto& clay = ClayRenderer::instance();
+    clay.beginFrame();
+
+    CLAY(CLAY_ID("ErrorRoot"), {
+        .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                    .childGap = 24,
+                    .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM },
+        .backgroundColor = { 14, 11, 22, 255 }
+    }) {
+        CLAY(CLAY_ID("IconBox"), {
+            .layout = { .sizing = { CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(120) },
+                        .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+            .backgroundColor = { 147, 0, 10, 255 },
+            .cornerRadius = CLAY_CORNER_RADIUS(60)
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString("!"),
+                      CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 64 }));
+        }
+        CLAY(CLAY_ID("Title"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) },
+                        .childAlignment = { .x = CLAY_ALIGN_X_CENTER } }
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString("Error de conexion"),
+                      CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 40 }));
+        }
+        CLAY(CLAY_ID("Msg"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) },
+                        .childAlignment = { .x = CLAY_ALIGN_X_CENTER } }
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString(props.errorMessage.empty() ? std::string("No se pudo conectar a Amazon Luna. Verifica tu conexion a internet.") : props.errorMessage),
+                      CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 18 }));
+        }
+        if (!props.errorCode.empty()) {
+            CLAY(CLAY_ID("Code"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) },
+                            .childAlignment = { .x = CLAY_ALIGN_X_CENTER } }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("Codigo: " + props.errorCode),
+                          CLAY_TEXT_CONFIG({ .textColor = { 148, 163, 184, 255 }, .fontSize = 14 }));
+            }
+        }
+        CLAY(CLAY_ID("Buttons"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) },
+                        .childGap = 20,
+                        .childAlignment = { .x = CLAY_ALIGN_X_CENTER },
+                        .layoutDirection = CLAY_LEFT_TO_RIGHT }
+        }) {
+            CLAY(CLAY_ID("RetryBtn"), {
+                .layout = { .sizing = { CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(60) },
+                            .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                .backgroundColor = { 145, 70, 255, 255 },
+                .cornerRadius = CLAY_CORNER_RADIUS(30)
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("Reintentar"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 18 }));
+            }
+            CLAY(CLAY_ID("BackBtn"), {
+                .layout = { .sizing = { CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(60) },
+                            .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } },
+                .backgroundColor = { 28, 21, 46, 255 },
+                .cornerRadius = CLAY_CORNER_RADIUS(30),
+                .border = { .color = { 45, 34, 72, 255 }, .width = { 1, 1, 1, 1, 0 } }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("Volver al inicio"),
+                          CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 18 }));
+            }
+        }
+        CLAY(CLAY_ID("Status"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0) },
+                        .childAlignment = { .x = CLAY_ALIGN_X_CENTER } }
+        }) {
+            CLAY_TEXT(ClayRenderer::toClayString(props.statusText.empty() ? std::string("Listo") : props.statusText),
+                      CLAY_TEXT_CONFIG({ .textColor = { 148, 163, 184, 255 }, .fontSize = 12 }));
+        }
+    }
+
+    Clay_RenderCommandArray commands = Clay_EndLayout(0.0f);
+    clay.renderCommands(commands);
+    disp.present();
+}
 } // namespace luna::display
