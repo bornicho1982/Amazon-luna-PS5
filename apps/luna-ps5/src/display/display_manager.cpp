@@ -1932,13 +1932,17 @@ void DisplayManager::drawErrorScreenClay(const std::string& errorMessage,
 void DisplayManager::drawLoginScreenClay(const std::string& statusText,
                                          const std::string& pinCode,
                                          const std::string& countdown,
-                                         bool waiting) {
+                                         bool waiting,
+                                         int qrSize,
+                                         const std::function<bool(int, int)>& qrModuleLookup) {
     if (!isReady_ || !mappedMemory_) return;
     luna::display::LoginScreenProps props{
         .statusText = statusText,
         .pinCode = pinCode,
         .countdown = countdown,
-        .waiting = waiting
+        .waiting = waiting,
+        .qrSize = qrSize,
+        .getQrModule = qrModuleLookup
     };
     luna::display::LunaClayUI::renderLoginScreen(*this, props);
 }

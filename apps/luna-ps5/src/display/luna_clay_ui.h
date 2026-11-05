@@ -60,6 +60,8 @@ struct LoginScreenProps {
     const std::string& pinCode;
     const std::string& countdown;
     bool waiting = true;
+    int qrSize = 0;
+    std::function<bool(int, int)> getQrModule;
 };
 
 struct MediaViewerScreenProps {

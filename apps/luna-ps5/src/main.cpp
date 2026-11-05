@@ -1060,27 +1060,27 @@ int main(int argc, char* argv[]) {
 
                 if (cbl.isAuthenticated()) {
                     luna::util::CrashLogger::log("[Main] Usuario autenticado con exito. Abriendo Web...");
-                    display.drawLoginScreen(
-                        cbl.getPublicCode(),
-                        cbl.getVerificationUri(),
-                        cbl.getQrSize(),
-                        [&cbl](int x, int y) { return cbl.getQrModule(x, y); },
+                    display.drawLoginScreenClay(
                         "Conectado a Amazon. Abriendo interfaz Web de Luna...",
-                        frameCount
+                        cbl.getPublicCode(),
+                        "",
+                        false,
+                        cbl.getQrSize(),
+                        [&cbl](int x, int y) { return cbl.getQrModule(x, y); }
                     );
                     loadCatalogIfAuthenticated();
                     appState = AppState::Catalog;
                     break;
                 }
 
-                display.drawLoginScreen(
-                    cbl.getPublicCode(),
-                    cbl.getVerificationUri(),
-                    cbl.getQrSize(),
-                    [&cbl](int x, int y) { return cbl.getQrModule(x, y); },
-                    cbl.getErrorMessage().empty() ? "Esperando a que autorices en tu telefono/PC..." : cbl.getErrorMessage(),
-                    frameCount
-                );
+                display.drawLoginScreenClay(
+                        cbl.getErrorMessage().empty() ? "Esperando a que autorices en tu telefono/PC..." : cbl.getErrorMessage(),
+                        cbl.getPublicCode(),
+                        "",
+                        true,
+                        cbl.getQrSize(),
+                        [&cbl](int x, int y) { return cbl.getQrModule(x, y); }
+                    );
                 break;
             }
 

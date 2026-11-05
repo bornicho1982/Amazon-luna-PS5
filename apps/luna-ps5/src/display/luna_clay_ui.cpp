@@ -2087,6 +2087,29 @@ void LunaClayUI::renderLoginScreen(DisplayManager& disp, const LoginScreenProps&
 
     Clay_RenderCommandArray commands = Clay_EndLayout(0.0f);
     clay.renderCommands(commands);
+
+    // Draw QR code on top of the QR box (centered in the card)
+    if (props.qrSize > 0 && props.getQrModule) {
+        int qrCanvasSize = 280;
+        int qrCanvasX = (1920 - 900) / 2 + (900 - qrCanvasSize) / 2;
+        int qrCanvasY = (1080 - 600) / 2 + (600 - qrCanvasSize) / 2;
+        int quietZone = 2;
+        int totalModules = props.qrSize + (quietZone * 2);
+        int moduleScale = (qrCanvasSize - 20) / totalModules;
+        if (moduleScale < 1) moduleScale = 1;
+        int totalQrPx = props.qrSize * moduleScale;
+        int offsetX = qrCanvasX + (qrCanvasSize - totalQrPx) / 2;
+        int offsetY = qrCanvasY + (qrCanvasSize - totalQrPx) / 2;
+        for (int y = 0; y < props.qrSize; ++y) {
+            for (int x = 0; x < props.qrSize; ++x) {
+                if (props.getQrModule(x, y)) {
+                    disp.fillRect(offsetX + x * moduleScale, offsetY + y * moduleScale,
+                                 moduleScale, moduleScale, 0xFF0A0E17);
+                }
+            }
+        }
+    }
+
     disp.present();
 }
 void LunaClayUI::renderMediaViewerScreen(DisplayManager& disp, const MediaViewerScreenProps& props) {
