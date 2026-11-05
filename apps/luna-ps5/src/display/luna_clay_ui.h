@@ -72,6 +72,17 @@ struct MediaViewerScreenProps {
     bool showControls = true;
 };
 
+struct StreamingDashboardScreenProps {
+    const std::string& statusText;
+    const std::string& gameTitle;
+    const std::string& ping;
+    const std::string& latency;
+    const std::string& bitrate;
+    const std::string& quality;
+    bool isConnected = true;
+    bool showHud = true;
+};
+
 class LunaClayUI {
 public:
     static void renderHomeScreen(DisplayManager& disp, const HomeScreenProps& props);
@@ -80,6 +91,7 @@ public:
     static void renderErrorScreen(DisplayManager& disp, const ErrorScreenProps& props);
     static void renderLoginScreen(DisplayManager& disp, const LoginScreenProps& props);
     static void renderMediaViewerScreen(DisplayManager& disp, const MediaViewerScreenProps& props);
+    static void renderStreamingDashboardScreen(DisplayManager& disp, const StreamingDashboardScreenProps& props);
 };
 
 } // namespace luna::display

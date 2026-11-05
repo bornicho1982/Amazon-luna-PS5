@@ -2231,4 +2231,69 @@ void LunaClayUI::renderMediaViewerScreen(DisplayManager& disp, const MediaViewer
     clay.renderCommands(commands);
     disp.present();
 }
+void LunaClayUI::renderStreamingDashboardScreen(DisplayManager& disp, const StreamingDashboardScreenProps& props) {
+    disp.clear(0xFF000000);
+    auto& clay = ClayRenderer::instance();
+    clay.beginFrame();
+
+    if (props.showHud) {
+        CLAY(CLAY_ID("StreamRoot"), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                        .layoutDirection = CLAY_TOP_TO_BOTTOM }
+        }) {
+            // Top: game title
+            CLAY(CLAY_ID("TopBar"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(80) },
+                            .padding = { 50, 50, 20, 20 },
+                            .childGap = 12,
+                            .childAlignment = { .y = CLAY_ALIGN_Y_CENTER },
+                            .layoutDirection = CLAY_LEFT_TO_RIGHT },
+                .backgroundColor = { 0, 0, 0, 140 }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString(props.gameTitle.empty() ? "En juego" : props.gameTitle),
+                          CLAY_TEXT_CONFIG({ .textColor = { 255, 255, 255, 255 }, .fontId = 1, .fontSize = 24 }));
+                CLAY(CLAY_ID("ConnStatus"), {
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                                .childAlignment = { .x = CLAY_ALIGN_X_RIGHT, .y = CLAY_ALIGN_Y_CENTER } }
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString(props.isConnected ? "Conectado" : "Desconectado"),
+                              CLAY_TEXT_CONFIG({ .textColor = props.isConnected ? Clay_Color{ 0, 240, 255, 255 } : Clay_Color{ 255, 100, 100, 255 }, .fontSize = 14 }));
+                }
+            }
+
+            // Spacer
+            CLAY(CLAY_ID("Spacer"), { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) } } }) {}
+
+            // Bottom: status bar
+            CLAY(CLAY_ID("StatusBar"), {
+                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(60) },
+                            .padding = { 50, 50, 12, 12 },
+                            .childGap = 24,
+                            .childAlignment = { .y = CLAY_ALIGN_Y_CENTER },
+                            .layoutDirection = CLAY_LEFT_TO_RIGHT },
+                .backgroundColor = { 0, 0, 0, 160 }
+            }) {
+                CLAY_TEXT(ClayRenderer::toClayString("Ping: " + (props.ping.empty() ? "0ms" : props.ping)),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 12 }));
+                CLAY_TEXT(ClayRenderer::toClayString("Latencia: " + (props.latency.empty() ? "0ms" : props.latency)),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 12 }));
+                CLAY_TEXT(ClayRenderer::toClayString("Bitrate: " + (props.bitrate.empty() ? "0 Mbps" : props.bitrate)),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 12 }));
+                CLAY_TEXT(ClayRenderer::toClayString("Calidad: " + (props.quality.empty() ? "1080p" : props.quality)),
+                          CLAY_TEXT_CONFIG({ .textColor = { 203, 213, 225, 255 }, .fontSize = 12 }));
+                CLAY(CLAY_ID("OptionsHint"), {
+                    .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                                .childAlignment = { .x = CLAY_ALIGN_X_RIGHT, .y = CLAY_ALIGN_Y_CENTER } }
+                }) {
+                    CLAY_TEXT(ClayRenderer::toClayString("OPTIONS: menu"),
+                              CLAY_TEXT_CONFIG({ .textColor = { 148, 163, 184, 255 }, .fontSize = 12 }));
+                }
+            }
+        }
+    }
+
+    Clay_RenderCommandArray commands = Clay_EndLayout(0.0f);
+    clay.renderCommands(commands);
+    disp.present();
+}
 } // namespace luna::display
