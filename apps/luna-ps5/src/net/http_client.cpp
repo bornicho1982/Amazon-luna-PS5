@@ -468,7 +468,7 @@ HttpResponse HttpClient::getIntoBuffer(const std::string& url,
             DWORD dwSize = 0;
             if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) break;
             if (dwSize == 0) break;
-            DWORD toRead = std::min(dwSize, static_cast<DWORD>(maxCap - outSize));
+            DWORD toRead = (dwSize < (maxCap - outSize)) ? dwSize : (maxCap - outSize);
             DWORD dwDownloaded = 0;
             if (WinHttpReadData(hRequest, outBuf + outSize, toRead, &dwDownloaded)) {
                 outSize += dwDownloaded;

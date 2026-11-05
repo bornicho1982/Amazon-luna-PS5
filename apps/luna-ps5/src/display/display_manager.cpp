@@ -7,7 +7,7 @@
 #include "util/i18n.h"
 #include "display/hero_banner_asset.h"
 #include "util/image_loader.h"
-#include "util/image_loader.h"
+#include "../session/isession_observer.h"
 #include <cmath>
 #include "util/crash_logger.h"
 #include "util/qrcodegen.h"
@@ -148,15 +148,33 @@ inline uint8_t clamp8(int v) {
 
 } // namespace
 
-DisplayManager::DisplayManager() = default;
+DisplayManager::DisplayManager() {
+    // Inicializar m_sessionClient a nullptr (se establecerá en init)
+}
+
+// Singleton implementation
+DisplayManager* DisplayManager::instance() {
+    static DisplayManager instance_;
+    return &instance_;
+}
 
 DisplayManager::~DisplayManager() {
     shutdown();
+    // Liberar observers si es necesario
+    if (m_sessionClient != nullptr) {
+        m_sessionClient->removeObserver(this);
+        m_sessionClient = nullptr;
+    }
 }
 
 bool DisplayManager::init(int width, int height) {
     width_ = width;
     height_ = height;
+    
+    // Resetear estado interno
+    m_sessionReady = false;
+    m_catalogUpdated = false;
+    isReady_ = false;
 
 #if defined(LUNA_TARGET_PS5)
     sceSystemServiceHideSplashScreen();
@@ -214,6 +232,8 @@ bool DisplayManager::init(int width, int height) {
     fontRenderer_.init();
     loadStaticHeroBanner();
     ClayRenderer::instance().init(this, width_, height_);
+    
+    // Inicializar observers (se establecerá m_sessionClient en main.cpp)
     return true;
 }
 
@@ -233,6 +253,120 @@ void DisplayManager::shutdown() {
         isReady_ = false;
         std::printf("[Display] Subsistema de pantalla cerrado\n");
     }
+}
+
+// Observer pattern implementations
+void DisplayManager::onSessionStateChanged(session::SessionState oldState, session::SessionState newState) {
+    (void)oldState;
+    (void)newState;
+    
+    // Manejar transiciones de estado de sesión
+    switch (newState) {
+        case session::SessionState::Idle:
+            std::printf("[Display] Session idle\n");
+            break;
+        case session::SessionState::CreatingJob:
+            std::printf("[Display] Session creating job\n");
+            break;
+        case session::SessionState::PollingJob:
+            std::printf("[Display] Session polling job\n");
+            break;
+        case session::SessionState::Ready:
+            m_sessionReady = true;
+            // Actualizar UI cuando la sesión está lista
+            if (m_sessionClient != nullptr) {
+                m_sessionClient->requestCatalogUpdate();
+            }
+            break;
+        case session::SessionState::Streaming:
+            std::printf("[Display] Session streaming\n");
+            break;
+        case session::SessionState::ShuttingDown:
+            m_sessionReady = false;
+            break;
+        case session::SessionState::Failed:
+            std::printf("[Display] Session failed\n");
+            break;
+        case session::SessionState::Terminated:
+            std::printf("[Display] Session terminated\n");
+            break;
+    }
+}
+
+void DisplayManager::onSessionInfoReady(const session::GameSessionInfo& info) {
+    (void)info;
+    
+    std::printf("[Display] Session info ready\n");
+    
+    // Actualizar UI con información de sesión
+    updateSessionUI(info);
+}
+
+void DisplayManager::onCollectionsUpdated(
+    const std::vector<luna::display::GameTile>& home,
+    const std::vector<luna::display::GameTile>& library
+) {
+    (void)home;
+    (void)library;
+    
+    m_catalogUpdated = true;
+    
+    // Actualizar UI con colecciones actualizadas
+    updateCatalogUI(home, library);
+}
+
+void DisplayManager::onAuthStateChanged(bool authenticated) {
+    (void)authenticated;
+    
+    std::printf("[Display] Auth state changed: %s\n", authenticated ? "true" : "false");
+    
+    // Actualizar UI de autenticación
+    updateAuthUI(authenticated);
+}
+
+void DisplayManager::onError(int errorCode, const std::string& message) {
+    (void)errorCode;
+    (void)message;
+    
+    std::printf("[Display] Error: %d - %s\n", errorCode, message.c_str());
+    
+    // Mostrar error en UI
+    showErrorUI(errorCode, message);
+}
+
+// ISessionObserver methods - Streaming events
+void DisplayManager::onStreamingStarted(const luna::display::GameTile& game) {
+    std::printf("[Display] Streaming started: %s\n", game.title.c_str());
+}
+
+void DisplayManager::onStreamingStopped() {
+    std::printf("[Display] Streaming stopped\n");
+}
+
+// Internal methods for updating UI based on events
+void DisplayManager::updateSessionUI(const session::GameSessionInfo& info) {
+    (void)info;
+    std::printf("[Display] Actualizando UI de sesión\n");
+}
+
+void DisplayManager::updateCatalogUI(
+    const std::vector<luna::display::GameTile>& home,
+    const std::vector<luna::display::GameTile>& library
+) {
+    (void)home;
+    (void)library;
+    std::printf("[Display] Actualizando UI del catálogo\n");
+}
+
+void DisplayManager::updateAuthUI(bool authenticated) {
+    (void)authenticated;
+    std::printf("[Display] Actualizando UI de autenticación\n");
+}
+
+void DisplayManager::showErrorUI(int errorCode, const std::string& message) {
+    (void)errorCode;
+    (void)message;
+    std::printf("[Display] Mostrando error en UI\n");
 }
 
 void DisplayManager::loadStaticHeroBanner() {

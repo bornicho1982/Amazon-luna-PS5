@@ -163,8 +163,9 @@ static void renderCleanOrPopoutGameCard(DisplayManager& disp, ClayRenderer& clay
         CLAY_AUTO_ID({
             .layout = {
                 .sizing = { CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(34) },
-                .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                .padding = { 0, 0, 0, 0 },
                 .childGap = 8,
+                .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                 .layoutDirection = CLAY_LEFT_TO_RIGHT
             },
             .backgroundColor = { 213, 227, 255, 255 }, // #D5E3FF
@@ -180,6 +181,7 @@ static void renderCleanOrPopoutGameCard(DisplayManager& disp, ClayRenderer& clay
         CLAY_AUTO_ID({
             .layout = {
                 .sizing = { CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(84) },
+                .padding = { 0, 0, 0, 0 },
                 .childGap = 4,
                 .layoutDirection = CLAY_TOP_TO_BOTTOM
             }
@@ -197,16 +199,18 @@ static void renderCleanOrPopoutGameCard(DisplayManager& disp, ClayRenderer& clay
             CLAY_AUTO_ID({
                 .layout = {
                     .sizing = { CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(36) },
-                    .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                    .padding = { 0, 0, 0, 0 },
                     .childGap = 6,
+                    .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                 }
             }) {
                 CLAY_AUTO_ID({
                     .layout = {
                         .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(26) },
-                        .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                        .padding = { 8, 8, 0, 0 },
                         .childGap = 6,
+                        .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     }
                 }) {
@@ -314,6 +318,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_FIXED(116), CLAY_SIZING_FIXED(42) },
+                                .padding = { 12, 12, 0, 0 },
                                 .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             },
@@ -348,6 +353,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 CLAY_AUTO_ID({
                     .layout = {
                         .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(210) },
+                        .padding = { 8, 8, 0, 0 },
                         .childGap = 32,
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     }
@@ -403,6 +409,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
             CLAY_AUTO_ID({
                 .layout = {
                     .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(480) },
+                    .padding = { 16, 16, 0, 0 },
                     .childGap = 32,
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                 }
@@ -438,8 +445,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         .layout = {
                             .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(88) },
                             .padding = { 20, 20, 0, 0 },
-                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                             .childGap = 16,
+                            .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                             .layoutDirection = CLAY_LEFT_TO_RIGHT
                         },
                         .backgroundColor = { 30, 22, 50, 255 },
@@ -494,6 +501,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                     CLAY_AUTO_ID({
                         .layout = {
                             .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(70) },
+                            .padding = { 12, 12, 0, 0 },
                             .childGap = 14,
                             .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                             .layoutDirection = CLAY_LEFT_TO_RIGHT
@@ -568,8 +576,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
             .layout = {
                 .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(68) },
                 .padding = { 48, 48, 0, 0 },
-                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                 .childGap = 24,
+                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                 .layoutDirection = CLAY_LEFT_TO_RIGHT
             },
             .backgroundColor = { 10, 14, 23, 245 }, // #0A0E17
@@ -579,6 +587,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
             CLAY_AUTO_ID({
                 .layout = {
                     .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(40) },
+                    .padding = { 8, 8, 0, 0 },
                     .childGap = 10,
                     .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
@@ -602,6 +611,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
             CLAY_AUTO_ID({
                 .layout = {
                     .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48) },
+                    .padding = { 12, 12, 0, 0 },
                     .childGap = 14,
                     .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
@@ -659,8 +669,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 .layout = {
                     .sizing = { CLAY_SIZING_FIXED(108), CLAY_SIZING_FIXED(38) },
                     .padding = { 12, 12, 0, 0 },
-                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                     .childGap = 8,
+                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                 },
                 .backgroundColor = searchBtnFoc ? Clay_Color{ 255, 255, 255, 255 } : Clay_Color{ 22, 27, 42, 255 },
@@ -682,8 +692,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 .layout = {
                     .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(36) },
                     .padding = { 12, 12, 0, 0 },
-                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                     .childGap = 6,
+                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                 },
                 .backgroundColor = { 22, 27, 42, 220 },
@@ -700,8 +710,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                 .layout = {
                     .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(40) },
                     .padding = { 8, 14, 0, 0 },
-                    .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                     .childGap = 10,
+                    .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                 },
                 .backgroundColor = avatarFoc ? Clay_Color{ 255, 255, 255, 255 } : Clay_Color{ 22, 27, 42, 255 },
@@ -860,6 +870,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(30) },
+                                .padding = { 8, 8, 0, 0 },
                                 .childGap = 10,
                                 .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
@@ -945,6 +956,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(50) },
+                                .padding = { 8, 8, 0, 0 },
                                 .childGap = 12,
                                 .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
@@ -955,8 +967,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                     .layout = {
                                         .sizing = { CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(48) },
                                         .padding = { 16, 20, 0, 0 },
-                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .childGap = 10,
+                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                                     },
                                     .backgroundColor = isHeroActive ? Clay_Color{255, 255, 255, 255} : Clay_Color{94, 40, 184, 255},
@@ -978,8 +990,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                     .layout = {
                                         .sizing = { CLAY_SIZING_FIXED(192), CLAY_SIZING_FIXED(48) },
                                         .padding = { 14, 16, 0, 0 },
-                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .childGap = 10,
+                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                                     },
                                     .backgroundColor = btn0Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -1001,8 +1013,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                     .layout = {
                                         .sizing = { CLAY_SIZING_FIXED(192), CLAY_SIZING_FIXED(48) },
                                         .padding = { 14, 16, 0, 0 },
-                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .childGap = 10,
+                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                                     },
                                     .backgroundColor = btn1Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -1024,8 +1036,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                     .layout = {
                                         .sizing = { CLAY_SIZING_FIXED(172), CLAY_SIZING_FIXED(48) },
                                         .padding = { 14, 16, 0, 0 },
-                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .childGap = 10,
+                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                                     },
                                     .backgroundColor = btn2Foc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -1056,8 +1068,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                     .layout = {
                                         .sizing = { CLAY_SIZING_FIXED(isHeroFav ? 178.0f : 160.0f), CLAY_SIZING_FIXED(48) },
                                         .padding = { 14, 16, 0, 0 },
-                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .childGap = 10,
+                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                                     },
                                     .backgroundColor = btn3Foc
@@ -1090,6 +1102,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                             CLAY_AUTO_ID({
                                 .layout = {
                                     .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28) },
+                                    .padding = { 8, 8, 0, 0 },
                                     .childGap = 10,
                                     .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                     .layoutDirection = CLAY_LEFT_TO_RIGHT
@@ -1161,6 +1174,7 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                     CLAY_AUTO_ID({
                         .layout = {
                             .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(220) },
+                            .padding = { 8, 8, 0, 0 },
                             .childGap = 14,
                             .layoutDirection = CLAY_TOP_TO_BOTTOM
                         }
@@ -1170,8 +1184,9 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(168) },
-                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                .padding = { 0, 0, 0, 0 },
                                 .childGap = 16,
+                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
@@ -1183,8 +1198,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                     .layout = {
                                         .sizing = { CLAY_SIZING_FIXED(154), CLAY_SIZING_FIXED(152) },
                                         .padding = { 12, 12, 16, 16 },
-                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .childGap = 14,
+                                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                                         .layoutDirection = CLAY_TOP_TO_BOTTOM
                                     },
                                     .backgroundColor = isSel ? Clay_Color{ 52, 57, 78, 255 } : Clay_Color{ 42, 45, 61, 255 }, // #2A2D3D
@@ -1260,8 +1275,9 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(308) },
-                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                .padding = { 0, 0, 0, 0 },
                                 .childGap = 16,
+                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
@@ -1299,8 +1315,9 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(310) },
-                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                .padding = { 0, 0, 0, 0 },
                                 .childGap = 16,
+                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
@@ -1313,8 +1330,9 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                                 CLAY_AUTO_ID({
                                     .layout = {
                                         .sizing = { CLAY_SIZING_FIT(), CLAY_SIZING_FIXED(308) },
-                                        .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                        .padding = { 0, 0, 0, 0 },
                                         .childGap = 6,
+                                        .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                                     }
                                 }) {
@@ -1355,8 +1373,9 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(190) },
-                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                .padding = { 0, 0, 0, 0 },
                                 .childGap = 18,
+                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
@@ -1393,8 +1412,9 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
                         CLAY_AUTO_ID({
                             .layout = {
                                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(308) },
-                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                .padding = { 0, 0, 0, 0 },
                                 .childGap = 18,
+                                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                                 .layoutDirection = CLAY_LEFT_TO_RIGHT
                             }
                         }) {
@@ -1418,8 +1438,8 @@ void LunaClayUI::renderHomeScreen(DisplayManager& disp, const HomeScreenProps& p
             .layout = {
                 .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(44) },
                 .padding = { 48, 48, 0, 0 },
-                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                 .childGap = 28,
+                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                 .layoutDirection = CLAY_LEFT_TO_RIGHT
             },
             .backgroundColor = { 10, 14, 24, 245 }, // PS5 Dark
@@ -1544,8 +1564,8 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
             .layout = {
                 .sizing = { CLAY_SIZING_FIXED(1920), CLAY_SIZING_FIXED(68) },
                 .padding = { 48, 48, 0, 0 },
-                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                 .childGap = 16,
+                .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                 .layoutDirection = CLAY_LEFT_TO_RIGHT
             },
             .backgroundColor = { 10, 14, 24, 245 },
@@ -1592,8 +1612,8 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     .layout = {
                         .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56) },
                         .padding = { 16, 16, 0, 0 },
-                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                         .childGap = 12,
+                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     },
                     .backgroundColor = btnPlayFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -1617,8 +1637,8 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     .layout = {
                         .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(50) },
                         .padding = { 16, 16, 0, 0 },
-                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                         .childGap = 12,
+                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     },
                     .backgroundColor = btnGalFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -1641,8 +1661,8 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                     .layout = {
                         .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(50) },
                         .padding = { 16, 16, 0, 0 },
-                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                         .childGap = 12,
+                        .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     },
                     .backgroundColor = btnFavFoc ? Clay_Color{255, 255, 255, 255} : Clay_Color{26, 33, 51, 255},
@@ -1678,8 +1698,9 @@ void LunaClayUI::renderGameDetail(DisplayManager& disp, const GameDetailProps& p
                 CLAY_AUTO_ID({
                     .layout = {
                         .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(36) },
-                        .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                        .padding = { 0, 0, 0, 0 },
                         .childGap = 16,
+                        .childAlignment = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
                         .layoutDirection = CLAY_LEFT_TO_RIGHT
                     }
                 }) {

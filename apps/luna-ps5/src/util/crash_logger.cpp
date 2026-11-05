@@ -6,11 +6,27 @@
 #include <cstdarg>
 #include <cstring>
 #include <mutex>
+
+#if defined(_WIN32)
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace luna::util {
 
 namespace {
+
+#if defined(_WIN32)
+int syncFileDescriptor(FILE* f) {
+    return _commit(_fileno(f));
+}
+#else
+int syncFileDescriptor(FILE* f) {
+    return fsync(fileno(f));
+}
+#endif
+
 std::string g_logFile = "/data/homebrew/PPSA99825/luna_trace.log";
 std::mutex g_logMutex;
 std::string g_currentStep;
@@ -35,7 +51,7 @@ void CrashLogger::init(const std::string& logPath) {
                     std::fwrite(copyBuf, 1, n, prevF);
                 }
                 std::fflush(prevF);
-                fsync(fileno(prevF));
+                syncFileDescriptor(prevF);
                 std::fclose(prevF);
             }
         }
@@ -50,7 +66,7 @@ void CrashLogger::init(const std::string& logPath) {
     if (f) {
         std::fprintf(f, "=== LUNA PS5 TRACE LOG INITIALIZED ===\n");
         std::fflush(f);
-        fsync(fileno(f));
+        syncFileDescriptor(f);
         std::fclose(f);
     }
     g_initialized = true;
@@ -74,7 +90,7 @@ void CrashLogger::log(const char* fmt, ...) {
     if (f) {
         std::fprintf(f, "%s\n", buf);
         std::fflush(f);
-        fsync(fileno(f));
+        syncFileDescriptor(f);
         std::fclose(f);
     }
 }

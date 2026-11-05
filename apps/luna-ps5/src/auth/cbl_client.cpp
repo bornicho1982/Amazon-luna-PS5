@@ -79,7 +79,12 @@ std::string CblClient::getOrGenerateDeviceSerial() {
     auto getEntropy = [](uint64_t extra) -> uint64_t {
         uint64_t tsc = 0;
 #if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) || defined(__clang__)
         tsc = __builtin_ia32_rdtsc();
+#else
+        // MSVC version
+        tsc = static_cast<uint64_t>(__rdtsc());
+#endif
 #endif
         auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
         uint64_t val = static_cast<uint64_t>(now) ^ (tsc * 6364136223846793005ULL + 1442695040888963407ULL + extra);

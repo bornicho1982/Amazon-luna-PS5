@@ -6,73 +6,16 @@
 #include <vector>
 #include <functional>
 #include "display/font_renderer.h"
+#include "../session/isession_observer.h"
+#include "../session/luna_session.h"  // Para tipos de luna::session::SessionState y GameSessionInfo
 
 namespace luna::display {
 
-struct GameTile {
-    std::string id;
-    std::string title;
-    std::string subtitle;
-    std::string buttonText = "â¶ Jugar ahora";
-    std::string secondaryButtonText = "";
-    bool isEntitled = true;
-    std::string playToken;
-    std::string buildId;
+struct GameTile;
+struct LunaCollection;
+struct PlayerProfileInfo;
 
-    std::string publisher;
-    std::string developer;
-    std::string releaseYear;
-    std::string genres;
-    std::string inputMethods = "Mando DualSense";
-    std::string playerCount = "1 jugador";
-    std::string metacritic;
-    std::string channelSubtext = "Incluido con Prime";
-    uint32_t badgeColor = 0xFF9146FF;
-    std::string category = "LUNA+";
-    std::string synopsis = "Disponible para jugar al instante en Amazon Luna Cloud.";
-    uint32_t heroColor = 0xFF9146FF;
-
-    std::string coverUrl;
-    std::string backdropUrl;
-    std::string logoUrl;
-    std::vector<std::string> screenshotUrls;
-    std::string videoUrl;
-
-    std::vector<uint8_t> coverRgba;
-    int coverWidth = 0;
-    int coverHeight = 0;
-    std::string pegiRating = "PEGI 12";
-    std::vector<std::string> ageRatingDescriptors;
-    bool detailsLoaded = false;
-    std::string lastPlayedDate;
-    std::vector<GameTile> similarGames;
-};
-
-struct LunaCollection {
-    std::string id;
-    std::string title;
-    std::string subtitle;
-    bool isHeroRotator = false;
-    bool isRankings = false;
-    bool isPartnerRow = false;
-    bool isCategoryCarousel = false;
-    bool isRecentlyPlayed16_9 = false;
-    std::string partnerPromoImage;
-    std::string partnerTitle;
-    std::string partnerDescription;
-    std::string partnerButtonText = "Ver todos los juegos";
-    std::vector<GameTile> items;
-};
-
-struct PlayerProfileInfo {
-    std::string displayName = "Bornicho";
-    std::string discriminator = "#8663";
-    std::string planStatus = "Incluido con Prime";
-    std::string avatarUrl = "https://m.media-amazon.com/images/G/01/T/TC05316420/A07531864/Avatars/Privates_Poo.png";
-    std::string profileId = "amzn1.actor.person.oid.A24FP4VJ7KI5CD";
-};
-
-class DisplayManager {
+class DisplayManager : public luna::session::ISessionObserver {
 public:
     DisplayManager();
     ~DisplayManager();
@@ -243,7 +186,38 @@ public:
 
     bool isReady() const { return isReady_; }
 
+public:
+    // Singleton access - public for testing and external use
+    static DisplayManager* instance();
+
 private:
+    // Observer pattern implementation - must be public to override base class methods
+    void onSessionStateChanged(session::SessionState oldState, session::SessionState newState) override;
+    void onSessionInfoReady(const session::GameSessionInfo& info) override;
+    void onCollectionsUpdated(
+        const std::vector<luna::display::GameTile>& home,
+        const std::vector<luna::display::GameTile>& library
+    ) override;
+    void onAuthStateChanged(bool authenticated) override;
+    void onError(int errorCode, const std::string& message) override;
+    void onStreamingStarted(const luna::display::GameTile& game) override;
+    void onStreamingStopped() override;
+
+    // UI update methods
+    void updateSessionUI(const session::GameSessionInfo& info);
+    void updateCatalogUI(
+        const std::vector<luna::display::GameTile>& home,
+        const std::vector<luna::display::GameTile>& library
+    );
+    void updateAuthUI(bool authenticated);
+    void showErrorUI(int errorCode, const std::string& message);
+
+    // LunaSessionClient observer registration
+    session::LunaSessionClient* m_sessionClient = nullptr;  // Observer reference to LunaSessionSessionClient
+    
+    // Internal state management based on session events
+    bool m_sessionReady = false;
+    bool m_catalogUpdated = false;
     void setPixelSwizzled(uint8_t*, int x, int y, uint32_t colorArgb) { putPixel(x, y, colorArgb); }
     uint32_t getPixelSwizzled(const uint8_t*, int x, int y) const { return getPixel(x, y); }
     void blendPixelSwizzled(uint8_t*, int x, int y, uint32_t colorArgb, uint8_t alpha) { blendPixel(x, y, colorArgb, alpha); }

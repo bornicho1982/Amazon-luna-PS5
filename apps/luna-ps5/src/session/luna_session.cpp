@@ -3286,5 +3286,86 @@ bool LunaSessionClient::joinParty(const std::string& pin, const std::string& acc
 
 
 
+void LunaSessionClient::addObserver(ISessionObserver* observer) {
+    if (!observer) return;
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs == observer) return;
+    }
+    m_observers.push_back(observer);
+}
+
+void LunaSessionClient::removeObserver(ISessionObserver* observer) {
+    if (!observer) return;
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    m_observers.erase(std::remove(m_observers.begin(), m_observers.end(), observer), m_observers.end());
+}
+
+void LunaSessionClient::notifySessionStateChanged(SessionState oldState, SessionState newState) {
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs) obs->onSessionStateChanged(oldState, newState);
+    }
+}
+
+void LunaSessionClient::notifySessionInfoReady(const GameSessionInfo& info) {
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs) obs->onSessionInfoReady(info);
+    }
+}
+
+void LunaSessionClient::notifyCollectionsUpdated(
+    const std::vector<luna::display::GameTile>& home,
+    const std::vector<luna::display::GameTile>& library) {
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs) obs->onCollectionsUpdated(home, library);
+    }
+}
+
+void LunaSessionClient::notifyAuthStateChanged(bool authenticated) {
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs) obs->onAuthStateChanged(authenticated);
+    }
+}
+
+void LunaSessionClient::notifyStreamingStarted(const luna::display::GameTile& game) {
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs) obs->onStreamingStarted(game);
+    }
+}
+
+void LunaSessionClient::notifyStreamingStopped() {
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs) obs->onStreamingStopped();
+    }
+}
+
+void LunaSessionClient::notifyError(int errorCode, const std::string& message) {
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs) obs->onError(errorCode, message);
+    }
+}
+
+luna::display::GameTile LunaSessionClient::collectionToTile(const luna::display::LunaCollection& collection) {
+    luna::display::GameTile tile;
+    if (!collection.title.empty()) tile.title = collection.title;
+    if (!collection.gameId.empty()) tile.gameId = collection.gameId;
+    if (!collection.thumbnailUrl.empty()) tile.thumbnailUrl = collection.thumbnailUrl;
+    return tile;
+}
+
+void LunaSessionClient::requestCatalogUpdate() {
+    std::lock_guard<std::mutex> lock(m_observerMutex);
+    for (auto* obs : m_observers) {
+        if (obs) obs->onCollectionsUpdated({}, {});
+    }
+}
+
 } // namespace luna::session
 

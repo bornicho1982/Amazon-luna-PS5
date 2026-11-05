@@ -400,6 +400,14 @@ int main(int argc, char* argv[]) {
 
     // 9. Cliente de Sesion Amazon Tempo
     luna::session::LunaSessionClient sessionClient;
+    
+    // Registrar DisplayManager como observer del session client (Observer Pattern)
+    luna::display::DisplayManager* displayMgr = luna::display::DisplayManager::instance();
+    if (displayMgr != nullptr) {
+        std::printf("[Main] Registrando DisplayManager como observer de LunaSessionClient\n");
+        sessionClient.addObserver(displayMgr);
+    }
+    
     std::string g_lastStatusText = "";
     std::string g_catalogDiagnostic = "";
     bool catalogFetched = false;
@@ -736,12 +744,12 @@ int main(int argc, char* argv[]) {
             rowSelectedCol.resize(cols.size(), 0);
         }
         if (selectedRowIdx >= static_cast<int>(cols.size())) {
-            selectedRowIdx = std::max(0, static_cast<int>(cols.size()) - 1);
+            selectedRowIdx = (0 < static_cast<int>(cols.size()) - 1) ? (static_cast<int>(cols.size()) - 1) : 0;
         }
         if (!cols.empty() && selectedRowIdx >= 0) {
             int maxItems = static_cast<int>(cols[selectedRowIdx].items.size());
             if (rowSelectedCol[selectedRowIdx] >= maxItems) {
-                rowSelectedCol[selectedRowIdx] = std::max(0, maxItems - 1);
+                rowSelectedCol[selectedRowIdx] = (0 < maxItems - 1) ? (maxItems - 1) : 0;
             }
         }
     };
@@ -1010,10 +1018,10 @@ int main(int argc, char* argv[]) {
         int navElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastNavTime).count();
 
         if (postSessionModalOpen) {
-            int numSug = std::min(static_cast<int>(postSessionSuggestions.size()), 5);
+            int numSug = (static_cast<int>(postSessionSuggestions.size()) < 5) ? static_cast<int>(postSessionSuggestions.size()) : 5;
             if (navElapsedMs > navThresholdMs) {
-                bool moveLeft = (padState.buttons & luna::input::PAD_LEFT) || (padState.leftX < -13000);
-                bool moveRight = (padState.buttons & luna::input::PAD_RIGHT) || (padState.leftX > 13000);
+                bool moveLeft = (padState.buttons & luna::input::PadButton::PAD_LEFT) || (padState.leftX < -13000);
+                bool moveRight = (padState.buttons & luna::input::PadButton::PAD_RIGHT) || (padState.leftX > 13000);
                 if (moveLeft && postSessionSelectedIdx > 0) {
                     postSessionSelectedIdx--;
                     lastNavTime = now;
@@ -1262,20 +1270,20 @@ int main(int argc, char* argv[]) {
                                 moved = true;
                             } else if (selectedRowIdx == 0 && !curCols.empty() && curCols[0].isHeroRotator && activeTabIdx != 3) {
                                 int maxC = static_cast<int>(curCols[0].items.size());
-                                int curSlide = (!rowSelectedCol.empty()) ? std::clamp(rowSelectedCol[0], 0, std::max(0, maxC - 1)) : 0;
+                                int curSlide = (!rowSelectedCol.empty()) ? std::clamp(rowSelectedCol[0], 0, (maxC > 0) ? maxC - 1 : 0) : 0;
                                 bool isPremSlide = (!curCols[0].items.empty() &&
                                                    (curCols[0].items[curSlide].title.find("Luna Premium") != std::string::npos ||
                                                     curCols[0].items[curSlide].id.find("luna_premium") != std::string::npos));
                                 // Joystick L/R desliza el juego del Banner; Cruceta (Botonera) L/R elige entre los 4 botones de acción
                                 if (stickLeft || (dpadLeft && isPremSlide)) {
                                     if (!rowSelectedCol.empty()) {
-                                        rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % std::max(1, maxC);
+                                        rowSelectedCol[0] = (rowSelectedCol[0] + maxC - 1) % ((maxC > 1) ? maxC : 1);
                                     }
                                     heroBtnIdx = 0;
                                     moved = true;
                                 } else if (stickRight || (dpadRight && isPremSlide)) {
                                     if (!rowSelectedCol.empty()) {
-                                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % std::max(1, maxC);
+                                        rowSelectedCol[0] = (rowSelectedCol[0] + 1) % ((maxC > 1) ? maxC : 1);
                                     }
                                     heroBtnIdx = 0;
                                     moved = true;

@@ -8,7 +8,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
-#include "display/display_manager.h"
+#include "display/types.h"  // Forward declarations for display types
+#include "display/display_types_def.h"  // Full definitions of GameTile, LunaCollection, PlayerProfileInfo
+#include "session/isession_observer.h"
 
 namespace luna::session {
 
@@ -18,9 +20,35 @@ enum class SessionState {
     PollingJob,
     Ready,
     Streaming,
+    ShuttingDown,
     Failed,
     Terminated
 };
+
+// Public constants for session states (for testing and external access)
+constexpr SessionState kIdle = SessionState::Idle;
+constexpr SessionState kCreatingJob = SessionState::CreatingJob;
+constexpr SessionState kPollingJob = SessionState::PollingJob;
+constexpr SessionState kReady = SessionState::Ready;
+constexpr SessionState kStreaming = SessionState::Streaming;
+constexpr SessionState kShuttingDown = SessionState::ShuttingDown;
+constexpr SessionState kFailed = SessionState::Failed;
+constexpr SessionState kTerminated = SessionState::Terminated;
+
+// Static helper to convert state to string
+inline std::string sessionStateToString(SessionState state) {
+    switch (state) {
+        case SessionState::Idle: return "Idle";
+        case SessionState::CreatingJob: return "CreatingJob";
+        case SessionState::PollingJob: return "PollingJob";
+        case SessionState::Ready: return "Ready";
+        case SessionState::Streaming: return "Streaming";
+        case SessionState::ShuttingDown: return "ShuttingDown";
+        case SessionState::Failed: return "Failed";
+        case SessionState::Terminated: return "Terminated";
+        default: return "Unknown";
+    }
+}
 
 struct GameSessionInfo {
     std::string gameId;
@@ -76,6 +104,25 @@ public:
     std::vector<luna::display::LunaCollection> fetchRemotePlayCollections(const std::string& accessToken, const std::string& deviceSerial = "");
     bool createParty(std::string& outPin, std::string& outPartyId, const std::string& accessToken, const std::string& deviceSerial = "");
     bool joinParty(const std::string& pin, const std::string& accessToken, const std::string& deviceSerial = "");
+    
+    // Observer pattern methods
+    void addObserver(ISessionObserver* observer);
+    void removeObserver(ISessionObserver* observer);
+    
+    // Public notification methods for testing and external control
+    void notifySessionStateChanged(SessionState oldState, SessionState newState);
+    void notifySessionInfoReady(const GameSessionInfo& info);
+    void notifyCollectionsUpdated(
+        const std::vector<luna::display::GameTile>& home,
+        const std::vector<luna::display::GameTile>& library
+    );
+    void notifyAuthStateChanged(bool authenticated);
+    void notifyStreamingStarted(const luna::display::GameTile& game);
+    void notifyStreamingStopped();
+    void notifyError(int errorCode, const std::string& message);
+    
+    // Request catalog update from observers (called when session is ready)
+    void requestCatalogUpdate();
 
 private:
     bool pollJob();
@@ -112,6 +159,9 @@ private:
     std::vector<luna::display::LunaCollection> m_remotePlayCollections;
     luna::display::PlayerProfileInfo m_playerProfile;
 
+    // Helper function to convert LunaCollection to GameTile (for observer notifications)
+    static luna::display::GameTile collectionToTile(const luna::display::LunaCollection& collection);
+
     int m_pollAttempts = 0;
     static constexpr int kMaxPollAttempts = 40;
     std::chrono::steady_clock::time_point m_lastPollTime;
@@ -124,6 +174,11 @@ private:
     luna::display::GameTile* m_pendingDetailTile = nullptr;
     std::string m_asyncAccessToken;
     std::string m_asyncDeviceSerial;
+    
+    // Observer pattern
+    std::vector<ISessionObserver*> m_observers;
+    std::mutex m_observerMutex;
+
 };
 
 } // namespace luna::session
