@@ -16,6 +16,14 @@
         "C:\\proyectos antigravity\\webkit PS5 v2"
       ],
       "enabled": true
+    },
+    "StitchMCP": {
+      "type": "remote",
+      "url": "https://stitch.googleapis.com/mcp",
+      "headers": {
+        "X-Goog-Api-Key": "${STITCH_API_KEY}"
+      },
+      "enabled": true
     }
   }
 }
