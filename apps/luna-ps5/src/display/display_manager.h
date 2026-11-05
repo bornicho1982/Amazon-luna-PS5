@@ -118,6 +118,11 @@ public:
                              const std::string& errorCode,
                              const std::string& statusText);
 
+    void drawLoginScreenClay(const std::string& statusText,
+                             const std::string& pinCode,
+                             const std::string& countdown,
+                             bool waiting);
+
     // kind: 0 = Gestionar perfiles, 1 = Planes Luna, 2 = Distintivos, 3 = Stream
     void drawProfileScreen(int kind,
                            int sel,

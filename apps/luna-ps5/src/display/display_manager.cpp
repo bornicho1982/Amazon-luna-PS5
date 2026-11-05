@@ -1929,6 +1929,19 @@ void DisplayManager::drawErrorScreenClay(const std::string& errorMessage,
     };
     luna::display::LunaClayUI::renderErrorScreen(*this, props);
 }
+void DisplayManager::drawLoginScreenClay(const std::string& statusText,
+                                         const std::string& pinCode,
+                                         const std::string& countdown,
+                                         bool waiting) {
+    if (!isReady_ || !mappedMemory_) return;
+    luna::display::LoginScreenProps props{
+        .statusText = statusText,
+        .pinCode = pinCode,
+        .countdown = countdown,
+        .waiting = waiting
+    };
+    luna::display::LunaClayUI::renderLoginScreen(*this, props);
+}
 void DisplayManager::drawProfileScreen(int kind,
                                        int sel,
                                        int subTab,
